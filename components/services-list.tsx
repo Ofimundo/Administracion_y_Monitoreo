@@ -28,8 +28,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { services, type Service } from "@/lib/services-data";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { services, clients, getClientById, getClientServices, type Service, type Client } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
+import { ClientDashboard } from "@/components/client-dashboard";
 import { cn } from "@/lib/utils";
 import {
   Filter,
@@ -41,6 +48,7 @@ import {
   FileSpreadsheet,
   ChevronDown,
   Check,
+  LayoutDashboard,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -62,6 +70,8 @@ export function ServicesList() {
     maxError: 100,
   });
   const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [showClientDashboard, setShowClientDashboard] = useState(false);
 
   const availableStatuses = [
     { value: "success", label: "Excelente (0% error)", color: "bg-green-500" },
@@ -69,7 +79,6 @@ export function ServicesList() {
     { value: "error", label: "Crítico (>10% error)", color: "bg-red-500" },
   ];
 
-  // Lista de nombres de servicios para el buscador
   const serviceNames = useMemo(() => {
     return services.map(service => ({
       value: service.name,
@@ -79,7 +88,6 @@ export function ServicesList() {
     }));
   }, []);
 
-  // Aplicar filtros
   const filteredServices = useMemo(() => {
     let result = [...services];
 
@@ -104,7 +112,6 @@ export function ServicesList() {
     return result;
   }, [filters]);
 
-  // Contar filtros activos
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (filters.search) count++;
@@ -114,7 +121,6 @@ export function ServicesList() {
     return count;
   }, [filters]);
 
-  // Limpiar filtros
   const resetFilters = () => {
     setFilters({
       search: "",
@@ -125,7 +131,6 @@ export function ServicesList() {
     setOpenSearch(false);
   };
 
-  // Toggle estado
   const toggleStatus = (statusValue: string) => {
     setFilters(prev => ({
       ...prev,
@@ -135,7 +140,6 @@ export function ServicesList() {
     }));
   };
 
-  // Exportar a Excel
   const exportToExcel = () => {
     const excelData = filteredServices.map(service => ({
       "Servicio": service.name,
@@ -163,6 +167,14 @@ export function ServicesList() {
     if (errorPercentage === 0) return "bg-green-100 text-green-700 border-green-200";
     if (errorPercentage <= 10) return "bg-yellow-100 text-yellow-700 border-yellow-200";
     return "bg-red-100 text-red-700 border-red-200";
+  };
+
+  const handleClientClick = (clientId: string) => {
+    const fullClient = getClientById(clientId);
+    if (fullClient) {
+      setSelectedClient(fullClient);
+      setShowClientDashboard(true);
+    }
   };
 
   return (
@@ -203,7 +215,6 @@ export function ServicesList() {
         <Card>
           <CardContent className="pt-6">
             <div className="space-y-4">
-              {/* Búsqueda con autocompletado - LISTA DE SERVICIOS */}
               <div>
                 <Label className="text-sm font-medium mb-2 block">Buscar servicio</Label>
                 <Popover open={openSearch} onOpenChange={setOpenSearch}>
@@ -281,7 +292,6 @@ export function ServicesList() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Filtro de estado */}
                 <div>
                   <Label className="text-sm font-medium mb-2 block">Estado del servicio</Label>
                   <div className="space-y-2">
@@ -301,7 +311,6 @@ export function ServicesList() {
                   </div>
                 </div>
 
-                {/* Filtro de error mínimo */}
                 <div>
                   <Label className="text-sm font-medium mb-2 block">
                     Error mínimo: {filters.minError}%
@@ -324,7 +333,6 @@ export function ServicesList() {
                   </div>
                 </div>
 
-                {/* Filtro de error máximo */}
                 <div>
                   <Label className="text-sm font-medium mb-2 block">
                     Error máximo: {filters.maxError}%
@@ -348,7 +356,6 @@ export function ServicesList() {
                 </div>
               </div>
 
-              {/* Botón de limpiar dentro del panel */}
               {activeFiltersCount > 0 && (
                 <div className="flex justify-end pt-2 border-t">
                   <Button variant="outline" size="sm" onClick={resetFilters}>
@@ -362,7 +369,6 @@ export function ServicesList() {
         </Card>
       )}
 
-      {/* Indicadores de filtros activos */}
       {activeFiltersCount > 0 && (
         <div className="flex flex-wrap gap-2 items-center p-3 bg-muted/30 rounded-lg">
           <span className="text-sm font-medium text-muted-foreground">Filtros aplicados:</span>
@@ -465,7 +471,7 @@ export function ServicesList() {
         </div>
       )}
 
-      {/* Modal de detalle del servicio */}
+      {/* Modal de detalle del servicio - ACTUALIZADO con clientes clickeables */}
       {selectedService && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="max-w-2xl w-full max-h-[80vh] overflow-y-auto">
@@ -505,18 +511,45 @@ export function ServicesList() {
                 </div>
               </div>
 
+              {/* Lista de clientes - CLICKEABLE */}
               <div>
                 <h3 className="font-semibold mb-2">Clientes</h3>
                 <div className="space-y-2">
-                  {selectedService.clients.map(client => (
-                    <div key={client.id} className="flex items-center justify-between p-2 border rounded-lg">
-                      <span>{client.name}</span>
-                      <Badge variant={client.status === "success" ? "success" : client.status === "warning" ? "warning" : "destructive"}>
-                        {client.errorPercentage}% error
-                      </Badge>
-                    </div>
-                  ))}
+                  {selectedService.clients.map(client => {
+                    const fullClient = getClientById(client.id);
+                    return (
+                      <div 
+                        key={client.id} 
+                        className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted transition-all group"
+                        onClick={() => handleClientClick(client.id)}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{client.name}</span>
+                            {fullClient?.rut && (
+                              <span className="text-xs text-muted-foreground">{fullClient.rut}</span>
+                            )}
+                          </div>
+                          {fullClient?.email && (
+                            <p className="text-xs text-muted-foreground">{fullClient.email}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={client.status === "success" ? "success" : client.status === "warning" ? "warning" : "destructive"}>
+                            {client.errorPercentage}% error
+                          </Badge>
+                          <Button variant="outline" size="sm" className="gap-1">
+                            <LayoutDashboard className="h-3 w-3" />
+                            Dashboard
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  💡 Haz clic en cualquier cliente para ver su Dashboard completo
+                </p>
               </div>
 
               <div>
@@ -539,6 +572,27 @@ export function ServicesList() {
           </Card>
         </div>
       )}
+
+      {/* Modal del Dashboard del Cliente */}
+      <Dialog open={showClientDashboard} onOpenChange={setShowClientDashboard}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LayoutDashboard className="h-5 w-5" />
+              Dashboard del Cliente
+            </DialogTitle>
+          </DialogHeader>
+          {selectedClient && (
+            <ClientDashboard 
+              clientId={selectedClient.id} 
+              onClose={() => {
+                setShowClientDashboard(false);
+                setSelectedClient(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
