@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ interface Filters {
 }
 
 export function ServicesList() {
+  const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [openSearch, setOpenSearch] = useState(false);
   const [filters, setFilters] = useState<Filters>({
@@ -442,21 +444,23 @@ export function ServicesList() {
                 <div className="text-sm text-muted-foreground">
                   {service.clients.length} clientes asociados
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedService(service);
-                  }}
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Ver detalle
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-primary hover:bg-primary/10"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/servicio/${service.id}`);
+                    }}
+                  >
+                    <LayoutDashboard className="mr-2 h-4 w-4" />
+                    Monitorear
+                  </Button>
+                  
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-3 text-center">
-                Doble clic para ver el detalle del servicio
-              </p>
+              
             </CardContent>
           </Card>
         ))}
@@ -471,108 +475,7 @@ export function ServicesList() {
         </div>
       )}
 
-      {/* Modal de detalle del servicio - ACTUALIZADO con clientes clickeables */}
-      {selectedService && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-2xl flex items-center gap-2">
-                  {selectedService.status === "success" && <CheckCircle className="h-6 w-6 text-green-600" />}
-                  {selectedService.status === "warning" && <AlertCircle className="h-6 w-6 text-yellow-600" />}
-                  {selectedService.status === "error" && <AlertCircle className="h-6 w-6 text-red-600" />}
-                  {selectedService.name}
-                </CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedService(null)}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="font-semibold mb-2">Descripción</h3>
-                <p className="text-muted-foreground">{selectedService.description}</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="text-sm text-muted-foreground">Porcentaje de error</div>
-                  <div className={cn(
-                    "text-2xl font-bold",
-                    selectedService.errorPercentage === 0 ? "text-green-600" :
-                    selectedService.errorPercentage <= 10 ? "text-yellow-600" : "text-red-600"
-                  )}>
-                    {selectedService.errorPercentage}%
-                  </div>
-                </div>
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="text-sm text-muted-foreground">Clientes</div>
-                  <div className="text-2xl font-bold">{selectedService.clients.length}</div>
-                </div>
-              </div>
-
-              {/* Lista de clientes - CLICKEABLE */}
-              <div>
-                <h3 className="font-semibold mb-2">Clientes</h3>
-                <div className="space-y-2">
-                  {selectedService.clients.map(client => {
-                    const fullClient = getClientById(client.id);
-                    return (
-                      <div 
-                        key={client.id} 
-                        className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted transition-all group"
-                        onClick={() => handleClientClick(client.id)}
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{client.name}</span>
-                            {fullClient?.rut && (
-                              <span className="text-xs text-muted-foreground">{fullClient.rut}</span>
-                            )}
-                          </div>
-                          {fullClient?.email && (
-                            <p className="text-xs text-muted-foreground">{fullClient.email}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={client.status === "success" ? "success" : client.status === "warning" ? "warning" : "destructive"}>
-                            {client.errorPercentage}% error
-                          </Badge>
-                          <Button variant="outline" size="sm" className="gap-1">
-                            <LayoutDashboard className="h-3 w-3" />
-                            Dashboard
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  💡 Haz clic en cualquier cliente para ver su Dashboard completo
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Logs recientes</h3>
-                <div className="space-y-2">
-                  {selectedService.logs.slice(0, 5).map(log => (
-                    <div key={log.id} className="p-2 border rounded-lg text-sm">
-                      <div className="flex items-center gap-2">
-                        {log.type === "success" && <CheckCircle className="h-4 w-4 text-green-500" />}
-                        {log.type === "error" && <AlertCircle className="h-4 w-4 text-red-500" />}
-                        {log.type === "warning" && <AlertCircle className="h-4 w-4 text-yellow-500" />}
-                        <span>{log.message}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">{log.timestamp}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
+      
       {/* Modal del Dashboard del Cliente */}
       <Dialog open={showClientDashboard} onOpenChange={setShowClientDashboard}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">

@@ -61,7 +61,7 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format, subDays } from "date-fns";
+import { format, subDays, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { services, generateMetricsData, type MetricDataPoint } from "@/lib/services-data";
@@ -77,8 +77,37 @@ const DEFAULT_FILTERS = {
 
 const COLORS = ["#10b981", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6"];
 
+// Lista de errores TÉCNICOS de infraestructura (NO reglas de negocio)
+const ERRORES_INFRAESTRUCTURA = [
+  "error de conexión", "timeout", "servidor no responde", "softland no disponible",
+  "sii no responde", "connection failed", "failed to connect", "could not connect",
+  "connection refused", "network error", "500", "503", "502", "504",
+  "no se pudo conectar", "softland error", "sii error", "error de red",
+  "socket hang up", "ECONNREFUSED", "ENOTFOUND", "error interno del servidor",
+  "base de datos caída", "sql server no disponible", "el servicio rpa no responde"
+];
+
+// Función para detectar si un motivo es error de infraestructura
+const isInfraestructuraError = (motivo: string): boolean => {
+  if (!motivo) return false;
+  const motivoLower = motivo.toLowerCase();
+  return ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term.toLowerCase()));
+};
+
+// Interfaz para datos reales de facturas
+interface InvoiceData {
+  fecha_proceso: string;
+  estado: string;
+  tipo_documento: number;
+  folio_documento: number;
+  rut_proveedor: string;
+  razon_social: string;
+  motivo: string;
+}
+
 export function DashboardMetrics() {
   const [allData, setAllData] = useState<MetricDataPoint[]>([]);
+  const [realInvoiceData, setRealInvoiceData] = useState<InvoiceData[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
@@ -86,163 +115,297 @@ export function DashboardMetrics() {
   const [searchService, setSearchService] = useState("");
   const [selectedMetric, setSelectedMetric] = useState<"requests" | "errors" | "responseTime" | "throughput">("requests");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedServiceFilter, setSelectedServiceFilter] = useState<string>("todos");
 
   // Obtener lista de servicios reales
   const availableServices = useMemo(() => {
     return services.map(s => s.name).sort();
   }, []);
 
-  // Cargar datos
+  // Cargar datos reales de facturas y datos generales
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      setTimeout(() => {
+      try {
+        const res = await fetch("/api/facturas/bitacora?estado=todos");
+        const data = await res.json();
+        
+        if (data.success && data.data) {
+          setRealInvoiceData(data.data);
+          
+          // Calcular estadísticas diarias SOLO con errores de infraestructura
+          const dailyStats: { [key: string]: any } = {};
+          
+          data.data.forEach((item: any) => {
+            const fecha = item.fecha_proceso.split('T')[0];
+            const estado = item.estado;
+            const motivo = item.motivo || "";
+            const esErrorInfra = isInfraestructuraError(motivo);
+            
+            if (!dailyStats[fecha]) {
+              dailyStats[fecha] = {
+                fecha,
+                aprobadas: 0,
+                rechazadasReglaNegocio: 0,
+                manualesReglaNegocio: 0,
+                pendientes: 0,
+                erroresInfraestructura: 0,
+                total: 0
+              };
+            }
+            
+            if (estado === "Aprobado") {
+              dailyStats[fecha].aprobadas++;
+            } else if (estado === "Rechazado") {
+              if (esErrorInfra) {
+                dailyStats[fecha].erroresInfraestructura++;
+              } else {
+                dailyStats[fecha].rechazadasReglaNegocio++;
+              }
+            } else if (estado === "Manual") {
+              if (esErrorInfra) {
+                dailyStats[fecha].erroresInfraestructura++;
+              } else {
+                dailyStats[fecha].manualesReglaNegocio++;
+              }
+            } else {
+              dailyStats[fecha].pendientes++;
+            }
+            
+            dailyStats[fecha].total++;
+          });
+          
+          const metricsData: MetricDataPoint[] = [];
+          const sortedDates = Object.keys(dailyStats).sort();
+          
+          sortedDates.forEach(date => {
+            const stats = dailyStats[date];
+            
+            metricsData.push({
+              id: `facturas_${date}`,
+              timestamp: date,
+              date: parseISO(date),
+              successCount: stats.aprobadas,
+              errorCount: stats.erroresInfraestructura, // SOLO errores de infraestructura
+              reglaNegocioCount: stats.rechazadasReglaNegocio + stats.manualesReglaNegocio, // Reglas de negocio
+              responseTime: 300 + Math.floor(Math.random() * 100),
+              throughput: Math.floor(stats.total / 24),
+              serviceName: "Aceptación y Rechazo de Facturas",
+              endpoint: "/api/facturas/bitacora",
+            });
+          });
+          
+          // Combinar con datos simulados de otros servicios
+          const simulatedData = generateMetricsData();
+          const otherServicesData = simulatedData.filter(s => s.serviceName !== "Aceptación y Rechazo de Facturas");
+          
+          setAllData([...metricsData, ...otherServicesData]);
+        } else {
+          setAllData(generateMetricsData());
+        }
+      } catch (error) {
+        console.error("Error cargando datos:", error);
         setAllData(generateMetricsData());
+      } finally {
         setLoading(false);
-      }, 500);
+      }
     };
+    
     loadData();
   }, []);
 
-  // Servicios filtrados por búsqueda
-  const filteredServicesList = useMemo(() => {
-    if (!searchService) return availableServices;
-    return availableServices.filter(service => 
-      service.toLowerCase().includes(searchService.toLowerCase())
-    );
-  }, [availableServices, searchService]);
+  // Datos filtrados por servicio seleccionado
+  const filteredByService = useMemo(() => {
+    if (selectedServiceFilter === "todos") {
+      return allData;
+    }
+    return allData.filter(item => item.serviceName === selectedServiceFilter);
+  }, [allData, selectedServiceFilter]);
 
-  // Contar filtros activos
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    
-    // Verificar si el rango de fechas es diferente al default
-    const defaultFrom = DEFAULT_FILTERS.dateRange.from;
-    const defaultTo = DEFAULT_FILTERS.dateRange.to;
-    const currentFrom = filters.dateRange.from;
-    const currentTo = filters.dateRange.to;
-    
-    if (currentFrom && defaultFrom && currentFrom.getTime() !== defaultFrom.getTime()) {
-      count++;
-    } else if (currentTo && defaultTo && currentTo.getTime() !== defaultTo.getTime()) {
-      count++;
-    }
-    
-    if (filters.services.length > 0) count++;
-    if (filters.minSuccessRate > 0) count++;
-    if (filters.maxResponseTime < 1000) count++;
-    if (filters.status.length < 3) count++;
-    
-    return count;
-  }, [filters]);
+  // Servicios disponibles para el selector (con datos reales)
+  const availableServicesWithData = useMemo(() => {
+    const servicesWithData = new Set(allData.map(item => item.serviceName));
+    return Array.from(servicesWithData).sort();
+  }, [allData]);
 
-  // Aplicar filtros a los datos
-  const filteredData = useMemo(() => {
-    let result = [...allData];
-    
-    if (filters.dateRange.from && filters.dateRange.to) {
-      result = result.filter(item => {
-        const itemDate = new Date(item.timestamp);
-        return itemDate >= filters.dateRange.from! && itemDate <= filters.dateRange.to!;
-      });
+  // Datos específicos para facturas (si está seleccionado)
+  const invoiceChartData = useMemo(() => {
+    if (selectedServiceFilter !== "todos" && selectedServiceFilter !== "Aceptación y Rechazo de Facturas") {
+      return [];
     }
+    if (realInvoiceData.length === 0) return [];
     
-    if (filters.services.length > 0) {
-      result = result.filter(item => filters.services.includes(item.serviceName));
-    }
+    const dailyData: { [key: string]: any } = {};
     
-    if (filters.minSuccessRate > 0) {
-      result = result.filter(item => {
-        const successRate = (item.successCount / (item.successCount + item.errorCount)) * 100;
-        return successRate >= filters.minSuccessRate;
-      });
-    }
-    
-    if (filters.maxResponseTime < 1000) {
-      result = result.filter(item => item.responseTime <= filters.maxResponseTime);
-    }
-    
-    if (filters.status.length < 3) {
-      result = result.filter(item => {
-        const serviceInfo = services.find(s => s.name === item.serviceName);
-        const status = serviceInfo?.status || "success";
-        return filters.status.includes(status);
-      });
-    }
-    
-    return result;
-  }, [allData, filters]);
-
-  // Calcular estadísticas
-  const statistics = useMemo(() => {
-    const totalSuccess = filteredData.reduce((sum, d) => sum + d.successCount, 0);
-    const totalErrors = filteredData.reduce((sum, d) => sum + d.errorCount, 0);
-    const avgResponseTime = filteredData.reduce((sum, d) => sum + d.responseTime, 0) / (filteredData.length || 1);
-    const avgThroughput = filteredData.reduce((sum, d) => sum + d.throughput, 0) / (filteredData.length || 1);
-    const errorRate = totalSuccess + totalErrors > 0 ? (totalErrors / (totalSuccess + totalErrors)) * 100 : 0;
-    
-    const byService = filteredData.reduce((acc, d) => {
-      if (!acc[d.serviceName]) {
-        acc[d.serviceName] = { success: 0, errors: 0, responseTime: 0, count: 0 };
+    realInvoiceData.forEach(item => {
+      const fecha = item.fecha_proceso.split('T')[0];
+      const motivo = item.motivo || "";
+      const esErrorInfra = isInfraestructuraError(motivo);
+      
+      if (!dailyData[fecha]) {
+        dailyData[fecha] = {
+          fecha: format(parseISO(fecha), "dd/MM"),
+          aprobadas: 0,
+          reglasNegocio: 0,
+          erroresInfraestructura: 0,
+          pendientes: 0,
+        };
       }
-      acc[d.serviceName].success += d.successCount;
-      acc[d.serviceName].errors += d.errorCount;
-      acc[d.serviceName].responseTime += d.responseTime;
-      acc[d.serviceName].count++;
-      return acc;
-    }, {} as Record<string, { success: number; errors: number; responseTime: number; count: number }>);
+      
+      if (item.estado === "Aprobado") {
+        dailyData[fecha].aprobadas++;
+      } else if (item.estado === "Rechazado" || item.estado === "Manual") {
+        if (esErrorInfra) {
+          dailyData[fecha].erroresInfraestructura++;
+        } else {
+          dailyData[fecha].reglasNegocio++;
+        }
+      } else {
+        dailyData[fecha].pendientes++;
+      }
+    });
+    
+    return Object.values(dailyData).sort((a, b) => {
+      const [dayA, monthA] = a.fecha.split('/');
+      const [dayB, monthB] = b.fecha.split('/');
+      return new Date(2024, parseInt(monthA) - 1, parseInt(dayA)).getTime() - 
+             new Date(2024, parseInt(monthB) - 1, parseInt(dayB)).getTime();
+    }).slice(-30);
+  }, [realInvoiceData, selectedServiceFilter]);
+
+  // Calcular estadísticas reales de facturas (separando errores técnicos de reglas de negocio)
+  const invoiceStats = useMemo(() => {
+    if (selectedServiceFilter !== "todos" && selectedServiceFilter !== "Aceptación y Rechazo de Facturas") {
+      return null;
+    }
+    
+    const total = realInvoiceData.length;
+    const aprobadas = realInvoiceData.filter(i => i.estado === "Aprobado").length;
+    const pendientes = realInvoiceData.filter(i => i.estado === "Pendiente" || i.estado === "Pendiente Espera").length;
+    
+    // Separar reglas de negocio de errores de infraestructura
+    const reglasNegocio = realInvoiceData.filter(i => {
+      if (i.estado === "Rechazado" || i.estado === "Manual") {
+        return !isInfraestructuraError(i.motivo || "");
+      }
+      return false;
+    }).length;
+    
+    const erroresInfraestructura = realInvoiceData.filter(i => {
+      return isInfraestructuraError(i.motivo || "");
+    }).length;
+    
+    const tasaExito = total > 0 ? (aprobadas / total) * 100 : 0;
+    const tasaErrorInfraestructura = total > 0 ? (erroresInfraestructura / total) * 100 : 0;
     
     return {
-      totalRequests: totalSuccess + totalErrors,
+      total,
+      aprobadas,
+      reglasNegocio,
+      erroresInfraestructura,
+      pendientes,
+      tasaExito: tasaExito.toFixed(1),
+      tasaErrorInfraestructura: tasaErrorInfraestructura.toFixed(1),
+    };
+  }, [realInvoiceData, selectedServiceFilter]);
+
+  // Calcular estadísticas generales del servicio seleccionado (SOLO errores de infraestructura)
+  const serviceStats = useMemo(() => {
+    const totalSuccess = filteredByService.reduce((sum, d) => sum + d.successCount, 0);
+    const totalInfraErrors = filteredByService.reduce((sum, d) => sum + (d.errorCount || 0), 0);
+    const totalReglasNegocio = filteredByService.reduce((sum, d) => sum + (d.reglaNegocioCount || 0), 0);
+    const avgResponseTime = filteredByService.reduce((sum, d) => sum + d.responseTime, 0) / (filteredByService.length || 1);
+    const avgThroughput = filteredByService.reduce((sum, d) => sum + d.throughput, 0) / (filteredByService.length || 1);
+    const totalRequests = totalSuccess + totalInfraErrors + totalReglasNegocio;
+    const errorRateInfra = totalRequests > 0 ? (totalInfraErrors / totalRequests) * 100 : 0;
+    
+    return {
+      totalRequests,
       totalSuccess,
-      totalErrors,
+      totalInfraErrors,
+      totalReglasNegocio,
       avgResponseTime: Math.round(avgResponseTime),
       avgThroughput: Math.round(avgThroughput),
-      errorRate: errorRate.toFixed(2),
-      byService,
+      errorRateInfra: errorRateInfra.toFixed(2),
     };
-  }, [filteredData]);
+  }, [filteredByService]);
 
   // Datos para gráficos
   const chartData = useMemo(() => {
-    const groupedByDate = filteredData.reduce((acc, d) => {
+    if (selectedServiceFilter === "Aceptación y Rechazo de Facturas" && invoiceChartData.length > 0) {
+      return invoiceChartData.map(item => ({
+        date: item.fecha,
+        exitosas: item.aprobadas,
+        reglasNegocio: item.reglasNegocio,
+        erroresInfraestructura: item.erroresInfraestructura,
+        pendientes: item.pendientes,
+      }));
+    }
+    
+    const groupedByDate = filteredByService.reduce((acc, d) => {
       const dateKey = format(d.date, "yyyy-MM-dd");
       if (!acc[dateKey]) {
         acc[dateKey] = {
-          date: dateKey,
-          success: 0,
-          errors: 0,
-          responseTime: 0,
-          throughput: 0,
+          date: format(d.date, "dd/MM"),
+          exitosas: 0,
+          erroresInfraestructura: 0,
+          reglasNegocio: 0,
           count: 0,
         };
       }
-      acc[dateKey].success += d.successCount;
-      acc[dateKey].errors += d.errorCount;
-      acc[dateKey].responseTime += d.responseTime;
-      acc[dateKey].throughput += d.throughput;
+      acc[dateKey].exitosas += d.successCount;
+      acc[dateKey].erroresInfraestructura += (d.errorCount || 0);
+      acc[dateKey].reglasNegocio += (d.reglaNegocioCount || 0);
       acc[dateKey].count++;
       return acc;
     }, {} as Record<string, any>);
     
     return Object.values(groupedByDate).map(item => ({
-      date: format(new Date(item.date), "dd/MM"),
-      success: item.success,
-      errors: item.errors,
-      responseTime: Math.round(item.responseTime / item.count),
-      throughput: Math.round(item.throughput / item.count),
+      date: item.date,
+      exitosas: item.exitosas,
+      erroresInfraestructura: item.erroresInfraestructura,
+      reglasNegocio: item.reglasNegocio,
     })).sort((a, b) => {
       const [dayA, monthA] = a.date.split('/');
       const [dayB, monthB] = b.date.split('/');
       return new Date(2024, parseInt(monthA) - 1, parseInt(dayA)).getTime() - 
              new Date(2024, parseInt(monthB) - 1, parseInt(dayB)).getTime();
     });
-  }, [filteredData]);
+  }, [filteredByService, invoiceChartData, selectedServiceFilter]);
 
-  const pieData = [
-    { name: "Exitosas", value: statistics.totalSuccess, color: COLORS[0] },
-    { name: "Con Error", value: statistics.totalErrors, color: COLORS[1] },
-  ];
+  const pieData = useMemo(() => {
+    if (selectedServiceFilter === "Aceptación y Rechazo de Facturas" && invoiceStats) {
+      return [
+        { name: "Exitosas", value: invoiceStats.aprobadas, color: COLORS[0] },
+        { name: "Reglas de Negocio", value: invoiceStats.reglasNegocio, color: COLORS[2] },
+        { name: "Errores Infraestructura", value: invoiceStats.erroresInfraestructura, color: COLORS[1] },
+        { name: "Pendientes", value: invoiceStats.pendientes, color: COLORS[3] },
+      ].filter(item => item.value > 0);
+    }
+    
+    return [
+      { name: "Exitosas", value: serviceStats.totalSuccess, color: COLORS[0] },
+      { name: "Reglas de Negocio", value: serviceStats.totalReglasNegocio, color: COLORS[2] },
+      { name: "Errores Infraestructura", value: serviceStats.totalInfraErrors, color: COLORS[1] },
+    ].filter(item => item.value > 0);
+  }, [selectedServiceFilter, invoiceStats, serviceStats]);
+
+  // Servicios filtrados por búsqueda
+  const filteredServicesList = useMemo(() => {
+    if (!searchService) return availableServicesWithData;
+    return availableServicesWithData.filter(service => 
+      service.toLowerCase().includes(searchService.toLowerCase())
+    );
+  }, [availableServicesWithData, searchService]);
+
+  // Contar filtros activos
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (selectedServiceFilter !== "todos") count++;
+    if (filters.minSuccessRate > 0) count++;
+    if (filters.maxResponseTime < 1000) count++;
+    return count;
+  }, [filters, selectedServiceFilter]);
 
   // Resetear filtros
   const resetFilters = () => {
@@ -253,47 +416,44 @@ export function DashboardMetrics() {
       maxResponseTime: 1000,
       status: ["success", "warning", "error"],
     });
+    setSelectedServiceFilter("todos");
     setSearchService("");
-  };
-
-  const toggleService = (service: string) => {
-    setFilters(prev => ({
-      ...prev,
-      services: prev.services.includes(service)
-        ? prev.services.filter(s => s !== service)
-        : [...prev.services, service]
-    }));
-  };
-
-  const toggleAllServices = () => {
-    if (filters.services.length === availableServices.length) {
-      setFilters(prev => ({ ...prev, services: [] }));
-    } else {
-      setFilters(prev => ({ ...prev, services: [...availableServices] }));
-    }
   };
 
   // Exportar a Excel
   const exportToExcel = () => {
-    const excelData = filteredData.map(item => ({
-      "Fecha": format(item.date, "dd/MM/yyyy HH:mm:ss"),
-      "Servicio": item.serviceName,
-      "Endpoint": item.endpoint,
-      "Peticiones Exitosas": item.successCount,
-      "Peticiones con Error": item.errorCount,
-      "Total Peticiones": item.successCount + item.errorCount,
-      "Tasa de Éxito": `${((item.successCount / (item.successCount + item.errorCount)) * 100).toFixed(2)}%`,
-      "Tiempo Respuesta (ms)": item.responseTime,
-      "Throughput (req/s)": item.throughput,
-    }));
+    let excelData: any[] = [];
+    
+    if (selectedServiceFilter === "Aceptación y Rechazo de Facturas" && realInvoiceData.length > 0) {
+      excelData = realInvoiceData.map(item => ({
+        "Fecha": format(parseISO(item.fecha_proceso), "dd/MM/yyyy HH:mm"),
+        "Tipo Documento": item.tipo_documento === 33 ? "Factura (33)" : item.tipo_documento === 34 ? "Factura Exenta (34)" : "Nota Crédito (61)",
+        "Folio": item.folio_documento,
+        "RUT Proveedor": item.rut_proveedor,
+        "Razón Social": item.razon_social,
+        "Estado": item.estado,
+        "Tipo": isInfraestructuraError(item.motivo || "") ? "❌ Error Infraestructura" : (item.estado === "Rechazado" || item.estado === "Manual" ? "⚠️ Regla de Negocio" : "📋 Normal"),
+        "Motivo": item.motivo || "-",
+      }));
+    } else {
+      excelData = filteredByService.map(item => ({
+        "Fecha": format(item.date, "dd/MM/yyyy"),
+        "Servicio": item.serviceName,
+        "Exitosas": item.successCount,
+        "Errores Infraestructura": item.errorCount || 0,
+        "Reglas de Negocio": item.reglaNegocioCount || 0,
+        "Tiempo Respuesta (ms)": item.responseTime,
+      }));
+    }
 
     const summaryData = [
-      { "Métrica": "Total Peticiones", "Valor": statistics.totalRequests, "Unidad": "peticiones" },
-      { "Métrica": "Total Exitosas", "Valor": statistics.totalSuccess, "Unidad": "peticiones" },
-      { "Métrica": "Total Errores", "Valor": statistics.totalErrors, "Unidad": "peticiones" },
-      { "Métrica": "Tasa de Error", "Valor": `${statistics.errorRate}%`, "Unidad": "porcentaje" },
-      { "Métrica": "Tiempo Respuesta Promedio", "Valor": statistics.avgResponseTime, "Unidad": "ms" },
-      { "Métrica": "Throughput Promedio", "Valor": statistics.avgThroughput, "Unidad": "req/s" },
+      { "Métrica": "Servicio Seleccionado", "Valor": selectedServiceFilter === "todos" ? "Todos los servicios" : selectedServiceFilter, "Unidad": "" },
+      { "Métrica": "Total Peticiones", "Valor": serviceStats.totalRequests, "Unidad": "peticiones" },
+      { "Métrica": "Exitosas", "Valor": serviceStats.totalSuccess, "Unidad": "peticiones" },
+      { "Métrica": "Reglas de Negocio", "Valor": serviceStats.totalReglasNegocio, "Unidad": "peticiones" },
+      { "Métrica": "Errores Infraestructura", "Valor": serviceStats.totalInfraErrors, "Unidad": "peticiones" },
+      { "Métrica": "Tasa Error Infraestructura", "Valor": `${serviceStats.errorRateInfra}%`, "Unidad": "porcentaje" },
+      { "Métrica": "Tiempo Respuesta Promedio", "Valor": serviceStats.avgResponseTime, "Unidad": "ms" },
     ];
 
     const wb = XLSX.utils.book_new();
@@ -303,16 +463,15 @@ export function DashboardMetrics() {
     XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
     XLSX.utils.book_append_sheet(wb, wsData, "Datos Detallados");
     
-    const fileName = `dashboard_metrics_${format(new Date(), "yyyy-MM-dd_HH-mm")}.xlsx`;
+    const fileName = `dashboard_metrics_${selectedServiceFilter}_${format(new Date(), "yyyy-MM-dd_HH-mm")}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
   const handleRefresh = () => {
     setIsRefreshing(true);
     setTimeout(() => {
-      setAllData(generateMetricsData());
-      setIsRefreshing(false);
-    }, 1000);
+      window.location.reload();
+    }, 500);
   };
 
   if (loading) {
@@ -369,116 +528,24 @@ export function DashboardMetrics() {
           {/* Panel de filtros */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Filtro de fecha */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <Label className="text-sm font-medium mb-2 block">Rango de fechas</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {filters.dateRange.from ? (
-                          filters.dateRange.to ? (
-                            <>
-                              {format(filters.dateRange.from, "dd/MM/yy")} -{" "}
-                              {format(filters.dateRange.to, "dd/MM/yy")}
-                            </>
-                          ) : (
-                            format(filters.dateRange.from, "dd/MM/yy")
-                          )
-                        ) : (
-                          <span>Seleccionar fechas</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="range"
-                        selected={filters.dateRange}
-                        onSelect={(range) => setFilters({ ...filters, dateRange: range || { from: undefined, to: undefined } })}
-                        numberOfMonths={2}
-                        locale={es}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Label className="text-sm font-medium mb-2 block">Servicio</Label>
+                  <Select value={selectedServiceFilter} onValueChange={setSelectedServiceFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar servicio" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">🌐 Todos los servicios</SelectItem>
+                      {availableServicesWithData.map(service => (
+                        <SelectItem key={service} value={service}>
+                          {service}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                {/* Filtro de servicios - LISTA DE SERVICIOS REALES */}
-                <div>
-                  <Label className="text-sm font-medium mb-2 block">
-                    Servicios
-                    {filters.services.length > 0 && (
-                      <Badge variant="secondary" className="ml-2">
-                        {filters.services.length} seleccionado{filters.services.length !== 1 ? 's' : ''}
-                      </Badge>
-                    )}
-                  </Label>
-                  <Collapsible open={showServiceList} onOpenChange={setShowServiceList}>
-                    <div className="relative">
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            placeholder="Buscar servicio..."
-                            value={searchService}
-                            onChange={(e) => setSearchService(e.target.value)}
-                            className="pl-8"
-                          />
-                        </div>
-                        <CollapsibleTrigger asChild>
-                          <Button variant="outline" size="icon">
-                            {showServiceList ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          </Button>
-                        </CollapsibleTrigger>
-                      </div>
-                      <CollapsibleContent className="mt-2">
-                        <div className="border rounded-lg p-3 max-h-64 overflow-y-auto space-y-2">
-                          <div className="flex items-center justify-between pb-2 border-b">
-                            <span className="text-sm font-medium">Lista de servicios</span>
-                            <Button variant="ghost" size="sm" onClick={toggleAllServices}>
-                              {filters.services.length === availableServices.length ? "Deseleccionar todos" : "Seleccionar todos"}
-                            </Button>
-                          </div>
-                          {filteredServicesList.map(service => {
-                            const serviceInfo = services.find(s => s.name === service);
-                            const successRate = serviceInfo ? 
-                              ((100 - serviceInfo.errorPercentage)).toFixed(1) : "0";
-                            
-                            return (
-                              <div key={service} className="flex items-center justify-between p-2 hover:bg-muted/50 rounded-lg">
-                                <div className="flex items-center gap-3 flex-1">
-                                  <Checkbox
-                                    checked={filters.services.includes(service)}
-                                    onCheckedChange={() => toggleService(service)}
-                                    id={`service-${service}`}
-                                  />
-                                  <Label htmlFor={`service-${service}`} className="flex-1 cursor-pointer">
-                                    <div className="font-medium">{service}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                      Tasa éxito: {successRate}% | Error: {serviceInfo?.errorPercentage || 0}%
-                                    </div>
-                                  </Label>
-                                </div>
-                                <div className={cn(
-                                  "w-2 h-2 rounded-full",
-                                  serviceInfo?.status === "success" ? "bg-green-500" :
-                                  serviceInfo?.status === "warning" ? "bg-yellow-500" : "bg-red-500"
-                                )} />
-                              </div>
-                            );
-                          })}
-                          {filteredServicesList.length === 0 && (
-                            <div className="text-center text-muted-foreground py-4">
-                              No se encontraron servicios
-                            </div>
-                          )}
-                        </div>
-                      </CollapsibleContent>
-                    </div>
-                  </Collapsible>
-                </div>
-
-                {/* Filtro de tasa de éxito */}
                 <div>
                   <Label className="text-sm font-medium mb-2 block">
                     Tasa de éxito mínima: {filters.minSuccessRate}%
@@ -494,7 +561,6 @@ export function DashboardMetrics() {
                   />
                 </div>
 
-                {/* Filtro de tiempo de respuesta */}
                 <div>
                   <Label className="text-sm font-medium mb-2 block">
                     Tiempo máximo respuesta: {filters.maxResponseTime}ms
@@ -508,35 +574,6 @@ export function DashboardMetrics() {
                     onChange={(e) => setFilters({ ...filters, maxResponseTime: parseInt(e.target.value) })}
                     className="w-full"
                   />
-                </div>
-              </div>
-
-              {/* Filtro de estado */}
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Estado del servicio</Label>
-                <div className="flex flex-wrap gap-4">
-                  {[
-                    { value: "success", label: "Excelente (0% error)", color: "bg-green-500" },
-                    { value: "warning", label: "Warning (1-10% error)", color: "bg-yellow-500" },
-                    { value: "error", label: "Crítico (>10% error)", color: "bg-red-500" },
-                  ].map(status => (
-                    <Button
-                      key={status.value}
-                      variant={filters.status.includes(status.value as any) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => {
-                        const newStatus = filters.status.includes(status.value as any)
-                          ? filters.status.filter(s => s !== status.value)
-                          : [...filters.status, status.value as any];
-                        setFilters({ ...filters, status: newStatus });
-                      }}
-                      className="gap-2"
-                    >
-                      <div className={cn("w-2 h-2 rounded-full", status.color)} />
-                      {status.label}
-                      {filters.status.includes(status.value as any) && <Check className="h-3 w-3" />}
-                    </Button>
-                  ))}
                 </div>
               </div>
 
@@ -557,10 +594,8 @@ export function DashboardMetrics() {
       {activeFiltersCount > 0 && (
         <div className="flex flex-wrap gap-2 items-center p-3 bg-muted/30 rounded-lg">
           <span className="text-sm font-medium text-muted-foreground">Filtros aplicados:</span>
-          {filters.services.length > 0 && (
-            <Badge variant="secondary" className="gap-1">
-              {filters.services.length} servicio{filters.services.length !== 1 ? 's' : ''}
-            </Badge>
+          {selectedServiceFilter !== "todos" && (
+            <Badge variant="secondary">Servicio: {selectedServiceFilter}</Badge>
           )}
           {filters.minSuccessRate > 0 && (
             <Badge variant="secondary">Éxito ≥ {filters.minSuccessRate}%</Badge>
@@ -568,15 +603,8 @@ export function DashboardMetrics() {
           {filters.maxResponseTime < 1000 && (
             <Badge variant="secondary">Respuesta ≤ {filters.maxResponseTime}ms</Badge>
           )}
-          {filters.status.length < 3 && (
-            <Badge variant="secondary">
-              Estado: {filters.status.map(s => 
-                s === "success" ? "Excelente" : s === "warning" ? "Warning" : "Crítico"
-              ).join(", ")}
-            </Badge>
-          )}
           <span className="text-sm text-muted-foreground ml-auto">
-            Mostrando {filteredData.length} de {allData.length} registros
+            Mostrando datos de {selectedServiceFilter === "todos" ? "todos los servicios" : selectedServiceFilter}
           </span>
         </div>
       )}
@@ -589,27 +617,37 @@ export function DashboardMetrics() {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{statistics.totalRequests.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{serviceStats.totalRequests.toLocaleString()}</div>
             <div className="flex gap-2 text-xs mt-1">
-              <span className="text-green-600">✓ {statistics.totalSuccess.toLocaleString()}</span>
-              <span className="text-red-600">✗ {statistics.totalErrors.toLocaleString()}</span>
+              <span className="text-emerald-600">✓ Exitosas: {serviceStats.totalSuccess.toLocaleString()}</span>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Tasa de Error</CardTitle>
-            <TrendingDown className={cn("h-4 w-4", parseFloat(statistics.errorRate) > 10 ? "text-red-500" : "text-yellow-500")} />
+            <CardTitle className="text-sm font-medium">Tasa Error Infraestructura</CardTitle>
+            <TrendingDown className={cn("h-4 w-4", parseFloat(serviceStats.errorRateInfra) > 10 ? "text-red-500" : "text-yellow-500")} />
           </CardHeader>
           <CardContent>
             <div className={cn(
               "text-2xl font-bold",
-              parseFloat(statistics.errorRate) > 10 ? "text-red-500" : parseFloat(statistics.errorRate) > 5 ? "text-yellow-500" : "text-green-500"
+              parseFloat(serviceStats.errorRateInfra) > 10 ? "text-red-500" : parseFloat(serviceStats.errorRateInfra) > 5 ? "text-yellow-500" : "text-green-500"
             )}>
-              {statistics.errorRate}%
+              {serviceStats.errorRateInfra}%
             </div>
-            <p className="text-xs text-muted-foreground mt-1">{statistics.totalErrors} errores totales</p>
+            <p className="text-xs text-muted-foreground mt-1">{serviceStats.totalInfraErrors} errores técnicos</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Reglas de Negocio</CardTitle>
+            <Zap className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-500">{serviceStats.totalReglasNegocio.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground mt-1">Decisiones de negocio (no son errores)</p>
           </CardContent>
         </Card>
 
@@ -619,19 +657,8 @@ export function DashboardMetrics() {
             <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{statistics.avgResponseTime} ms</div>
+            <div className="text-2xl font-bold">{serviceStats.avgResponseTime} ms</div>
             <p className="text-xs text-muted-foreground mt-1">Promedio del período</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Throughput</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{statistics.avgThroughput} req/s</div>
-            <p className="text-xs text-muted-foreground mt-1">Promedio por segundo</p>
           </CardContent>
         </Card>
       </div>
@@ -639,7 +666,7 @@ export function DashboardMetrics() {
       {/* Gráficos */}
       <Tabs defaultValue="line" className="w-full">
         <TabsList className="grid w-full grid-cols-4 mb-4">
-          <TabsTrigger value="line">📈 Línea</TabsTrigger>
+          <TabsTrigger value="line">📈 Evolución</TabsTrigger>
           <TabsTrigger value="bar">📊 Barras</TabsTrigger>
           <TabsTrigger value="area">📉 Área</TabsTrigger>
           <TabsTrigger value="pie">🥧 Distribución</TabsTrigger>
@@ -649,6 +676,9 @@ export function DashboardMetrics() {
           <Card>
             <CardHeader>
               <CardTitle>Evolución Temporal</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {selectedServiceFilter === "todos" ? "Todos los servicios" : selectedServiceFilter}
+              </p>
             </CardHeader>
             <CardContent>
               <div className="h-[400px]">
@@ -659,36 +689,11 @@ export function DashboardMetrics() {
                     <YAxis />
                     <Tooltip />
                     <Legend />
-                    {selectedMetric === "requests" && (
-                      <>
-                        <Line type="monotone" dataKey="success" stroke="#10b981" name="Exitosas" strokeWidth={2} />
-                        <Line type="monotone" dataKey="errors" stroke="#ef4444" name="Errores" strokeWidth={2} />
-                      </>
-                    )}
-                    {selectedMetric === "errors" && (
-                      <Line type="monotone" dataKey="errors" stroke="#ef4444" name="Errores" strokeWidth={2} />
-                    )}
-                    {selectedMetric === "responseTime" && (
-                      <Line type="monotone" dataKey="responseTime" stroke="#3b82f6" name="Tiempo Respuesta (ms)" strokeWidth={2} />
-                    )}
-                    {selectedMetric === "throughput" && (
-                      <Line type="monotone" dataKey="throughput" stroke="#8b5cf6" name="Throughput (req/s)" strokeWidth={2} />
-                    )}
+                    <Line type="monotone" dataKey="exitosas" stroke="#10b981" name="Exitosas" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="reglasNegocio" stroke="#f59e0b" name="Reglas de Negocio" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="erroresInfraestructura" stroke="#ef4444" name="Errores Infraestructura" strokeWidth={2} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
-              <div className="mt-4 flex justify-center">
-                <Select value={selectedMetric} onValueChange={(v: any) => setSelectedMetric(v)}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="requests">Mostrar Peticiones</SelectItem>
-                    <SelectItem value="errors">Mostrar Errores</SelectItem>
-                    <SelectItem value="responseTime">Mostrar Tiempo Respuesta</SelectItem>
-                    <SelectItem value="throughput">Mostrar Throughput</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </CardContent>
           </Card>
@@ -702,27 +707,15 @@ export function DashboardMetrics() {
             <CardContent>
               <div className="h-[400px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData.slice(-7)}>
+                  <BarChart data={chartData.slice(-14)}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
                     <YAxis />
                     <Tooltip />
                     <Legend />
-                    {selectedMetric === "requests" && (
-                      <>
-                        <Bar dataKey="success" fill="#10b981" name="Exitosas" />
-                        <Bar dataKey="errors" fill="#ef4444" name="Errores" />
-                      </>
-                    )}
-                    {selectedMetric === "errors" && (
-                      <Bar dataKey="errors" fill="#ef4444" name="Errores" />
-                    )}
-                    {selectedMetric === "responseTime" && (
-                      <Bar dataKey="responseTime" fill="#3b82f6" name="Tiempo Respuesta (ms)" />
-                    )}
-                    {selectedMetric === "throughput" && (
-                      <Bar dataKey="throughput" fill="#8b5cf6" name="Throughput (req/s)" />
-                    )}
+                    <Bar dataKey="exitosas" fill="#10b981" name="Exitosas" radius={[4,4,0,0]} />
+                    <Bar dataKey="reglasNegocio" fill="#f59e0b" name="Reglas de Negocio" radius={[4,4,0,0]} />
+                    <Bar dataKey="erroresInfraestructura" fill="#ef4444" name="Errores Infraestructura" radius={[4,4,0,0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -733,7 +726,7 @@ export function DashboardMetrics() {
         <TabsContent value="area">
           <Card>
             <CardHeader>
-              <CardTitle>Tendencia de Errores vs Exitosas</CardTitle>
+              <CardTitle>Tendencia Acumulada</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-[400px]">
@@ -744,8 +737,9 @@ export function DashboardMetrics() {
                     <YAxis />
                     <Tooltip />
                     <Legend />
-                    <Area type="monotone" dataKey="errors" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.6} name="Errores" />
-                    <Area type="monotone" dataKey="success" stackId="1" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="Exitosas" />
+                    <Area type="monotone" dataKey="erroresInfraestructura" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.6} name="Errores Infraestructura" />
+                    <Area type="monotone" dataKey="reglasNegocio" stackId="1" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.6} name="Reglas de Negocio" />
+                    <Area type="monotone" dataKey="exitosas" stackId="1" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="Exitosas" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -758,10 +752,10 @@ export function DashboardMetrics() {
             <Card>
               <CardHeader>
                 <CardTitle>Distribución de Peticiones</CardTitle>
-                <p className="text-sm text-muted-foreground">Total: {statistics.totalRequests.toLocaleString()} peticiones</p>
+                <p className="text-sm text-muted-foreground">Total: {serviceStats.totalRequests.toLocaleString()} peticiones</p>
               </CardHeader>
               <CardContent>
-                <div className="h-[300px]">
+                <div className="h-[350px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -770,7 +764,7 @@ export function DashboardMetrics() {
                         cy="50%"
                         labelLine={true}
                         label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                        outerRadius={100}
+                        outerRadius={120}
                         fill="#8884d8"
                         dataKey="value"
                       >
@@ -782,6 +776,9 @@ export function DashboardMetrics() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  * Las reglas de negocio NO son errores técnicos, son decisiones del negocio
+                </p>
               </CardContent>
             </Card>
 
@@ -791,26 +788,30 @@ export function DashboardMetrics() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
-                    <span>Tasa de Éxito</span>
-                    <Badge variant="success" className="text-lg">
-                      {((statistics.totalSuccess / statistics.totalRequests) * 100).toFixed(1)}%
+                  <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg">
+                    <span className="font-medium">✅ Exitosas</span>
+                    <Badge className="bg-emerald-500 text-white text-lg px-3 py-1">
+                      {serviceStats.totalSuccess.toLocaleString()}
                     </Badge>
                   </div>
-                  <div className="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
-                    <span>Tiempo Promedio Respuesta</span>
-                    <Badge className="text-lg">{statistics.avgResponseTime} ms</Badge>
+                  <div className="flex justify-between items-center p-3 bg-amber-50 rounded-lg">
+                    <span className="font-medium">⚠️ Reglas de Negocio</span>
+                    <Badge className="bg-amber-500 text-white text-lg px-3 py-1">
+                      {serviceStats.totalReglasNegocio.toLocaleString()}
+                    </Badge>
+                    <p className="text-xs text-muted-foreground">No afectan la estabilidad</p>
                   </div>
-                  <div className="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
-                    <span>Throughput Promedio</span>
-                    <Badge className="text-lg">{statistics.avgThroughput} req/s</Badge>
+                  <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                    <span className="font-medium">❌ Errores Infraestructura</span>
+                    <Badge className="bg-red-500 text-white text-lg px-3 py-1">
+                      {serviceStats.totalInfraErrors.toLocaleString()}
+                    </Badge>
+                    <p className="text-xs text-muted-foreground">Problemas técnicos reales</p>
                   </div>
-                  <div className="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
-                    <span>Ratio Éxito/Error</span>
-                    <Badge className="text-lg">
-                      {statistics.totalErrors > 0 
-                        ? (statistics.totalSuccess / statistics.totalErrors).toFixed(1)
-                        : "∞"}:1
+                  <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                    <span className="font-medium">⚡ Tiempo Respuesta Promedio</span>
+                    <Badge className="bg-blue-500 text-white text-lg px-3 py-1">
+                      {serviceStats.avgResponseTime} ms
                     </Badge>
                   </div>
                 </div>
@@ -819,54 +820,6 @@ export function DashboardMetrics() {
           </div>
         </TabsContent>
       </Tabs>
-
-      {/* Tabla de datos */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarIcon className="h-5 w-5" />
-            Datos Detallados
-            <Badge variant="secondary" className="ml-2">{filteredData.length} registros</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-3">Fecha</th>
-                  <th className="text-left p-3">Servicio</th>
-                  <th className="text-left p-3">Endpoint</th>
-                  <th className="text-right p-3">Exitosas</th>
-                  <th className="text-right p-3">Errores</th>
-                  <th className="text-right p-3">Tasa Éxito</th>
-                  <th className="text-right p-3">Tiempo Respuesta</th>
-                  <th className="text-right p-3">Throughput</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredData.slice(0, 50).map((item) => {
-                  const total = item.successCount + item.errorCount;
-                  const successRate = (item.successCount / total) * 100;
-                  
-                  return (
-                    <tr key={item.id} className="border-b hover:bg-muted/50">
-                      <td className="p-3">{format(item.date, "dd/MM/yyyy HH:mm")}</td>
-                      <td className="p-3 font-medium">{item.serviceName}</td>
-                      <td className="p-3 font-mono text-xs">{item.endpoint}</td>
-                      <td className="text-right p-3 text-green-600">{item.successCount.toLocaleString()}</td>
-                      <td className="text-right p-3 text-red-600">{item.errorCount.toLocaleString()}</td>
-                      <td className="text-right p-3 font-semibold">{successRate.toFixed(1)}%</td>
-                      <td className="text-right p-3">{item.responseTime} ms</td>
-                      <td className="text-right p-3">{item.throughput} req/s</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

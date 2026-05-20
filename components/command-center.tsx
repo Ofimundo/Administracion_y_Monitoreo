@@ -140,10 +140,24 @@ export function CommandCenter() {
 
   const handleReiniciar = async () => {
     console.log(`Reiniciando servicio: ${selectedService?.name}`);
+    if (selectedServiceId === "facturas") {
+      const res = await fetch("/api/facturas/sincronizar", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || "Error al sincronizar con Softland.");
+      }
+    }
   };
 
   const handleReenviarFallidos = async () => {
     console.log(`Reenviando fallidos para: ${selectedService?.name}`);
+    if (selectedServiceId === "facturas") {
+      const res = await fetch("/api/facturas/sincronizar", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || "Error al resincronizar.");
+      }
+    }
   };
 
   const handleNotificarCliente = async () => {
@@ -156,6 +170,13 @@ export function CommandCenter() {
 
   const handleIniciarProceso = async () => {
     console.log(`Iniciando proceso para: ${selectedService?.name}`);
+    if (selectedServiceId === "facturas") {
+      const res = await fetch("/api/facturas/ejecutar", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || "La ejecución del motor RPA falló.");
+      }
+    }
   };
 
   const handleDetenerServicio = async () => {

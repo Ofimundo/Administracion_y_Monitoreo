@@ -41,9 +41,10 @@ export interface MetricDataPoint {
 
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
-  { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: ["facturas", "saldos"] },
-  { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: ["facturas"] },
-  { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: ["facturas", "finiquitos"] },
+  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas"] },
+  { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: ["saldos"] },
+  { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: ["finiquitos"] },
   { id: "cl4", name: "Banco Santander", rut: "79.456.789-0", email: "soporte@santander.cl", phone: "+56 2 4567 8901", errorPercentage: 0, status: "success", services: ["saldos"] },
   { id: "cl5", name: "Banco Chile", rut: "80.567.890-1", email: "atencion@bancochile.cl", phone: "+56 2 5678 9012", errorPercentage: 0, status: "success", services: ["saldos"] },
   { id: "cl6", name: "Recursos Humanos SA", rut: "81.678.901-2", email: "contacto@rrhhsa.cl", phone: "+56 2 6789 0123", errorPercentage: 0, status: "success", services: ["finiquitos"] },
@@ -54,8 +55,8 @@ export const clients: Client[] = [
   { id: "cl14", name: "Distribuidora Nacional", rut: "86.123.456-7", email: "ventas@distribuidora.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: ["notas-credito"] },
 ];
 
-// SERVICIOS EXACTOS DE LA IMAGEN
-export const services: Service[] = [
+// Datos base de servicios
+const baseServices: Service[] = [
   {
     id: "facturas",
     name: "Aceptación y Rechazo de Facturas",
@@ -63,9 +64,7 @@ export const services: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl1", name: "Empresa A", errorPercentage: 0, status: "success" },
-      { id: "cl2", name: "Empresa B", errorPercentage: 0, status: "success" },
-      { id: "cl3", name: "Empresa C", errorPercentage: 0, status: "success" },
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [
       { id: "1", message: "Servicio inicializado correctamente", timestamp: new Date().toISOString(), type: "success" },
@@ -160,6 +159,61 @@ export const services: Service[] = [
   },
 ];
 
+// Variable mutable para los servicios (permite actualización dinámica)
+let services: Service[] = [...baseServices];
+
+// Función para actualizar un servicio con datos reales
+export function updateServiceStatus(serviceId: string, errorPercentage: number, status: "success" | "warning" | "error", logs?: Log[]) {
+  const serviceIndex = services.findIndex(s => s.id === serviceId);
+  if (serviceIndex !== -1) {
+    services[serviceIndex] = {
+      ...services[serviceIndex],
+      status,
+      errorPercentage,
+      clients: services[serviceIndex].clients.map(client => ({
+        ...client,
+        errorPercentage,
+        status,
+      })),
+      logs: logs || services[serviceIndex].logs,
+    };
+    
+    // También actualizar el cliente global correspondiente
+    const clientIndex = clients.findIndex(c => c.id === "cl_ofimundo");
+    if (clientIndex !== -1 && serviceId === "facturas") {
+      clients[clientIndex] = {
+        ...clients[clientIndex],
+        errorPercentage,
+        status,
+      };
+    }
+  }
+}
+
+// Función para obtener los servicios (versión reactiva)
+export function getServices(): Service[] {
+  return [...services];
+}
+
+// Función para obtener un servicio por ID
+export function getServiceById(serviceId: string): Service | undefined {
+  return services.find(s => s.id === serviceId);
+}
+
+// Función para actualizar logs de un servicio
+export function updateServiceLogs(serviceId: string, logs: Log[]) {
+  const serviceIndex = services.findIndex(s => s.id === serviceId);
+  if (serviceIndex !== -1) {
+    services[serviceIndex] = {
+      ...services[serviceIndex],
+      logs: [...logs, ...services[serviceIndex].logs].slice(0, 100), // Mantener últimos 100 logs
+    };
+  }
+}
+
+// Exportar servicios como getter para mantener compatibilidad con código existente
+export { services };
+
 // Función para obtener servicios de un cliente
 export const getClientServices = (clientId: string): Service[] => {
   const client = clients.find(c => c.id === clientId);
@@ -170,6 +224,11 @@ export const getClientServices = (clientId: string): Service[] => {
 // Función para obtener cliente por ID con datos completos
 export const getClientById = (clientId: string): Client | undefined => {
   return clients.find(c => c.id === clientId);
+};
+
+// Función para resetear servicios a estado base (útil para recarga)
+export const resetServicesToBase = () => {
+  services = [...baseServices];
 };
 
 // Generar datos de métricas para el dashboard basados en los servicios reales
@@ -187,16 +246,6 @@ export const generateMetricsData = (): MetricDataPoint[] => {
     "Notas de Crédito": ["/api/notas/emitir", "/api/notas/anular", "/api/notas/estado"],
   };
   
-  const errorRates: Record<string, number> = {
-    "Aceptación y Rechazo de Facturas": 0,
-    "Saldos Bancarios": 0,
-    "Finiquitos": 0,
-    "Cuentas Básicas": 2,
-    "DTE": 85,
-    "Contabilización": 2,
-    "Notas de Crédito": 0,
-  };
-  
   for (let i = 0; i < 90; i++) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
@@ -204,7 +253,7 @@ export const generateMetricsData = (): MetricDataPoint[] => {
     for (const service of services) {
       const endpoints = serviceEndpoints[service.name] || ["/api/endpoint"];
       const endpoint = endpoints[Math.floor(Math.random() * endpoints.length)];
-      const errorRate = errorRates[service.name] / 100;
+      const errorRate = service.errorPercentage / 100;
       
       const totalRequests = 800 + Math.floor(Math.random() * 400);
       const errorCount = Math.floor(totalRequests * (errorRate + (Math.random() * 0.05 - 0.025)));

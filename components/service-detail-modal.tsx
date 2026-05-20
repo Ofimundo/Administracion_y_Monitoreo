@@ -184,15 +184,7 @@ export function ServiceDetailModal({
                             </Badge>
                           )}
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onViewClientDetail?.(service, client)}
-                          className="text-primary hover:text-primary"
-                        >
-                          <ExternalLink className="h-4 w-4 mr-1" />
-                          Ver detalle
-                        </Button>
+                        
                       </div>
                     ))}
                   </div>
