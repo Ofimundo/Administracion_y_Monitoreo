@@ -7,6 +7,7 @@ export interface Service {
   status: "success" | "warning" | "error";
   clients: Client[];
   logs: Log[];
+  isComingSoon?: boolean; // Nueva propiedad para indicar si está próximo
 }
 
 export interface Client {
@@ -42,17 +43,27 @@ export interface MetricDataPoint {
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
   { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas"] },
-  { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: ["saldos"] },
+  { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
   { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: ["finiquitos"] },
-  { id: "cl4", name: "Banco Santander", rut: "79.456.789-0", email: "soporte@santander.cl", phone: "+56 2 4567 8901", errorPercentage: 0, status: "success", services: ["saldos"] },
-  { id: "cl5", name: "Banco Chile", rut: "80.567.890-1", email: "atencion@bancochile.cl", phone: "+56 2 5678 9012", errorPercentage: 0, status: "success", services: ["saldos"] },
-  { id: "cl6", name: "Recursos Humanos SA", rut: "81.678.901-2", email: "contacto@rrhhsa.cl", phone: "+56 2 6789 0123", errorPercentage: 0, status: "success", services: ["finiquitos"] },
-  { id: "cl8", name: "Banco Estado", rut: "82.789.012-3", email: "servicios@bancoestado.cl", phone: "+56 2 7890 1234", errorPercentage: 2, status: "warning", services: ["cuentas"] },
-  { id: "cl9", name: "Coopeuch", rut: "83.890.123-4", email: "atencion@coopeuch.cl", phone: "+56 2 8901 2345", errorPercentage: 1, status: "success", services: ["cuentas"] },
-  { id: "cl10", name: "Servicio de Impuestos Internos", rut: "84.901.234-5", email: "sii@hacienda.cl", phone: "+56 2 9012 3456", errorPercentage: 85, status: "error", services: ["dte"] },
-  { id: "cl12", name: "Auditores Asociados", rut: "85.012.345-6", email: "contacto@auditores.cl", phone: "+56 2 0123 4567", errorPercentage: 2, status: "warning", services: ["contabilizacion"] },
-  { id: "cl14", name: "Distribuidora Nacional", rut: "86.123.456-7", email: "ventas@distribuidora.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: ["notas-credito"] },
+  { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl4", name: "Banco Santander", rut: "79.456.789-0", email: "soporte@santander.cl", phone: "+56 2 4567 8901", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl5", name: "Banco Chile", rut: "80.567.890-1", email: "atencion@bancochile.cl", phone: "+56 2 5678 9012", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl6", name: "Recursos Humanos SA", rut: "81.678.901-2", email: "contacto@rrhhsa.cl", phone: "+56 2 6789 0123", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl8", name: "Banco Estado", rut: "82.789.012-3", email: "servicios@bancoestado.cl", phone: "+56 2 7890 1234", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl9", name: "Coopeuch", rut: "83.890.123-4", email: "atencion@coopeuch.cl", phone: "+56 2 8901 2345", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl10", name: "Servicio de Impuestos Internos", rut: "84.901.234-5", email: "sii@hacienda.cl", phone: "+56 2 9012 3456", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl12", name: "Auditores Asociados", rut: "85.012.345-6", email: "contacto@auditores.cl", phone: "+56 2 0123 4567", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl14", name: "Distribuidora Nacional", rut: "86.123.456-7", email: "ventas@distribuidora.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
+];
+
+// Servicios que están próximamente (muestran mensaje especial)
+const COMING_SOON_SERVICES = [
+  "saldos",
+  "finiquitos", 
+  "cuentas",
+  "dte",
+  "contabilizacion",
+  "notas-credito"
 ];
 
 // Datos base de servicios
@@ -70,92 +81,67 @@ const baseServices: Service[] = [
       { id: "1", message: "Servicio inicializado correctamente", timestamp: new Date().toISOString(), type: "success" },
       { id: "2", message: "Procesamiento de facturas completado", timestamp: new Date().toISOString(), type: "success" },
     ],
+    isComingSoon: false,
   },
   {
     id: "saldos",
     name: "Saldos Bancarios",
-    description: "Sistema automatizado para la consulta y consolidación de saldos bancarios de múltiples instituciones financieras. Permite obtener información actualizada de cuentas bancarias y generar reportes financieros.",
+    description: "🚀 Próximamente - Sistema automatizado para la consulta y consolidación de saldos bancarios de múltiples instituciones financieras.",
     errorPercentage: 0,
     status: "success",
-    clients: [
-      { id: "cl1", name: "Empresa A", errorPercentage: 0, status: "success" },
-      { id: "cl4", name: "Banco Santander", errorPercentage: 0, status: "success" },
-      { id: "cl5", name: "Banco Chile", errorPercentage: 0, status: "success" },
-    ],
-    logs: [
-      { id: "1", message: "Conexión con bancos establecida", timestamp: new Date().toISOString(), type: "success" },
-      { id: "2", message: "Saldos actualizados", timestamp: new Date().toISOString(), type: "success" },
-    ],
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
   {
     id: "finiquitos",
     name: "Finiquitos",
-    description: "Gestión automatizada del proceso de finiquitos laborales, incluyendo cálculo de indemnizaciones, generación de documentos legales y registro de pagos.",
+    description: "🚀 Próximamente - Gestión automatizada del proceso de finiquitos laborales, incluyendo cálculo de indemnizaciones y generación de documentos legales.",
     errorPercentage: 0,
     status: "success",
-    clients: [
-      { id: "cl3", name: "Empresa C", errorPercentage: 0, status: "success" },
-      { id: "cl6", name: "Recursos Humanos SA", errorPercentage: 0, status: "success" },
-    ],
-    logs: [
-      { id: "1", message: "Cálculo de finiquitos procesado", timestamp: new Date().toISOString(), type: "success" },
-    ],
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
   {
     id: "cuentas",
     name: "Cuentas Básicas",
-    description: "Sistema de gestión de cuentas básicas bancarias que permite la apertura, modificación y cierre de cuentas de manera automatizada, cumpliendo con la normativa financiera vigente.",
-    errorPercentage: 2,
-    status: "warning",
-    clients: [
-      { id: "cl8", name: "Banco Estado", errorPercentage: 2, status: "warning" },
-      { id: "cl9", name: "Coopeuch", errorPercentage: 1, status: "success" },
-    ],
-    logs: [
-      { id: "1", message: "Apertura masiva de cuentas procesada", timestamp: new Date().toISOString(), type: "success" },
-      { id: "2", message: "Error en validación de RUT", timestamp: new Date().toISOString(), type: "error" },
-    ],
+    description: "🚀 Próximamente - Sistema de gestión de cuentas básicas bancarias que permite la apertura, modificación y cierre de cuentas de manera automatizada.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
   {
     id: "dte",
     name: "DTE",
-    description: "Sistema de Documentos Tributarios Electrónicos que gestiona la emisión, recepción y almacenamiento de facturas, boletas, notas de débito y crédito, garantizando el cumplimiento con el SII.",
-    errorPercentage: 85,
-    status: "error",
-    clients: [
-      { id: "cl10", name: "Servicio de Impuestos Internos", errorPercentage: 85, status: "error" },
-    ],
-    logs: [
-      { id: "1", message: "Error masivo en emisión de DTE", timestamp: new Date().toISOString(), type: "error" },
-      { id: "2", message: "Servicio no responde", timestamp: new Date().toISOString(), type: "error" },
-    ],
+    description: "🚀 Próximamente - Sistema de Documentos Tributarios Electrónicos que gestiona la emisión, recepción y almacenamiento de facturas, boletas y notas.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
   {
     id: "contabilizacion",
     name: "Contabilización",
-    description: "Automatización del proceso de contabilización de documentos tributarios, incluyendo asientos contables, cuadratura de cuentas y generación de informes financieros.",
-    errorPercentage: 2,
-    status: "warning",
-    clients: [
-      { id: "cl12", name: "Auditores Asociados", errorPercentage: 2, status: "warning" },
-    ],
-    logs: [
-      { id: "1", message: "Asientos contables generados", timestamp: new Date().toISOString(), type: "success" },
-      { id: "2", message: "Error de cuadratura detectado", timestamp: new Date().toISOString(), type: "error" },
-    ],
+    description: "🚀 Próximamente - Automatización del proceso de contabilización de documentos tributarios, incluyendo asientos contables y cuadratura de cuentas.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
   {
     id: "notas-credito",
     name: "Notas de Crédito",
-    description: "Sistema automatizado para la emisión y gestión de notas de crédito electrónicas. Permite anular o modificar facturas emitidas previamente con total trazabilidad.",
+    description: "🚀 Próximamente - Sistema automatizado para la emisión y gestión de notas de crédito electrónicas.",
     errorPercentage: 0,
     status: "success",
-    clients: [
-      { id: "cl14", name: "Distribuidora Nacional", errorPercentage: 0, status: "success" },
-    ],
-    logs: [
-      { id: "1", message: "Notas de crédito emitidas", timestamp: new Date().toISOString(), type: "success" },
-    ],
+    clients: [],
+    logs: [],
+    isComingSoon: true,
   },
 ];
 
@@ -165,7 +151,7 @@ let services: Service[] = [...baseServices];
 // Función para actualizar un servicio con datos reales
 export function updateServiceStatus(serviceId: string, errorPercentage: number, status: "success" | "warning" | "error", logs?: Log[]) {
   const serviceIndex = services.findIndex(s => s.id === serviceId);
-  if (serviceIndex !== -1) {
+  if (serviceIndex !== -1 && !services[serviceIndex].isComingSoon) {
     services[serviceIndex] = {
       ...services[serviceIndex],
       status,
@@ -203,10 +189,10 @@ export function getServiceById(serviceId: string): Service | undefined {
 // Función para actualizar logs de un servicio
 export function updateServiceLogs(serviceId: string, logs: Log[]) {
   const serviceIndex = services.findIndex(s => s.id === serviceId);
-  if (serviceIndex !== -1) {
+  if (serviceIndex !== -1 && !services[serviceIndex].isComingSoon) {
     services[serviceIndex] = {
       ...services[serviceIndex],
-      logs: [...logs, ...services[serviceIndex].logs].slice(0, 100), // Mantener últimos 100 logs
+      logs: [...logs, ...services[serviceIndex].logs].slice(0, 100),
     };
   }
 }
@@ -218,7 +204,7 @@ export { services };
 export const getClientServices = (clientId: string): Service[] => {
   const client = clients.find(c => c.id === clientId);
   if (!client || !client.services) return [];
-  return services.filter(service => client.services?.includes(service.id));
+  return services.filter(service => client.services?.includes(service.id) && !service.isComingSoon);
 };
 
 // Función para obtener cliente por ID con datos completos
@@ -246,11 +232,14 @@ export const generateMetricsData = (): MetricDataPoint[] => {
     "Notas de Crédito": ["/api/notas/emitir", "/api/notas/anular", "/api/notas/estado"],
   };
   
+  // Solo generar métricas para servicios activos (no coming soon)
+  const activeServices = services.filter(s => !s.isComingSoon);
+  
   for (let i = 0; i < 90; i++) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     
-    for (const service of services) {
+    for (const service of activeServices) {
       const endpoints = serviceEndpoints[service.name] || ["/api/endpoint"];
       const endpoint = endpoints[Math.floor(Math.random() * endpoints.length)];
       const errorRate = service.errorPercentage / 100;
@@ -279,4 +268,10 @@ export const generateMetricsData = (): MetricDataPoint[] => {
   }
   
   return data;
+};
+
+// Función para verificar si un servicio está próximo
+export const isServiceComingSoon = (serviceId: string): boolean => {
+  const service = services.find(s => s.id === serviceId);
+  return service?.isComingSoon || false;
 };

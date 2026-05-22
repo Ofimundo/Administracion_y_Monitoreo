@@ -66,6 +66,14 @@ interface ClientDashboardProps {
   onClose?: () => void;
 }
 
+// Lista de servicios que están próximamente
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+
+// Función para verificar si un servicio está próximo
+const isServiceComingSoon = (serviceId: string): boolean => {
+  return COMING_SOON_SERVICES.includes(serviceId);
+};
+
 // Función para normalizar fecha
 const normalizeDate = (dateInput: any): Date => {
   if (!dateInput) return new Date();
@@ -127,12 +135,14 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     estado: "todos",
   });
 
-  // Cargar datos reales
+  const isOfimundo = clientId === "cl_ofimundo";
+
+  // Cargar datos reales solo para Ofimundo
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        if (clientId === "cl_ofimundo") {
+        if (isOfimundo) {
           const res = await fetch("/api/facturas/bitacora?estado=todos");
           const data = await res.json();
           
@@ -154,16 +164,19 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
             setAvailableTipos(["33", "34", "61"]);
           }
         } else {
+          // Para otros clientes, no hay datos
+          setAllData([]);
+          setFilteredData([]);
+          setAvailableTipos([]);
+        }
+      } catch (error) {
+        console.error("Error loading data:", error);
+        if (isOfimundo) {
           const sampleData = generateSampleData();
           setAllData(sampleData);
           setFilteredData(sampleData);
           setAvailableTipos(["33", "34", "61"]);
         }
-      } catch (error) {
-        const sampleData = generateSampleData();
-        setAllData(sampleData);
-        setFilteredData(sampleData);
-        setAvailableTipos(["33", "34", "61"]);
       } finally {
         setTimeout(() => {
           setLoading(false);
@@ -172,7 +185,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     };
     
     loadData();
-  }, [clientId]);
+  }, [clientId, isOfimundo]);
 
   const generateSampleData = () => {
     const data = [];
@@ -198,6 +211,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   };
 
   const applyFilters = () => {
+    if (!isOfimundo) return;
     let filtered = [...allData];
     
     if (filters.tipoDocumento !== "todos") {
@@ -261,6 +275,20 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   };
 
   const stats = useMemo(() => {
+    if (!isOfimundo) {
+      return {
+        totalTransactions: 0,
+        avgResponseTime: 0,
+        avgSatisfaction: 0,
+        approved: 0,
+        rejected: 0,
+        manual: 0,
+        pending: 0,
+        successRate: "0",
+        errorRate: 0,
+      };
+    }
+    
     const totalTransactions = filteredData.length;
     const approvedDocs = filteredData.filter((e: any) => e.estado === "Aprobado").length;
     const rejectedDocs = filteredData.filter((e: any) => e.estado === "Rechazado").length;
@@ -295,36 +323,42 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       successRate,
       errorRate,
     };
-  }, [filteredData]);
+  }, [filteredData, isOfimundo]);
 
   const chartData = useMemo(() => {
+    if (!isOfimundo) return [];
     return generateMonthlyData(filteredData);
-  }, [filteredData]);
+  }, [filteredData, isOfimundo]);
 
   const pieData = useMemo(() => {
+    if (!isOfimundo) return [];
     return [
       { name: "Aprobadas", value: stats.approved, color: "#10b981" },
       { name: "Rechazadas", value: stats.rejected, color: "#ef4444" },
       { name: "Manuales", value: stats.manual, color: "#f59e0b" },
       { name: "Pendientes", value: stats.pending, color: "#3b82f6" },
     ].filter(item => item.value > 0);
-  }, [stats.approved, stats.rejected, stats.manual, stats.pending]);
+  }, [stats.approved, stats.rejected, stats.manual, stats.pending, isOfimundo]);
 
   const client = useMemo(() => {
     return clients.find(c => c.id === clientId);
   }, [clientId]);
 
+  // Filtrar servicios activos (no próximos)
   const clientServices = useMemo(() => {
-    return client ? getClientServices(clientId) : [];
+    if (!client) return [];
+    const allServices = getClientServices(clientId);
+    return allServices.filter(service => !isServiceComingSoon(service.id));
   }, [client, clientId]);
 
   const activeFiltersCount = useMemo(() => {
+    if (!isOfimundo) return 0;
     let count = 0;
     if (filters.tipoDocumento !== "todos") count++;
     if (filters.estado !== "todos") count++;
     if (filters.fechaDesde || filters.fechaHasta) count++;
     return count;
-  }, [filters]);
+  }, [filters, isOfimundo]);
 
   const getSatisfactionColor = (score: number) => {
     if (score >= 80) return "#10b981";
@@ -363,14 +397,74 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       <div className="text-center py-8">
         <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-3" />
         <p className="text-muted-foreground">Cliente no encontrado</p>
-        
+        <Button onClick={handleClose} variant="outline" className="mt-4">
+          <X className="h-4 w-4 mr-2" />
+          Cerrar
+        </Button>
+      </div>
+    );
+  }
+
+  // Pantalla de "Próximamente" para clientes que no son Ofimundo
+  if (!isOfimundo) {
+    return (
+      <div className="space-y-5">
+        <div className="flex justify-end">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleClose}
+            className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors"
+          >
+            <X className="h-4 w-4" />
+            Cerrar
+          </Button>
+        </div>
+
+        <div className="text-center py-12">
+          <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-amber-100 flex items-center justify-center">
+            <Clock className="h-12 w-12 text-amber-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-foreground mb-3">
+            {client.name}
+          </h2>
+          <p className="text-muted-foreground text-lg mb-6">
+            Dashboard en desarrollo
+          </p>
+          <div className="max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-lg p-4 mb-8">
+            <p className="text-amber-700 text-sm">
+              🚀 El dashboard para este cliente se encuentra actualmente en desarrollo.
+              Próximamente podrás acceder a todas las métricas y estadísticas de monitoreo.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3 justify-center">
+            {client.rut && (
+              <Badge variant="outline" className="text-sm">
+                <Building className="h-3 w-3 mr-1" />
+                {client.rut}
+              </Badge>
+            )}
+            {client.email && (
+              <Badge variant="outline" className="text-sm">
+                <Mail className="h-3 w-3 mr-1" />
+                {client.email}
+              </Badge>
+            )}
+            {client.phone && (
+              <Badge variant="outline" className="text-sm">
+                <Phone className="h-3 w-3 mr-1" />
+                {client.phone}
+              </Badge>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
-      {/* Botón de cierre en la esquina superior derecha - CORREGIDO */}
+      {/* Botón de cierre */}
       <div className="flex justify-end">
         <Button 
           variant="ghost" 
@@ -378,7 +472,8 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
           onClick={handleClose}
           className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors"
         >
-          
+          <X className="h-4 w-4" />
+          Cerrar
         </Button>
       </div>
 
@@ -398,6 +493,9 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
                 stats.errorRate <= 10 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
               )}>
                 {stats.errorRate}% error técnico
+              </Badge>
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                📡 Datos en tiempo real
               </Badge>
             </div>
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -737,25 +835,32 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
 
         <TabsContent value="services" className="mt-4">
           <div className="grid grid-cols-1 gap-3">
-            {clientServices.map((service) => (
-              <Card key={service.id} className="border-l-3 border-l-emerald-500">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <Briefcase className="h-4 w-4 text-muted-foreground" />
-                        <h3 className="font-semibold text-base">{service.name}</h3>
-                        <StatusIndicator status="success" errorPercentage={0} size="sm" />
+            {clientServices.length > 0 ? (
+              clientServices.map((service) => (
+                <Card key={service.id} className="border-l-3 border-l-emerald-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <Briefcase className="h-4 w-4 text-muted-foreground" />
+                          <h3 className="font-semibold text-base">{service.name}</h3>
+                          <StatusIndicator status="success" errorPercentage={0} size="sm" />
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {service.description}
+                        </p>
                       </div>
-                      {/* DESCRIPCIÓN COMPLETA - SIN CORTAR */}
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {service.description}
-                      </p>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Clock className="h-8 w-8 mx-auto mb-3 text-gray-400" />
+                <p className="text-sm">No hay servicios activos para este cliente</p>
+                <p className="text-xs">Los servicios están en desarrollo y estarán disponibles próximamente</p>
+              </div>
+            )}
           </div>
         </TabsContent>
 

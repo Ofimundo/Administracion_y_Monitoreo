@@ -32,8 +32,13 @@ import {
   Search,
   X,
   Calendar as CalendarIcon,
+  Rocket,
+  Zap,
+  TrendingUp,
+  TrendingDown,
+  Activity,
 } from "lucide-react";
-import { format, subDays, isWithinInterval } from "date-fns";
+import { format, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
 
 interface TimelineEvent {
@@ -42,6 +47,7 @@ interface TimelineEvent {
   serviceId: string;
   log: LogEntry;
   service: Service;
+  isComingSoon?: boolean;
 }
 
 interface EventsTimelineProps {
@@ -58,56 +64,173 @@ interface Filters {
   };
 }
 
-// Valores por defecto - AHORA SIN FILTROS ACTIVOS
+// Lista de servicios que están próximamente
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+
+const isServiceComingSoon = (serviceId: string): boolean => COMING_SOON_SERVICES.includes(serviceId);
+const ACTIVE_SERVICE_ID = "facturas";
+
+// Colores por tipo de evento
+const EVENT_STYLES = {
+  success: {
+    bg: "bg-gradient-to-r from-emerald-50 to-transparent",
+    border: "border-l-emerald-500",
+    badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    icon: CheckCircle,
+    iconColor: "text-emerald-500",
+  },
+  error: {
+    bg: "bg-gradient-to-r from-red-50 to-transparent",
+    border: "border-l-red-500",
+    badge: "bg-red-100 text-red-700 border-red-200",
+    icon: XCircle,
+    iconColor: "text-red-500",
+  },
+  warning: {
+    bg: "bg-gradient-to-r from-amber-50 to-transparent",
+    border: "border-l-amber-500",
+    badge: "bg-amber-100 text-amber-700 border-amber-200",
+    icon: AlertTriangle,
+    iconColor: "text-amber-500",
+  },
+  info: {
+    bg: "bg-gradient-to-r from-blue-50 to-transparent",
+    border: "border-l-blue-500",
+    badge: "bg-blue-100 text-blue-700 border-blue-200",
+    icon: Info,
+    iconColor: "text-blue-500",
+  },
+  comingSoon: {
+    bg: "bg-gradient-to-r from-gray-50 to-transparent",
+    border: "border-l-gray-400",
+    badge: "bg-gray-100 text-gray-600 border-gray-200",
+    icon: Rocket,
+    iconColor: "text-gray-500",
+  },
+};
+
 const DEFAULT_FILTERS: Filters = {
   search: "",
   types: ["success", "error", "warning", "info"],
   serviceId: "all",
-  dateRange: { from: undefined, to: undefined }, // Sin rango de fechas por defecto
+  dateRange: { from: undefined, to: undefined },
 };
 
 export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [realLogs, setRealLogs] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Collect all logs from all services and sort by timestamp
-  const allEvents: TimelineEvent[] = useMemo(() => {
-    return services
-      .flatMap((service) =>
-        service.logs.map((log) => ({
-          id: `${service.id}-${log.id}`,
-          serviceName: service.name,
-          serviceId: service.id,
-          log,
-          service,
-        }))
-      )
-      .sort((a, b) => new Date(b.log.timestamp).getTime() - new Date(a.log.timestamp).getTime());
+  useEffect(() => {
+    const fetchRealLogs = async () => {
+      try {
+        const res = await fetch("/api/facturas/bitacora?estado=todos");
+        const data = await res.json();
+        
+        if (data.success && data.data) {
+          const getLogTypeFromEntry = (entry: any): LogEntry["type"] => {
+            const motivo = entry.motivo || "";
+            const erroresInfraestructura = [
+              "error de conexión", "timeout", "servidor no responde", "softland no disponible",
+              "sii no responde", "connection failed", "failed to connect", "could not connect",
+              "connection refused", "network error", "500", "503",
+              "no se pudo conectar", "softland error", "sii error", "error de red"
+            ];
+            
+            const esErrorInfraestructura = erroresInfraestructura.some(term => 
+              motivo.toLowerCase().includes(term.toLowerCase())
+            );
+            
+            if (esErrorInfraestructura) return "error";
+            
+            switch (entry.estado) {
+              case "Aprobado": return "success";
+              case "Rechazado": return "info";
+              case "Manual": return "info";
+              default: return "info";
+            }
+          };
+          
+          const mappedLogs: LogEntry[] = data.data.map((entry: any, index: number) => ({
+            id: entry.id_proceso ? `bitacora_${entry.id_proceso}` : `bitacora_${index}`,
+            message: entry.motivo || `Documento ${entry.estado} correctamente`,
+            details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
+            timestamp: entry.fecha_proceso,
+            type: getLogTypeFromEntry(entry),
+            estado: entry.estado,
+          }));
+          
+          setRealLogs(mappedLogs);
+        }
+        setLoading(false);
+      } catch (error) {
+        console.error("Error fetching logs:", error);
+        setLoading(false);
+      }
+    };
+    
+    fetchRealLogs();
   }, []);
 
-  // Aplicar filtros
+  const allEvents: TimelineEvent[] = useMemo(() => {
+    const events: TimelineEvent[] = [];
+    
+    for (const service of services) {
+      const comingSoon = isServiceComingSoon(service.id);
+      
+      if (service.id === ACTIVE_SERVICE_ID && realLogs.length > 0) {
+        realLogs.forEach((log) => {
+          events.push({
+            id: `${service.id}-${log.id}`,
+            serviceName: service.name,
+            serviceId: service.id,
+            log,
+            service,
+            isComingSoon: false,
+          });
+        });
+      } else if (comingSoon) {
+        events.push({
+          id: `${service.id}-welcome`,
+          serviceName: service.name,
+          serviceId: service.id,
+          log: {
+            id: "welcome",
+            message: "🚀 Servicio en fase de desarrollo",
+            details: "Próximamente estará disponible el monitoreo completo con todas las métricas en tiempo real.",
+            timestamp: new Date().toISOString(),
+            type: "info",
+          } as any,
+          service,
+          isComingSoon: true,
+        });
+      }
+    }
+    
+    return events.sort((a, b) => new Date(b.log.timestamp).getTime() - new Date(a.log.timestamp).getTime());
+  }, [services, realLogs]);
+
   const filteredEvents = useMemo(() => {
     let result = [...allEvents];
 
-    // Filtro de búsqueda
     if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
       result = result.filter(event =>
-        event.log.message.toLowerCase().includes(filters.search.toLowerCase()) ||
-        event.serviceName.toLowerCase().includes(filters.search.toLowerCase())
+        event.log.message.toLowerCase().includes(searchLower) ||
+        (event.log.details?.toLowerCase().includes(searchLower)) ||
+        event.serviceName.toLowerCase().includes(searchLower)
       );
     }
 
-    // Filtro de tipos de log
     if (filters.types.length > 0 && filters.types.length < 4) {
-      result = result.filter(event => filters.types.includes(event.log.type));
+      result = result.filter(event => !event.isComingSoon && filters.types.includes(event.log.type));
     }
 
-    // Filtro de servicio
     if (filters.serviceId !== "all") {
       result = result.filter(event => event.serviceId === filters.serviceId);
     }
 
-    // Filtro de rango de fechas - SOLO si ambos valores están definidos
     if (filters.dateRange.from && filters.dateRange.to) {
       result = result.filter(event => {
         const eventDate = new Date(event.log.timestamp);
@@ -121,294 +244,267 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     return result;
   }, [allEvents, filters]);
 
-  // Contar filtros activos - COMPARACIÓN CORRECTA
   const activeFiltersCount = useMemo(() => {
     let count = 0;
-    if (filters.search !== DEFAULT_FILTERS.search) count++;
-    if (filters.types.length !== DEFAULT_FILTERS.types.length) count++;
-    if (filters.serviceId !== DEFAULT_FILTERS.serviceId) count++;
-    // Solo contar si hay fechas seleccionadas
+    if (filters.search) count++;
+    if (filters.types.length !== 4) count++;
+    if (filters.serviceId !== "all") count++;
     if (filters.dateRange.from || filters.dateRange.to) count++;
     return count;
   }, [filters]);
 
-  // Limpiar filtros - Restablece a valores por defecto SIN filtros activos
-  const resetFilters = () => {
-    setFilters({
-      search: "",
-      types: ["success", "error", "warning", "info"],
-      serviceId: "all",
-      dateRange: { from: undefined, to: undefined },
-    });
-  };
-
-  // Toggle tipo de log
+  const resetFilters = () => setFilters(DEFAULT_FILTERS);
   const toggleType = (type: string) => {
     setFilters(prev => ({
       ...prev,
-      types: prev.types.includes(type)
-        ? prev.types.filter(t => t !== type)
-        : [...prev.types, type]
+      types: prev.types.includes(type) ? prev.types.filter(t => t !== type) : [...prev.types, type]
     }));
   };
 
-  const getTypeIcon = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success":
-        return <CheckCircle className="h-4 w-4 text-emerald-500" />;
-      case "warning":
-        return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-      case "error":
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <Info className="h-4 w-4 text-blue-500" />;
-    }
-  };
-
-  const getTypeColor = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success":
-        return "border-l-emerald-500 bg-emerald-50/50 hover:bg-emerald-50";
-      case "warning":
-        return "border-l-amber-500 bg-amber-50/50 hover:bg-amber-50";
-      case "error":
-        return "border-l-red-500 bg-red-50/50 hover:bg-red-50";
-      default:
-        return "border-l-blue-500 bg-blue-50/50 hover:bg-blue-50";
-    }
-  };
-
-  const getTypeBadge = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success":
-        return <span className="text-[10px] px-1.5 py-0 text-emerald-600 bg-emerald-100 rounded-full">Éxito</span>;
-      case "warning":
-        return <span className="text-[10px] px-1.5 py-0 text-amber-600 bg-amber-100 rounded-full">Alerta</span>;
-      case "error":
-        return <span className="text-[10px] px-1.5 py-0 text-red-600 bg-red-100 rounded-full">Error</span>;
-      default:
-        return <span className="text-[10px] px-1.5 py-0 text-blue-600 bg-blue-100 rounded-full">Info</span>;
-    }
-  };
-
-  const formatTime = (timestamp: string) => {
+  const formatRelativeTime = (timestamp: string) => {
     const date = new Date(timestamp);
-    const hours = date.getHours().toString().padStart(2, "0");
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    const day = date.getDate().toString().padStart(2, "0");
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    return `${day}/${month} ${hours}:${minutes}`;
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "Justo ahora";
+    if (diffMins < 60) return `Hace ${diffMins} min`;
+    if (diffHours < 24) return `Hace ${diffHours} h`;
+    if (diffDays === 1) return "Ayer";
+    if (diffDays < 7) return `Hace ${diffDays} días`;
+    return format(date, "dd/MM/yy");
   };
+
+  const getEventStyle = (event: TimelineEvent) => {
+    if (event.isComingSoon) return EVENT_STYLES.comingSoon;
+    return EVENT_STYLES[event.log.type as keyof typeof EVENT_STYLES] || EVENT_STYLES.info;
+  };
+
+  if (loading) {
+    return (
+      <Card className="h-full border-0 shadow-sm">
+        <CardContent className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-3"></div>
+            <p className="text-sm text-muted-foreground">Cargando eventos...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between mb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Clock className="h-5 w-5" />
-            Línea de Tiempo
-          </CardTitle>
+    <Card className="h-full border-0 shadow-sm overflow-hidden">
+      <CardHeader className="pb-2 border-b bg-white/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-emerald-100 rounded-lg">
+              <Activity className="h-4 w-4 text-emerald-600" />
+            </div>
+            <CardTitle className="text-base font-semibold">Línea de Tiempo</CardTitle>
+            <Badge variant="secondary" className="text-xs font-normal">
+              {filteredEvents.length} eventos
+            </Badge>
+          </div>
           <Button
-            variant={showFilters ? "default" : "outline"}
+            variant="ghost"
             size="sm"
             onClick={() => setShowFilters(!showFilters)}
-            className="h-7 text-xs"
+            className={cn("h-8 px-3 text-xs gap-1.5 transition-all", showFilters && "bg-muted")}
           >
-            <Filter className="mr-1 h-3 w-3" />
+            <Filter className="h-3.5 w-3.5" />
             Filtros
             {activeFiltersCount > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+              <Badge className="ml-1 h-5 px-1.5 text-[10px] bg-emerald-500">
                 {activeFiltersCount}
               </Badge>
             )}
           </Button>
         </div>
 
-        {/* Panel de filtros */}
         {showFilters && (
-          <div className="space-y-3 pt-2 border-t">
-            {/* Búsqueda */}
-            <div>
-              <Label className="text-xs font-medium mb-1 block">Buscar</Label>
-              <div className="relative">
-                <Search className="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por servicio o mensaje..."
-                  value={filters.search}
-                  onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                  className="pl-7 h-8 text-xs"
-                />
+          <div className="mt-3 pt-3 space-y-3 border-t">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar eventos..."
+                value={filters.search}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-medium mb-1.5 block">Servicio</Label>
+                <Select value={filters.serviceId} onValueChange={(value) => setFilters({ ...filters, serviceId: value })}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los servicios</SelectItem>
+                    {services.map(service => (
+                      <SelectItem key={service.id} value={service.id}>
+                        {service.name}
+                        {isServiceComingSoon(service.id) && " 🚀"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium mb-1.5 block">Rango de fechas</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal h-9 text-sm">
+                      <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                      {filters.dateRange.from ? (
+                        filters.dateRange.to ? (
+                          `${format(filters.dateRange.from, "dd/MM/yy")} - ${format(filters.dateRange.to, "dd/MM/yy")}`
+                        ) : (
+                          format(filters.dateRange.from, "dd/MM/yy")
+                        )
+                      ) : (
+                        "Todas las fechas"
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="range"
+                      selected={filters.dateRange}
+                      onSelect={(range) => setFilters({ ...filters, dateRange: range || { from: undefined, to: undefined } })}
+                      numberOfMonths={2}
+                      locale={es}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
-            {/* Filtro por servicio */}
             <div>
-              <Label className="text-xs font-medium mb-1 block">Servicio</Label>
-              <Select value={filters.serviceId} onValueChange={(value) => setFilters({ ...filters, serviceId: value })}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Todos los servicios" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">🌐 Todos los servicios</SelectItem>
-                  {services.map(service => (
-                    <SelectItem key={service.id} value={service.id}>
-                      {service.name} ({service.errorPercentage}% error)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Filtro por rango de fechas */}
-            <div>
-              <Label className="text-xs font-medium mb-1 block">Rango de fechas</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-left font-normal h-8 text-xs">
-                    <CalendarIcon className="mr-2 h-3 w-3" />
-                    {filters.dateRange.from ? (
-                      filters.dateRange.to ? (
-                        <>
-                          {format(filters.dateRange.from, "dd/MM/yy")} -{" "}
-                          {format(filters.dateRange.to, "dd/MM/yy")}
-                        </>
-                      ) : (
-                        format(filters.dateRange.from, "dd/MM/yy")
-                      )
-                    ) : (
-                      <span>Seleccionar fechas</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="range"
-                    selected={filters.dateRange}
-                    onSelect={(range) => setFilters({ ...filters, dateRange: range || { from: undefined, to: undefined } })}
-                    numberOfMonths={2}
-                    locale={es}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Filtro por tipo de evento */}
-            <div>
-              <Label className="text-xs font-medium mb-1 block">Tipo de evento</Label>
-              <div className="flex flex-wrap gap-2">
+              <Label className="text-xs font-medium mb-1.5 block">Tipo de evento</Label>
+              <div className="flex flex-wrap gap-1.5">
                 {[
-                  { value: "success", label: "Éxito", color: "bg-emerald-500" },
-                  { value: "error", label: "Error", color: "bg-red-500" },
-                  { value: "warning", label: "Alerta", color: "bg-amber-500" },
-                  { value: "info", label: "Info", color: "bg-blue-500" },
+                  { value: "success", label: "Éxito", emoji: "✅" },
+                  { value: "error", label: "Error", emoji: "❌" },
+                  { value: "warning", label: "Alerta", emoji: "⚠️" },
+                  { value: "info", label: "Info", emoji: "ℹ️" },
                 ].map(type => (
                   <Button
                     key={type.value}
                     variant={filters.types.includes(type.value) ? "default" : "outline"}
                     size="sm"
                     onClick={() => toggleType(type.value)}
-                    className="h-6 text-xs gap-1"
+                    className={cn(
+                      "h-7 text-xs gap-1.5 rounded-full px-3",
+                      filters.types.includes(type.value) && "bg-emerald-600 hover:bg-emerald-700"
+                    )}
                   >
-                    <div className={cn("w-2 h-2 rounded-full", type.color)} />
+                    <span>{type.emoji}</span>
                     {type.label}
                   </Button>
                 ))}
               </div>
             </div>
 
-            {/* Botón limpiar filtros */}
             {activeFiltersCount > 0 && (
               <div className="flex justify-end pt-1">
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  onClick={resetFilters} 
-                  className="h-7 text-xs"
-                >
+                <Button variant="ghost" size="sm" onClick={resetFilters} className="h-8 text-xs text-red-500 hover:text-red-600">
                   <X className="mr-1 h-3 w-3" />
-                  Limpiar todos los filtros ({activeFiltersCount})
+                  Limpiar filtros
                 </Button>
               </div>
             )}
           </div>
         )}
-
-        {/* Indicadores de filtros activos */}
-        {activeFiltersCount > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
-            {filters.search && (
-              <Badge variant="secondary" className="text-[10px] gap-1">
-                <Search className="h-2 w-2" />
-                {filters.search}
-              </Badge>
-            )}
-            {filters.serviceId !== "all" && (
-              <Badge variant="secondary" className="text-[10px]">
-                {services.find(s => s.id === filters.serviceId)?.name}
-              </Badge>
-            )}
-            {filters.types.length < 4 && (
-              <Badge variant="secondary" className="text-[10px]">
-                Tipo: {filters.types.map(t => t === "success" ? "Éxito" : t === "error" ? "Error" : t === "warning" ? "Alerta" : "Info").join(", ")}
-              </Badge>
-            )}
-            {(filters.dateRange.from || filters.dateRange.to) && (
-              <Badge variant="secondary" className="text-[10px]">
-                📅 {filters.dateRange.from && format(filters.dateRange.from, "dd/MM/yy")}
-                {filters.dateRange.from && filters.dateRange.to && " - "}
-                {filters.dateRange.to && format(filters.dateRange.to, "dd/MM/yy")}
-              </Badge>
-            )}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={resetFilters} 
-              className="h-5 text-[10px] px-2 ml-auto"
-            >
-              <X className="h-2 w-2 mr-1" />
-              Limpiar
-            </Button>
-          </div>
-        )}
       </CardHeader>
 
-      <CardContent className="max-h-[500px] overflow-y-auto">
-        <div className="space-y-2">
+      <CardContent className="p-0 max-h-[520px] overflow-y-auto">
+        <div className="divide-y divide-gray-100">
           {filteredEvents.length > 0 ? (
-            filteredEvents.map((event) => (
-              <button
-                key={event.id}
-                onClick={() => onSelectService && onSelectService(event.service)}
-                className={cn(
-                  "w-full text-left rounded-lg border-l-4 p-3 transition-all hover:shadow-md cursor-pointer",
-                  getTypeColor(event.log.type)
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  {getTypeIcon(event.log.type)}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-medium px-1.5 py-0 bg-gray-100 rounded-full">
-                        {event.serviceName}
-                      </span>
-                      {getTypeBadge(event.log.type)}
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatTime(event.log.timestamp)}
-                      </span>
+            filteredEvents.map((event, index) => {
+              const style = getEventStyle(event);
+              const Icon = style.icon;
+              const isLast = index === filteredEvents.length - 1;
+              
+              return (
+                <div
+                  key={event.id}
+                  className={cn(
+                    "group relative transition-all duration-200 hover:bg-muted/20",
+                    !event.isComingSoon && "cursor-pointer",
+                    !isLast && "border-b border-gray-100"
+                  )}
+                  onClick={() => !event.isComingSoon && onSelectService && onSelectService(event.service)}
+                >
+                  {/* Indicador de tiempo */}
+                  <div className="absolute left-6 top-4 bottom-0 w-px bg-gradient-to-b from-gray-200 to-transparent" />
+                  
+                  <div className="relative flex gap-3 p-4 pl-6">
+                    {/* Icono con círculo de fondo */}
+                    <div className={cn(
+                      "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all group-hover:scale-105",
+                      event.isComingSoon ? "bg-gray-100" : "bg-white shadow-sm border"
+                    )}>
+                      <Icon className={cn("h-4 w-4", style.iconColor)} />
                     </div>
-                    <p className="mt-1 text-xs text-foreground line-clamp-2">
-                      {event.log.message}
-                    </p>
+
+                    {/* Contenido */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">
+                            {event.serviceName}
+                          </span>
+                          <Badge className={cn("text-[10px] px-2 py-0 font-normal border", style.badge)}>
+                            {event.isComingSoon ? "En desarrollo" : event.log.type === "success" ? "Aprobado" : event.log.type === "error" ? "Error" : event.log.type === "warning" ? "Alerta" : "Información"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
+                          <Clock className="h-3 w-3" />
+                          {formatRelativeTime(event.log.timestamp)}
+                        </div>
+                      </div>
+
+                      <p className="text-sm text-foreground/90 leading-relaxed">
+                        {event.log.message}
+                      </p>
+                      
+                      {(event.log as any).details && (
+                        <p className="text-xs text-muted-foreground mt-1.5 font-mono">
+                          {(event.log as any).details}
+                        </p>
+                      )}
+
+                      {!event.isComingSoon && (
+                        <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="text-[10px] text-emerald-600 flex items-center gap-1">
+                            <Zap className="h-2.5 w-2.5" />
+                            Haz clic para ver detalles del servicio
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </button>
-            ))
+              );
+            })
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <p className="text-sm">No hay eventos que coincidan con los filtros</p>
-              <Button variant="link" size="sm" onClick={resetFilters} className="mt-2">
-                Limpiar filtros
-              </Button>
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                <Clock className="h-8 w-8 text-gray-400" />
+              </div>
+              <p className="text-sm font-medium text-muted-foreground">No hay eventos</p>
+              <p className="text-xs text-muted-foreground mt-1">No se encontraron eventos con los filtros seleccionados</p>
+              {activeFiltersCount > 0 && (
+                <Button variant="link" size="sm" onClick={resetFilters} className="mt-3">
+                  Limpiar filtros
+                </Button>
+              )}
             </div>
           )}
         </div>

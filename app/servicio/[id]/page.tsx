@@ -64,6 +64,14 @@ interface LogFilters {
   };
 }
 
+// Lista de servicios que están próximamente
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+
+// Función para verificar si un servicio está próximo
+const isServiceComingSoon = (serviceId: string): boolean => {
+  return COMING_SOON_SERVICES.includes(serviceId);
+};
+
 // Función para determinar el tipo de log según el estado y motivo - SOLO INFRAESTRUCTURA es ERROR
 const getLogTypeFromEntry = (entry: any): LogEntry["type"] => {
   const estado = entry.estado;
@@ -139,6 +147,7 @@ export default function ServiceDetailPage() {
   });
 
   const serviceStatic = services.find((s) => s.id === params.id);
+  const comingSoon = serviceStatic ? isServiceComingSoon(serviceStatic.id) : false;
   
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
   const [liveClients, setLiveClients] = useState<Client[]>([]);
@@ -317,14 +326,14 @@ export default function ServiceDetailPage() {
         setServiceDescription(serviceStatic.description);
         setServiceClients(serviceStatic.clients);
       }
-    } else if (serviceStatic) {
+    } else if (serviceStatic && !comingSoon) {
       setServiceName(serviceStatic.name);
       setServiceDescription(serviceStatic.description);
       setServiceErrorPercentage(0);
       setServiceStatus("success");
       setServiceClients(serviceStatic.clients);
     }
-  }, [params.id, serviceStatic]);
+  }, [params.id, serviceStatic, comingSoon]);
 
   const applyFilters = () => {
     setAppliedFilters({ ...tempFilters });
@@ -437,6 +446,50 @@ export default function ServiceDetailPage() {
     const date = new Date(timestamp);
     return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
   };
+
+  // Mostrar pantalla de "Próximamente" para servicios en desarrollo
+  if (comingSoon && params.id !== "facturas") {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-4 py-8">
+          <Button variant="ghost" onClick={() => router.push("/")} className="mb-6">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver a la lista de servicios
+          </Button>
+          
+          <Card className="text-center py-16">
+            <CardContent className="pt-8">
+              <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-amber-100 flex items-center justify-center">
+                <Clock className="h-12 w-12 text-amber-500" />
+              </div>
+              <h1 className="text-3xl font-bold text-foreground mb-3">
+                {serviceStatic?.name || "Servicio"}
+              </h1>
+              <p className="text-muted-foreground text-lg mb-6">
+                Este servicio se encuentra actualmente en desarrollo
+              </p>
+              <div className="max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-lg p-4 mb-8">
+                <p className="text-amber-700 text-sm">
+                  🚀 Próximamente estará disponible el monitoreo completo de este servicio.
+                  Te invitamos a revisar más adelante para acceder a todas las métricas y estadísticas.
+                </p>
+              </div>
+              <Button onClick={() => router.push("/")} className="bg-emerald-600 hover:bg-emerald-700">
+                <LayoutDashboard className="mr-2 h-4 w-4" />
+                Volver al Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+        <footer className="border-t border-border mt-8 py-4">
+          <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+            Sistema de Administración y Monitoreo de Servicios &copy; 2026
+          </div>
+        </footer>
+      </div>
+    );
+  }
 
   if (!serviceStatic && params.id !== "facturas") {
     return (

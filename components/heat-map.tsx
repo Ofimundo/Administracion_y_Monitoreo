@@ -57,6 +57,7 @@ import {
   List,
   Map,
   LayoutDashboard,
+  Clock,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -71,6 +72,14 @@ const ERRORES_INFRAESTRUCTURA = [
   "connection refused", "network error", "500", "503", "502", "504",
   "no se pudo conectar", "softland error", "sii error", "error de red"
 ];
+
+// Lista de servicios que están próximamente
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+
+// Función para verificar si un servicio está próximo
+const isServiceComingSoon = (serviceId: string): boolean => {
+  return COMING_SOON_SERVICES.includes(serviceId);
+};
 
 // Función para obtener datos reales de facturas
 const fetchRealData = async () => {
@@ -122,6 +131,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         const realData = await fetchRealData();
         
         const updatedServices = importedServices.map(service => {
+          // Solo facturas obtiene datos reales
           if (service.id === "facturas" && realData) {
             return {
               ...service,
@@ -137,6 +147,22 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 errorRate: realData.errorPercentage,
                 responseTime: 320,
                 uptime: 99.99,
+              }
+            };
+          }
+          // Servicios próximos tienen 0% error y status success
+          if (isServiceComingSoon(service.id)) {
+            return {
+              ...service,
+              errorPercentage: 0,
+              status: "success" as any,
+              description: "🚀 Próximamente - " + service.description,
+              clients: [],
+              metrics: {
+                totalRequests: 0,
+                errorRate: 0,
+                responseTime: 0,
+                uptime: 0,
               }
             };
           }
@@ -208,7 +234,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     return "bg-gray-500";
   };
 
-  const getStatusBadge = (status: string, percentage: number) => {
+  const getStatusBadge = (status: string, percentage: number, isComingSoon: boolean = false) => {
+    if (isComingSoon) {
+      return <Badge className="bg-gray-500 text-white gap-1 border-0"><Clock className="h-3 w-3" /> Próximamente</Badge>;
+    }
     if (status === "success") {
       return <Badge className="bg-emerald-500 text-white gap-1 border-0"><CheckCircle className="h-3 w-3" /> {percentage}% error técnico</Badge>;
     }
@@ -221,14 +250,16 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     return <Badge variant="outline">{percentage}% error</Badge>;
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: string, isComingSoon: boolean = false) => {
+    if (isComingSoon) return <Clock className="h-5 w-5 text-gray-500" />;
     if (status === "success") return <CheckCircle className="h-5 w-5 text-emerald-500" />;
     if (status === "warning") return <AlertTriangle className="h-5 w-5 text-amber-500" />;
     if (status === "error") return <AlertTriangle className="h-5 w-5 text-red-500" />;
     return null;
   };
 
-  const getHeatColor = (errorPercentage: number) => {
+  const getHeatColor = (errorPercentage: number, isComingSoon: boolean = false) => {
+    if (isComingSoon) return "bg-gray-100 dark:bg-gray-900/30 border-gray-200";
     if (errorPercentage === 0) return "bg-emerald-100 dark:bg-emerald-950/30 border-emerald-200";
     if (errorPercentage <= 5) return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100";
     if (errorPercentage <= 10) return "bg-amber-50 dark:bg-amber-950/20 border-amber-100";
@@ -237,7 +268,8 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     return "bg-red-100 dark:bg-red-950/30 border-red-200";
   };
 
-  const getMapColor = (errorPercentage: number) => {
+  const getMapColor = (errorPercentage: number, isComingSoon: boolean = false) => {
+    if (isComingSoon) return "bg-gray-400 hover:bg-gray-500";
     if (errorPercentage === 0) return "bg-emerald-500 hover:bg-emerald-600";
     if (errorPercentage <= 5) return "bg-emerald-400 hover:bg-emerald-500";
     if (errorPercentage <= 10) return "bg-amber-400 hover:bg-amber-500";
@@ -263,68 +295,57 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     }
   };
 
-  // Redirigir al monitoreo completo del servicio - RUTA CORREGIDA
+  // Redirigir al monitoreo completo del servicio - solo para facturas
   const handleGoToFullMonitoring = (serviceId: string) => {
     setShowDetailModal(false);
-    // Usar la misma ruta que en services-list.tsx: "/servicio/" (con acento en la i? revisemos)
-    // En services-list.tsx usas: router.push(`/servicio/${service.id}`)
     router.push(`/servicio/${serviceId}`);
   };
 
   // Exportación mejorada con más detalles
   const handleExportToExcel = () => {
-    const exportData = filteredServices.map(service => ({
-      "ID Servicio": service.id,
-      "Servicio": service.name,
-      "Descripción": service.description,
-      "Estado": service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico",
-      "Porcentaje Error Técnico": `${service.errorPercentage}%`,
-      "Nivel de Error": service.errorPercentage === 0 ? "Sin errores" : 
+    const exportData = filteredServices.map(service => {
+      const comingSoon = isServiceComingSoon(service.id);
+      return {
+        "ID Servicio": service.id,
+        "Servicio": service.name,
+        "Descripción": comingSoon ? "🚀 Próximamente - En desarrollo" : service.description,
+        "Estado": comingSoon ? "Próximamente" : (service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"),
+        "Porcentaje Error Técnico": comingSoon ? "N/A" : `${service.errorPercentage}%`,
+        "Nivel de Error": comingSoon ? "N/A" : (service.errorPercentage === 0 ? "Sin errores" : 
                         service.errorPercentage <= 5 ? "Bajo" :
                         service.errorPercentage <= 10 ? "Medio" :
-                        service.errorPercentage <= 20 ? "Alto" : "Crítico",
-      "Cantidad Clientes": service.clients.length,
-      "Lista Clientes": service.clients.map(c => c.name).join(", "),
-      "RUTs Clientes": service.clients.map(c => c.rut || "N/A").join(", "),
-      "Emails Clientes": service.clients.map(c => c.email || "N/A").join(", "),
-      "Total Request (mes)": service.metrics?.totalRequests || "N/A",
-      "Tiempo Respuesta (ms)": service.metrics?.responseTime || "N/A",
-      "Uptime (%)": service.metrics?.uptime || "N/A",
-      "Fecha Exportación": format(new Date(), "dd/MM/yyyy HH:mm:ss"),
-    }));
+                        service.errorPercentage <= 20 ? "Alto" : "Crítico"),
+        "Cantidad Clientes": comingSoon ? 0 : service.clients.length,
+        "Lista Clientes": comingSoon ? "" : service.clients.map(c => c.name).join(", "),
+        "RUTs Clientes": comingSoon ? "" : service.clients.map(c => c.rut || "N/A").join(", "),
+        "Emails Clientes": comingSoon ? "" : service.clients.map(c => c.email || "N/A").join(", "),
+        "Total Request (mes)": comingSoon ? "N/A" : (service.metrics?.totalRequests || "N/A"),
+        "Tiempo Respuesta (ms)": comingSoon ? "N/A" : (service.metrics?.responseTime || "N/A"),
+        "Uptime (%)": comingSoon ? "N/A" : (service.metrics?.uptime || "N/A"),
+        "Fecha Exportación": format(new Date(), "dd/MM/yyyy HH:mm:ss"),
+      };
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // Ajustar ancho de columnas
     const colWidths = [
-      { wch: 15 }, // ID Servicio
-      { wch: 25 }, // Servicio
-      { wch: 40 }, // Descripción
-      { wch: 12 }, // Estado
-      { wch: 18 }, // Porcentaje Error Técnico
-      { wch: 12 }, // Nivel de Error
-      { wch: 15 }, // Cantidad Clientes
-      { wch: 50 }, // Lista Clientes
-      { wch: 30 }, // RUTs Clientes
-      { wch: 35 }, // Emails Clientes
-      { wch: 18 }, // Total Request
-      { wch: 18 }, // Tiempo Respuesta
-      { wch: 15 }, // Uptime
-      { wch: 22 }, // Fecha Exportación
+      { wch: 15 }, { wch: 25 }, { wch: 40 }, { wch: 12 }, { wch: 18 },
+      { wch: 12 }, { wch: 15 }, { wch: 50 }, { wch: 30 }, { wch: 35 },
+      { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 22 },
     ];
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Mapa de Calor - Detallado");
     
-    // Hoja adicional con resumen estadístico
     const summaryData = [
       { "Métrica": "Total Servicios", "Valor": filteredServices.length },
       { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
-      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success").length },
+      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id)).length },
       { "Métrica": "Servicios Atención", "Valor": filteredServices.filter(s => s.status === "warning").length },
       { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => s.status === "error").length },
-      { "Métrica": "Tasa Error Promedio", "Valor": `${(filteredServices.reduce((acc, s) => acc + s.errorPercentage, 0) / filteredServices.length).toFixed(2)}%` },
+      { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isServiceComingSoon(s.id)).length },
+      { "Métrica": "Tasa Error Promedio", "Valor": `${(filteredServices.filter(s => !isServiceComingSoon(s.id)).reduce((acc, s) => acc + s.errorPercentage, 0) / (filteredServices.filter(s => !isServiceComingSoon(s.id)).length || 1)).toFixed(2)}%` },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
       { "Métrica": "Filtros Aplicados", "Valor": `Estado: ${selectedStatus}, Tipo: ${selectedType}, Búsqueda: ${searchTerm || "Ninguna"}` },
     ];
@@ -348,9 +369,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const avgErrorRate = filteredServices.length > 0 
     ? filteredServices.reduce((acc, service) => acc + service.errorPercentage, 0) / filteredServices.length 
     : 0;
-  const healthyServices = filteredServices.filter(s => s.status === "success").length;
+  const healthyServices = filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id)).length;
   const warningServices = filteredServices.filter(s => s.status === "warning").length;
   const errorServices = filteredServices.filter(s => s.status === "error").length;
+  const comingSoonCount = filteredServices.filter(s => isServiceComingSoon(s.id)).length;
 
   if (loading) {
     return (
@@ -366,7 +388,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   return (
     <div className="space-y-6">
       {/* Tarjetas de estadísticas mejoradas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -431,6 +453,18 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 <p className="text-2xl font-bold text-red-500">{errorServices}</p>
               </div>
               <AlertTriangle className="h-8 w-8 text-red-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Próximamente</p>
+                <p className="text-2xl font-bold text-gray-500">{comingSoonCount}</p>
+              </div>
+              <Clock className="h-8 w-8 text-gray-500" />
             </div>
           </CardContent>
         </Card>
@@ -609,77 +643,100 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             </div>
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredServices.map((service) => (
-                <div
-                  key={service.id}
-                  className={cn(
-                    "rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer",
-                    getHeatColor(service.errorPercentage)
-                  )}
-                  onClick={() => handleViewDetail(service)}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(service.status)}
-                      <h3 className="font-semibold text-base">{service.name}</h3>
-                    </div>
-                    {getStatusBadge(service.status, service.errorPercentage)}
-                  </div>
-                  
-                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                    {service.description}
-                  </p>
-                  
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Clientes</p>
-                      <p className="text-lg font-bold">{service.clients.length}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Error técnico</p>
-                      <p className={cn(
-                        "text-lg font-bold",
-                        service.errorPercentage === 0 ? "text-emerald-600" :
-                        service.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
-                      )}>
-                        {service.errorPercentage}%
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Estado</p>
-                      <p className="text-sm font-medium">
-                        {service.status === "success" ? "✅ Excelente" :
-                         service.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span>Salud del servicio</span>
-                      <span>{100 - service.errorPercentage}%</span>
-                    </div>
-                    <Progress value={100 - service.errorPercentage} className="h-2" />
-                  </div>
-
-                  {service.clients.length > 0 && (
-                    <div className="mt-3 pt-2 border-t">
-                      <div className="flex flex-wrap gap-1">
-                        {service.clients.slice(0, 3).map((client) => (
-                          <Badge key={client.id} variant="outline" className="text-[10px]">
-                            {client.name.length > 20 ? client.name.substring(0, 20) + "..." : client.name}
-                          </Badge>
-                        ))}
-                        {service.clients.length > 3 && (
-                          <Badge variant="outline" className="text-[10px]">
-                            +{service.clients.length - 3} más
+              {filteredServices.map((service) => {
+                const comingSoon = isServiceComingSoon(service.id);
+                return (
+                  <div
+                    key={service.id}
+                    className={cn(
+                      "rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer",
+                      getHeatColor(service.errorPercentage, comingSoon)
+                    )}
+                    onClick={() => handleViewDetail(service)}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        {getStatusIcon(service.status, comingSoon)}
+                        <h3 className="font-semibold text-base">{service.name}</h3>
+                        {comingSoon && (
+                          <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600">
+                            🚀 Próximamente
                           </Badge>
                         )}
                       </div>
+                      {getStatusBadge(service.status, service.errorPercentage, comingSoon)}
                     </div>
-                  )}
-                </div>
-              ))}
+                    
+                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                      {comingSoon ? "🚀 Servicio en desarrollo. Próximamente estará disponible el monitoreo completo." : service.description}
+                    </p>
+                    
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">Clientes</p>
+                        <p className="text-lg font-bold">{comingSoon ? 0 : service.clients.length}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">Error técnico</p>
+                        <p className={cn(
+                          "text-lg font-bold",
+                          comingSoon ? "text-gray-500" :
+                          service.errorPercentage === 0 ? "text-emerald-600" :
+                          service.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
+                        )}>
+                          {comingSoon ? "N/A" : `${service.errorPercentage}%`}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">Estado</p>
+                        <p className="text-sm font-medium">
+                          {comingSoon ? "⏳ Próximamente" :
+                            service.status === "success" ? "✅ Excelente" :
+                            service.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!comingSoon && (
+                      <>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span>Salud del servicio</span>
+                            <span>{100 - service.errorPercentage}%</span>
+                          </div>
+                          <Progress value={100 - service.errorPercentage} className="h-2" />
+                        </div>
+
+                        {service.clients.length > 0 && (
+                          <div className="mt-3 pt-2 border-t">
+                            <div className="flex flex-wrap gap-1">
+                              {service.clients.slice(0, 3).map((client) => (
+                                <Badge key={client.id} variant="outline" className="text-[10px]">
+                                  {client.name.length > 20 ? client.name.substring(0, 20) + "..." : client.name}
+                                </Badge>
+                              ))}
+                              {service.clients.length > 3 && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  +{service.clients.length - 3} más
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {comingSoon && (
+                      <div className="mt-3 pt-2 border-t text-center">
+                        <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200">
+                          <Clock className="h-3 w-3 mr-1" />
+                          En desarrollo
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : viewMode === "list" ? (
             <div className="overflow-x-auto">
@@ -695,41 +752,50 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredServices.map((service) => (
-                    <TableRow 
-                      key={service.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => handleViewDetail(service)}
-                    >
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(service.status)}
-                          {service.name}
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-[300px] truncate text-muted-foreground">
-                        {service.description}
-                      </TableCell>
-                      <TableCell className="text-center">{service.clients.length}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="outline" className={cn(
-                          service.errorPercentage === 0 ? "text-emerald-600 border-emerald-200" :
-                          service.errorPercentage <= 10 ? "text-amber-600 border-amber-200" : "text-red-600 border-red-200"
-                        )}>
-                          {service.errorPercentage}%
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {getStatusBadge(service.status, service.errorPercentage)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleViewDetail(service); }}>
-                          <Eye className="h-4 w-4 mr-1" />
-                          Ver
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredServices.map((service) => {
+                    const comingSoon = isServiceComingSoon(service.id);
+                    return (
+                      <TableRow 
+                        key={service.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleViewDetail(service)}
+                      >
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {getStatusIcon(service.status, comingSoon)}
+                            {service.name}
+                            {comingSoon && (
+                              <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600">
+                                🚀 Próximamente
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="max-w-[300px] truncate text-muted-foreground">
+                          {comingSoon ? "🚀 Servicio en desarrollo" : service.description}
+                        </TableCell>
+                        <TableCell className="text-center">{comingSoon ? 0 : service.clients.length}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className={cn(
+                            comingSoon ? "text-gray-500 border-gray-200" :
+                            service.errorPercentage === 0 ? "text-emerald-600 border-emerald-200" :
+                            service.errorPercentage <= 10 ? "text-amber-600 border-amber-200" : "text-red-600 border-red-200"
+                          )}>
+                            {comingSoon ? "N/A" : `${service.errorPercentage}%`}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {getStatusBadge(service.status, service.errorPercentage, comingSoon)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleViewDetail(service); }}>
+                            <Eye className="h-4 w-4 mr-1" />
+                            Ver
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -757,42 +823,51 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                     <div className="w-3 h-3 rounded-full bg-red-500"></div>
                     <span>Crítico (&gt;40%)</span>
                   </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded-full bg-gray-500"></div>
+                    <span>Próximamente</span>
+                  </div>
                 </div>
               </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {filteredServices.map((service) => (
-                  <TooltipProvider key={service.id}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() => handleViewDetail(service)}
-                          className={cn(
-                            "p-3 rounded-lg text-center transition-all transform hover:scale-105 cursor-pointer",
-                            "text-white font-medium shadow-md hover:shadow-lg",
-                            getMapColor(service.errorPercentage)
-                          )}
-                        >
-                          <p className="text-sm font-semibold truncate">
-                            {service.name}
-                          </p>
-                          <p className="text-xs opacity-90 mt-1">
-                            {service.errorPercentage}% error
-                          </p>
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs">
-                        <div className="space-y-1">
-                          <p className="font-semibold">{service.name}</p>
-                          <p className="text-xs text-muted-foreground">{service.description}</p>
-                          <p className="text-xs">📊 Error: {service.errorPercentage}%</p>
-                          <p className="text-xs">👥 Clientes: {service.clients.length}</p>
-                          <p className="text-xs">✅ Estado: {service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"}</p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ))}
+                {filteredServices.map((service) => {
+                  const comingSoon = isServiceComingSoon(service.id);
+                  return (
+                    <TooltipProvider key={service.id}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => handleViewDetail(service)}
+                            className={cn(
+                              "p-3 rounded-lg text-center transition-all transform hover:scale-105 cursor-pointer",
+                              "text-white font-medium shadow-md hover:shadow-lg",
+                              getMapColor(service.errorPercentage, comingSoon)
+                            )}
+                          >
+                            <p className="text-sm font-semibold truncate">
+                              {service.name}
+                            </p>
+                            <p className="text-xs opacity-90 mt-1">
+                              {comingSoon ? "Próximamente" : `${service.errorPercentage}% error`}
+                            </p>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <div className="space-y-1">
+                            <p className="font-semibold">{service.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {comingSoon ? "Servicio en desarrollo - Próximamente disponible" : service.description}
+                            </p>
+                            <p className="text-xs">📊 {comingSoon ? "Estado: En desarrollo" : `Error: ${service.errorPercentage}%`}</p>
+                            <p className="text-xs">👥 Clientes: {comingSoon ? 0 : service.clients.length}</p>
+                            <p className="text-xs">✅ Estado: {comingSoon ? "⏳ Próximamente" : (service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico")}</p>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })}
               </div>
 
               <div className="mt-6 pt-4 border-t text-center text-xs text-muted-foreground">
@@ -811,83 +886,109 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             <>
               <DialogHeader>
                 <div className="flex items-center gap-3">
-                  {getStatusIcon(selectedServiceDetail.status)}
+                  {getStatusIcon(selectedServiceDetail.status, isServiceComingSoon(selectedServiceDetail.id))}
                   <DialogTitle className="text-xl">{selectedServiceDetail.name}</DialogTitle>
-                  {getStatusBadge(selectedServiceDetail.status, selectedServiceDetail.errorPercentage)}
+                  {getStatusBadge(selectedServiceDetail.status, selectedServiceDetail.errorPercentage, isServiceComingSoon(selectedServiceDetail.id))}
                 </div>
               </DialogHeader>
               
               <div className="space-y-6">
                 <div>
                   <h4 className="text-sm font-semibold mb-2">Descripción</h4>
-                  <p className="text-sm text-muted-foreground">{selectedServiceDetail.description}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isServiceComingSoon(selectedServiceDetail.id) 
+                      ? "🚀 Servicio en desarrollo. Próximamente estará disponible el monitoreo completo con todas las métricas y estadísticas."
+                      : selectedServiceDetail.description}
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Clientes</p>
-                    <p className="text-2xl font-bold">{selectedServiceDetail.clients.length}</p>
+                    <p className="text-2xl font-bold">
+                      {isServiceComingSoon(selectedServiceDetail.id) ? 0 : selectedServiceDetail.clients.length}
+                    </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Error Técnico</p>
                     <p className={cn(
                       "text-2xl font-bold",
+                      isServiceComingSoon(selectedServiceDetail.id) ? "text-gray-500" :
                       selectedServiceDetail.errorPercentage === 0 ? "text-emerald-600" :
                       selectedServiceDetail.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
                     )}>
-                      {selectedServiceDetail.errorPercentage}%
+                      {isServiceComingSoon(selectedServiceDetail.id) ? "N/A" : `${selectedServiceDetail.errorPercentage}%`}
                     </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Estado</p>
                     <p className="text-lg font-medium">
-                      {selectedServiceDetail.status === "success" ? "✅ Excelente" :
-                       selectedServiceDetail.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
+                      {isServiceComingSoon(selectedServiceDetail.id) ? "⏳ Próximamente" :
+                        selectedServiceDetail.status === "success" ? "✅ Excelente" :
+                        selectedServiceDetail.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
                     </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Uptime</p>
-                    <p className="text-2xl font-bold text-emerald-600">99.9%</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {isServiceComingSoon(selectedServiceDetail.id) ? "N/A" : "99.9%"}
+                    </p>
                   </div>
                 </div>
 
-                <div>
-                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Clientes ({selectedServiceDetail.clients.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedServiceDetail.clients.map((client) => (
-                      <div key={client.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                        <div>
-                          <p className="font-medium">{client.name}</p>
-                          <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                            {client.rut && <span>RUT: {client.rut}</span>}
-                            {client.email && <span>Email: {client.email}</span>}
+                {!isServiceComingSoon(selectedServiceDetail.id) && (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Clientes ({selectedServiceDetail.clients.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {selectedServiceDetail.clients.map((client) => (
+                          <div key={client.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                            <div>
+                              <p className="font-medium">{client.name}</p>
+                              <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                                {client.rut && <span>RUT: {client.rut}</span>}
+                                {client.email && <span>Email: {client.email}</span>}
+                              </div>
+                            </div>
+                            <Badge variant="outline" className={cn(
+                              client.errorPercentage === 0 ? "text-emerald-600" :
+                              client.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
+                            )}>
+                              {client.errorPercentage}% error
+                            </Badge>
                           </div>
-                        </div>
-                        <Badge variant="outline" className={cn(
-                          client.errorPercentage === 0 ? "text-emerald-600" :
-                          client.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
-                        )}>
-                          {client.errorPercentage}% error
-                        </Badge>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                  </>
+                )}
+
+                {isServiceComingSoon(selectedServiceDetail.id) && (
+                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-200 text-center">
+                    <Clock className="h-8 w-8 text-amber-500 mx-auto mb-2" />
+                    <p className="text-amber-700 text-sm">
+                      Este servicio se encuentra actualmente en desarrollo.
+                      Próximamente podrás acceder a todas las métricas y estadísticas de monitoreo.
+                    </p>
                   </div>
-                </div>
+                )}
 
                 <div className="flex justify-end gap-2 pt-4 border-t">
                   <Button variant="outline" onClick={() => setShowDetailModal(false)}>
                     Cerrar
                   </Button>
-                  <Button 
-                    onClick={() => handleGoToFullMonitoring(selectedServiceDetail.id)}
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                  >
-                    <LayoutDashboard className="h-4 w-4 mr-1" />
-                    Ver monitoreo completo
-                  </Button>
+                  {!isServiceComingSoon(selectedServiceDetail.id) && (
+                    <Button 
+                      onClick={() => handleGoToFullMonitoring(selectedServiceDetail.id)}
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <LayoutDashboard className="h-4 w-4 mr-1" />
+                      Ver monitoreo completo
+                    </Button>
+                  )}
                 </div>
               </div>
             </>

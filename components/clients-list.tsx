@@ -38,6 +38,7 @@ import {
   LayoutDashboard,
   Eye,
   ArrowRight,
+  Clock,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -45,6 +46,9 @@ import * as XLSX from "xlsx";
 interface ClientsListProps {
   onSelectClient?: (client: Client) => void;
 }
+
+// Solo el cliente activo (Ofimundo S.A.)
+const ACTIVE_CLIENT_ID = "cl_ofimundo";
 
 export function ClientsList({ onSelectClient }: ClientsListProps) {
   const router = useRouter();
@@ -56,7 +60,12 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const [realData, setRealData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Cargar datos reales de facturas para sincronizar
+  // Filtrar solo el cliente activo
+  const activeClients = useMemo(() => {
+    return clients.filter(client => client.id === ACTIVE_CLIENT_ID);
+  }, []);
+
+  // Cargar datos reales de facturas para sincronizar solo con Ofimundo
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -91,7 +100,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
 
   // Obtener cliente con datos reales sincronizados
   const getClientWithRealData = (client: Client): Client => {
-    if (client.id === "cl_ofimundo" && realData) {
+    if (client.id === ACTIVE_CLIENT_ID && realData) {
       const status = realData.errorRate > 0 ? (realData.errorRate > 40 ? "error" : "warning") : "success";
       return {
         ...client,
@@ -103,7 +112,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   };
 
   const filteredClients = useMemo(() => {
-    let result = [...clients];
+    let result = [...activeClients];
     
     if (search) {
       result = result.filter(client =>
@@ -121,7 +130,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     }
     
     return result;
-  }, [clients, search, statusFilter, realData]);
+  }, [activeClients, search, statusFilter, realData]);
 
   const activeFiltersCount = (search ? 1 : 0) + (statusFilter !== "all" ? 1 : 0);
 
@@ -296,18 +305,19 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
               </Badge>
             )}
             <span className="text-sm text-muted-foreground ml-auto">
-              Mostrando {filteredClients.length} de {clients.length} clientes
+              Mostrando {filteredClients.length} de {activeClients.length} clientes
             </span>
           </div>
         )}
 
-        {/* Lista de clientes */}
+        {/* Lista de clientes - Solo Ofimundo */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredClients.map((client) => {
             const clientWithData = getClientWithRealData(client);
             const clientServices = getClientServices(client.id);
             const successRate = 100 - clientWithData.errorPercentage;
             const firstService = clientServices[0];
+            const isOfimundo = client.id === ACTIVE_CLIENT_ID;
             
             return (
               <Card
@@ -345,6 +355,13 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {/* Badge indicador para Ofimundo */}
+                  {isOfimundo && (
+                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                      📡 Datos en tiempo real
+                    </Badge>
+                  )}
+
                   <div className="space-y-1">
                     {client.email && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -363,7 +380,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                   <div className="grid grid-cols-2 gap-2 pt-2">
                     <div className="bg-muted/50 rounded-lg p-2 text-center">
                       <p className="text-2xl font-bold">{clientServices.length}</p>
-                      <p className="text-xs text-muted-foreground">Servicios</p>
+                      <p className="text-xs text-muted-foreground">Servicios Activos</p>
                     </div>
                     <div className="bg-muted/50 rounded-lg p-2 text-center">
                       <p className={cn(
@@ -394,6 +411,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                     </div>
                   </div>
 
+                  {/* Servicios contratados activos */}
                   {clientServices.length > 0 && (
                     <div className="flex flex-wrap gap-1 pt-1">
                       {clientServices.slice(0, 3).map(service => (
@@ -457,7 +475,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
         )}
       </div>
 
-      {/* Modal del Dashboard del Cliente - CON VisuallyHidden para accesibilidad */}
+      {/* Modal del Dashboard del Cliente */}
       <Dialog open={showDashboard} onOpenChange={setShowDashboard}>
         <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] overflow-y-auto p-0">
           <VisuallyHidden>
