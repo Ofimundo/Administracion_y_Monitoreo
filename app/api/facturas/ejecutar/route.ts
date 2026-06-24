@@ -1,8 +1,8 @@
-// app/api/facturas/ejecutar/route.ts (ACTUALIZADO)
+// app/api/facturas/ejecutar/route.ts (CORREGIDO)
 import { NextResponse } from "next/server";
 import { isSimulationMode, executeProcedure } from "@/lib/db-client";
 import { PA_EJECUCION_ACEPTACION_RECHAZO } from "@/lib/db-simulation";
-import { marcarInicioProceso, marcarFinProceso, debeDetenerseProceso } from "./detener/route";
+import { marcarInicioProceso, marcarFinProceso, debeDetenerseProceso, procesoActivo } from "../detener/route";
 
 // Cache para almacenar el log de la última ejecución en memoria del servidor
 let ultimaEjecucion: any = null;
@@ -121,6 +121,3 @@ export async function POST() {
     );
   }
 }
-
-// Importar la variable desde el módulo detener
-import { procesoActivo } from "./detener/route";

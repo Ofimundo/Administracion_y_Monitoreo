@@ -1035,7 +1035,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                     </p>
                   </div>
                 )}
-
                 <div className="flex justify-end gap-2 pt-4 border-t">
                   <Button variant="outline" onClick={() => setShowDetailModal(false)}>
                     Cerrar
