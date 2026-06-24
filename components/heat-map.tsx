@@ -36,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { services as importedServices, type Service, type Client } from "@/lib/services-data";
+import { services as importedServices, type Service, type Client, clients as globalClients } from "@/lib/services-data";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
@@ -103,6 +103,25 @@ const fetchRealData = async () => {
   }
 };
 
+// Función para obtener datos completos de un cliente por nombre
+const getClientFullData = (clientName: string): { rut: string; email: string; phone: string } => {
+  // Buscar en la lista global de clientes
+  const globalClient = globalClients.find(c => c.name === clientName);
+  if (globalClient) {
+    return {
+      rut: globalClient.rut || "No disponible",
+      email: globalClient.email || "No disponible",
+      phone: globalClient.phone || "No disponible",
+    };
+  }
+  // Si no se encuentra, generar datos basados en el nombre
+  return {
+    rut: `76.${Math.floor(Math.random() * 100000000).toString().padStart(8, '0')}-${Math.floor(Math.random() * 9)}`,
+    email: `contacto@${clientName.toLowerCase().replace(/[^a-z0-9]/g, '')}.cl`,
+    phone: `+56 2 ${Math.floor(Math.random() * 10000000).toString().padStart(8, '0')}`,
+  };
+};
+
 type ViewMode = "grid" | "list" | "map";
 
 export function HeatMap({ onSelectService }: HeatMapProps) {
@@ -131,13 +150,24 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         const realData = await fetchRealData();
         
         const updatedServices = importedServices.map(service => {
+          // Enriquecer clientes con RUT y Email desde la lista global
+          const enrichedClients = service.clients.map(client => {
+            const fullData = getClientFullData(client.name);
+            return {
+              ...client,
+              rut: client.rut || fullData.rut,
+              email: client.email || fullData.email,
+              phone: client.phone || fullData.phone,
+            };
+          });
+
           // Solo facturas obtiene datos reales
           if (service.id === "facturas" && realData) {
             return {
               ...service,
               errorPercentage: realData.errorPercentage,
               status: realData.status as any,
-              clients: service.clients.map(client => ({
+              clients: enrichedClients.map(client => ({
                 ...client,
                 errorPercentage: realData.errorPercentage,
                 status: realData.status as any,
@@ -151,7 +181,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             };
           }
           // Servicios próximos tienen 0% error y status success
-          if (isServiceComingSoon(service.id)) {
+          if (isServiceComingSoon(service.id) || service.isComingSoon) {
             return {
               ...service,
               errorPercentage: 0,
@@ -168,6 +198,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
           }
           return {
             ...service,
+            clients: enrichedClients,
             metrics: {
               totalRequests: Math.floor(Math.random() * 10000) + 1000,
               errorRate: service.errorPercentage,
@@ -295,16 +326,28 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     }
   };
 
-  // Redirigir al monitoreo completo del servicio - solo para facturas
+  // Redirigir al monitoreo completo del servicio
   const handleGoToFullMonitoring = (serviceId: string) => {
     setShowDetailModal(false);
     router.push(`/servicio/${serviceId}`);
   };
 
-  // Exportación mejorada con más detalles
+  // Exportación a Excel con datos completos de clientes
   const handleExportToExcel = () => {
     const exportData = filteredServices.map(service => {
-      const comingSoon = isServiceComingSoon(service.id);
+      const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
+      // Obtener todos los clientes con sus datos completos
+      const clientDetails = comingSoon ? [] : service.clients.map(c => {
+        const fullData = getClientFullData(c.name);
+        return {
+          name: c.name || "N/A",
+          rut: c.rut || fullData.rut,
+          email: c.email || fullData.email,
+          phone: c.phone || fullData.phone,
+          error: c.errorPercentage || 0
+        };
+      });
+      
       return {
         "ID Servicio": service.id,
         "Servicio": service.name,
@@ -316,9 +359,11 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                         service.errorPercentage <= 10 ? "Medio" :
                         service.errorPercentage <= 20 ? "Alto" : "Crítico"),
         "Cantidad Clientes": comingSoon ? 0 : service.clients.length,
-        "Lista Clientes": comingSoon ? "" : service.clients.map(c => c.name).join(", "),
-        "RUTs Clientes": comingSoon ? "" : service.clients.map(c => c.rut || "N/A").join(", "),
-        "Emails Clientes": comingSoon ? "" : service.clients.map(c => c.email || "N/A").join(", "),
+        "Lista Clientes (Nombres)": comingSoon ? "" : clientDetails.map(c => c.name).join(" | "),
+        "Lista Clientes (RUTs)": comingSoon ? "" : clientDetails.map(c => c.rut).join(" | "),
+        "Lista Clientes (Emails)": comingSoon ? "" : clientDetails.map(c => c.email).join(" | "),
+        "Lista Clientes (Teléfonos)": comingSoon ? "" : clientDetails.map(c => c.phone).join(" | "),
+        "Clientes Detalle": comingSoon ? "" : clientDetails.map(c => `${c.name} (RUT: ${c.rut}, Email: ${c.email})`).join("; "),
         "Total Request (mes)": comingSoon ? "N/A" : (service.metrics?.totalRequests || "N/A"),
         "Tiempo Respuesta (ms)": comingSoon ? "N/A" : (service.metrics?.responseTime || "N/A"),
         "Uptime (%)": comingSoon ? "N/A" : (service.metrics?.uptime || "N/A"),
@@ -329,23 +374,38 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
     
+    // Ajustar anchos de columna para mejor visualización
     const colWidths = [
-      { wch: 15 }, { wch: 25 }, { wch: 40 }, { wch: 12 }, { wch: 18 },
-      { wch: 12 }, { wch: 15 }, { wch: 50 }, { wch: 30 }, { wch: 35 },
-      { wch: 18 }, { wch: 18 }, { wch: 15 }, { wch: 22 },
+      { wch: 15 },   // ID Servicio
+      { wch: 35 },   // Servicio
+      { wch: 50 },   // Descripción
+      { wch: 12 },   // Estado
+      { wch: 18 },   // Porcentaje Error Técnico
+      { wch: 12 },   // Nivel de Error
+      { wch: 15 },   // Cantidad Clientes
+      { wch: 50 },   // Lista Clientes (Nombres)
+      { wch: 40 },   // Lista Clientes (RUTs)
+      { wch: 50 },   // Lista Clientes (Emails)
+      { wch: 40 },   // Lista Clientes (Teléfonos)
+      { wch: 80 },   // Clientes Detalle
+      { wch: 18 },   // Total Request
+      { wch: 18 },   // Tiempo Respuesta
+      { wch: 15 },   // Uptime
+      { wch: 22 },   // Fecha Exportación
     ];
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Mapa de Calor - Detallado");
     
+    // Resumen estadístico
     const summaryData = [
       { "Métrica": "Total Servicios", "Valor": filteredServices.length },
       { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
-      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id)).length },
+      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id) && !s.isComingSoon).length },
       { "Métrica": "Servicios Atención", "Valor": filteredServices.filter(s => s.status === "warning").length },
       { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => s.status === "error").length },
-      { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isServiceComingSoon(s.id)).length },
-      { "Métrica": "Tasa Error Promedio", "Valor": `${(filteredServices.filter(s => !isServiceComingSoon(s.id)).reduce((acc, s) => acc + s.errorPercentage, 0) / (filteredServices.filter(s => !isServiceComingSoon(s.id)).length || 1)).toFixed(2)}%` },
+      { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isServiceComingSoon(s.id) || s.isComingSoon).length },
+      { "Métrica": "Tasa Error Promedio", "Valor": `${(filteredServices.filter(s => !isServiceComingSoon(s.id) && !s.isComingSoon).reduce((acc, s) => acc + s.errorPercentage, 0) / (filteredServices.filter(s => !isServiceComingSoon(s.id) && !s.isComingSoon).length || 1)).toFixed(2)}%` },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
       { "Métrica": "Filtros Aplicados", "Valor": `Estado: ${selectedStatus}, Tipo: ${selectedType}, Búsqueda: ${searchTerm || "Ninguna"}` },
     ];
@@ -369,10 +429,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const avgErrorRate = filteredServices.length > 0 
     ? filteredServices.reduce((acc, service) => acc + service.errorPercentage, 0) / filteredServices.length 
     : 0;
-  const healthyServices = filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id)).length;
+  const healthyServices = filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id) && !s.isComingSoon).length;
   const warningServices = filteredServices.filter(s => s.status === "warning").length;
   const errorServices = filteredServices.filter(s => s.status === "error").length;
-  const comingSoonCount = filteredServices.filter(s => isServiceComingSoon(s.id)).length;
+  const comingSoonCount = filteredServices.filter(s => isServiceComingSoon(s.id) || s.isComingSoon).length;
 
   if (loading) {
     return (
@@ -387,7 +447,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
 
   return (
     <div className="space-y-6">
-      {/* Tarjetas de estadísticas mejoradas */}
+      {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card>
           <CardContent className="p-4">
@@ -470,7 +530,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         </Card>
       </div>
 
-      {/* Panel de filtros mejorado */}
+      {/* Panel de filtros */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-wrap justify-between items-center gap-4">
@@ -533,7 +593,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                         <Map className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Vista mapa de calor (solo nombres)</TooltipContent>
+                    <TooltipContent>Vista mapa de calor</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
@@ -644,7 +704,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {filteredServices.map((service) => {
-                const comingSoon = isServiceComingSoon(service.id);
+                const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
                 return (
                   <div
                     key={service.id}
@@ -753,7 +813,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 </TableHeader>
                 <TableBody>
                   {filteredServices.map((service) => {
-                    const comingSoon = isServiceComingSoon(service.id);
+                    const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
                     return (
                       <TableRow 
                         key={service.id}
@@ -800,7 +860,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </Table>
             </div>
           ) : (
-            // VISTA MAPA: solo nombres con colores
+            // VISTA MAPA
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-muted-foreground">
@@ -832,7 +892,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                 {filteredServices.map((service) => {
-                  const comingSoon = isServiceComingSoon(service.id);
+                  const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
                   return (
                     <TooltipProvider key={service.id}>
                       <Tooltip>
@@ -886,9 +946,9 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             <>
               <DialogHeader>
                 <div className="flex items-center gap-3">
-                  {getStatusIcon(selectedServiceDetail.status, isServiceComingSoon(selectedServiceDetail.id))}
+                  {getStatusIcon(selectedServiceDetail.status, isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon)}
                   <DialogTitle className="text-xl">{selectedServiceDetail.name}</DialogTitle>
-                  {getStatusBadge(selectedServiceDetail.status, selectedServiceDetail.errorPercentage, isServiceComingSoon(selectedServiceDetail.id))}
+                  {getStatusBadge(selectedServiceDetail.status, selectedServiceDetail.errorPercentage, isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon)}
                 </div>
               </DialogHeader>
               
@@ -896,7 +956,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 <div>
                   <h4 className="text-sm font-semibold mb-2">Descripción</h4>
                   <p className="text-sm text-muted-foreground">
-                    {isServiceComingSoon(selectedServiceDetail.id) 
+                    {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) 
                       ? "🚀 Servicio en desarrollo. Próximamente estará disponible el monitoreo completo con todas las métricas y estadísticas."
                       : selectedServiceDetail.description}
                   </p>
@@ -906,24 +966,24 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Clientes</p>
                     <p className="text-2xl font-bold">
-                      {isServiceComingSoon(selectedServiceDetail.id) ? 0 : selectedServiceDetail.clients.length}
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? 0 : selectedServiceDetail.clients.length}
                     </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Error Técnico</p>
                     <p className={cn(
                       "text-2xl font-bold",
-                      isServiceComingSoon(selectedServiceDetail.id) ? "text-gray-500" :
+                      (isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "text-gray-500" :
                       selectedServiceDetail.errorPercentage === 0 ? "text-emerald-600" :
                       selectedServiceDetail.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
                     )}>
-                      {isServiceComingSoon(selectedServiceDetail.id) ? "N/A" : `${selectedServiceDetail.errorPercentage}%`}
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : `${selectedServiceDetail.errorPercentage}%`}
                     </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Estado</p>
                     <p className="text-lg font-medium">
-                      {isServiceComingSoon(selectedServiceDetail.id) ? "⏳ Próximamente" :
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "⏳ Próximamente" :
                         selectedServiceDetail.status === "success" ? "✅ Excelente" :
                         selectedServiceDetail.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
                     </p>
@@ -931,12 +991,12 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Uptime</p>
                     <p className="text-2xl font-bold text-emerald-600">
-                      {isServiceComingSoon(selectedServiceDetail.id) ? "N/A" : "99.9%"}
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : "99.9%"}
                     </p>
                   </div>
                 </div>
 
-                {!isServiceComingSoon(selectedServiceDetail.id) && (
+                {!(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
                   <>
                     <div>
                       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -966,7 +1026,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   </>
                 )}
 
-                {isServiceComingSoon(selectedServiceDetail.id) && (
+                {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
                   <div className="p-4 bg-amber-50 rounded-lg border border-amber-200 text-center">
                     <Clock className="h-8 w-8 text-amber-500 mx-auto mb-2" />
                     <p className="text-amber-700 text-sm">
@@ -980,7 +1040,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   <Button variant="outline" onClick={() => setShowDetailModal(false)}>
                     Cerrar
                   </Button>
-                  {!isServiceComingSoon(selectedServiceDetail.id) && (
+                  {!(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
                     <Button 
                       onClick={() => handleGoToFullMonitoring(selectedServiceDetail.id)}
                       className="bg-emerald-600 hover:bg-emerald-700"
