@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -20,6 +21,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { clients, getClientServices, type Client, type Service } from "@/lib/services-data";
@@ -39,6 +41,8 @@ import {
   Eye,
   ArrowRight,
   Clock,
+  FileSpreadsheet,
+  Download,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -50,6 +54,18 @@ interface ClientsListProps {
 // Solo el cliente activo (Ofimundo S.A.)
 const ACTIVE_CLIENT_ID = "cl_ofimundo";
 
+// Definición de campos disponibles para exportación
+const EXPORT_FIELDS = [
+  { id: "cliente", label: "Cliente", default: true },
+  { id: "rut", label: "RUT", default: true },
+  { id: "email", label: "Email", default: true },
+  { id: "telefono", label: "Teléfono", default: false },
+  { id: "errorPorcentaje", label: "Porcentaje de Error", default: true },
+  { id: "estado", label: "Estado", default: true },
+  { id: "serviciosContratados", label: "Servicios Contratados", default: true },
+  { id: "listaServicios", label: "Lista Servicios", default: false },
+];
+
 export function ClientsList({ onSelectClient }: ClientsListProps) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -59,6 +75,12 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const [showDashboard, setShowDashboard] = useState(false);
   const [realData, setRealData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Modal de exportación
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>(
+    EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
+  );
 
   // Filtrar solo el cliente activo
   const activeClients = useMemo(() => {
@@ -139,41 +161,89 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     setStatusFilter("all");
   };
 
-  const exportToExcel = () => {
-    const excelData = filteredClients.map(client => {
+  // Abrir modal de exportación
+  const handleOpenExportModal = () => {
+    setShowExportModal(true);
+  };
+
+  // Cerrar modal de exportación
+  const handleCloseExportModal = () => {
+    setShowExportModal(false);
+  };
+
+  // Toggle selección de un campo individual
+  const handleToggleField = (fieldId: string) => {
+    setSelectedFields(prev => {
+      if (prev.includes(fieldId)) {
+        return prev.filter(id => id !== fieldId);
+      } else {
+        return [...prev, fieldId];
+      }
+    });
+  };
+
+  // Seleccionar/Deseleccionar todos los campos
+  const handleSelectAllFields = () => {
+    if (selectedFields.length === EXPORT_FIELDS.length) {
+      setSelectedFields([]);
+    } else {
+      setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+    }
+  };
+
+  // Exportar a Excel con campos seleccionados
+  const handleExportToExcel = () => {
+    if (selectedFields.length === 0) {
+      alert("Por favor selecciona al menos un campo para exportar.");
+      return;
+    }
+
+    const fieldMap: Record<string, (client: any) => any> = {
+      cliente: (c) => c.name,
+      rut: (c) => c.rut || "-",
+      email: (c) => c.email || "-",
+      telefono: (c) => c.phone || "-",
+      errorPorcentaje: (c) => `${c.errorPercentage}%`,
+      estado: (c) => c.status === "success" ? "Excelente" : c.status === "warning" ? "Atención" : "Crítico",
+      serviciosContratados: (c) => getClientServices(c.id).length,
+      listaServicios: (c) => getClientServices(c.id).map(s => s.name).join(", "),
+    };
+
+    const fieldLabels: Record<string, string> = {};
+    EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
+
+    const exportData = filteredClients.map(client => {
       const clientWithData = getClientWithRealData(client);
-      const clientServices = getClientServices(client.id);
-      return {
-        "Cliente": client.name,
-        "RUT": client.rut || "-",
-        "Email": client.email || "-",
-        "Teléfono": client.phone || "-",
-        "Porcentaje de Error": `${clientWithData.errorPercentage}%`,
-        "Estado": clientWithData.status === "success" ? "Excelente" : clientWithData.status === "warning" ? "Atención" : "Crítico",
-        "Servicios Contratados": clientServices.length,
-        "Lista Servicios": clientServices.map(s => s.name).join(", "),
-      };
+      const row: Record<string, any> = {};
+      selectedFields.forEach(fieldId => {
+        const label = fieldLabels[fieldId] || fieldId;
+        row[label] = fieldMap[fieldId](clientWithData);
+      });
+      return row;
     });
 
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(excelData);
+    const ws = XLSX.utils.json_to_sheet(exportData);
     
-    const colWidths = [
-      { wch: 30 },
-      { wch: 15 },
-      { wch: 30 },
-      { wch: 15 },
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 15 },
-      { wch: 50 },
-    ];
+    const colWidths = selectedFields.map(() => ({ wch: 30 }));
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Clientes");
     
-    const fileName = `clientes_${format(new Date(), "yyyy-MM-dd_HH-mm")}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    // Resumen estadístico
+    const summaryData = [
+      { "Métrica": "Total Clientes", "Valor": filteredClients.length },
+      { "Métrica": "Clientes Excelentes", "Valor": filteredClients.filter(c => getClientWithRealData(c).status === "success").length },
+      { "Métrica": "Clientes en Atención", "Valor": filteredClients.filter(c => getClientWithRealData(c).status === "warning").length },
+      { "Métrica": "Clientes Críticos", "Valor": filteredClients.filter(c => getClientWithRealData(c).status === "error").length },
+      { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+    
+    XLSX.writeFile(wb, `clientes_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+    
+    setShowExportModal(false);
   };
 
   const handleGoToServiceMonitoring = (serviceId: string, serviceName: string) => {
@@ -231,14 +301,8 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
             )}
           </div>
 
-          <Button variant="outline" size="sm" onClick={exportToExcel}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-              <polyline points="10 9 9 9 8 9" />
-            </svg>
+          <Button variant="outline" size="sm" onClick={handleOpenExportModal}>
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
             Exportar a Excel
           </Button>
         </div>
@@ -494,6 +558,71 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
               }}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Exportación con selección de campos */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              Seleccionar Campos para Exportar
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedFields.length === EXPORT_FIELDS.length}
+                  onCheckedChange={handleSelectAllFields}
+                  id="select-all"
+                />
+                <Label htmlFor="select-all" className="font-semibold cursor-pointer">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedFields.length} de {EXPORT_FIELDS.length} campos seleccionados
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {EXPORT_FIELDS.map((field) => (
+                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedFields.includes(field.id)}
+                    onCheckedChange={() => handleToggleField(field.id)}
+                    id={`field-${field.id}`}
+                  />
+                  <Label htmlFor={`field-${field.id}`} className="text-sm cursor-pointer">
+                    {field.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            {selectedFields.length === 0 && (
+              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
+                ⚠️ Debes seleccionar al menos un campo para exportar.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseExportModal}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleExportToExcel} 
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={selectedFields.length === 0 || filteredClients.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFields.length} campos
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

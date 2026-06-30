@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es" class="bg-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Estado del Servicio Ahora — Dashboard Ejecutivo-Operativo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased">
+
+  <!-- Header -->
+  <header class="bg-[#1e2a52] text-white px-6 py-3 flex items-center justify-between shadow">
+    <div class="flex items-center gap-3">
+      <div class="h-9 w-9 rounded-md bg-white/10 flex items-center justify-center text-lg font-bold">●</div>
+      <div>
+        <h1 class="text-base font-semibold leading-tight">Estado del Servicio Ahora</h1>
+        <p class="text-xs text-blue-200">Mesa de Servicio · Dashboard Ejecutivo-Operativo</p>
+      </div>
+    </div>
+    <div class="text-xs text-blue-100 flex items-center gap-2">
+      <span>↻ Última actualización</span>
+      <span class="font-semibold text-white">10:27</span>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-4 md:p-6">
+
+    <p class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase mb-3">Indicadores Clave de Rendimiento</p>
+
+    <!-- KPI Cards -->
+    <section class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-5">
+      <!-- Card template -->
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Tickets</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">38</p>
+        <p class="text-[11px] text-slate-400 mt-1">Activos hoy</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">% Abandono</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">7%</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 85%</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">TMA</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">0:25</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 120%</p>
+        <p class="text-[10px] text-slate-400">Tiempo Medio Atención</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">FCR Telefónica</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">37%</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 110%</p>
+        <p class="text-[10px] text-slate-400">Resolución en 1er contacto</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">TMR Santiago</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">3:45</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 98%</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">TMR Regiones</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">7:25</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 90%</p>
+      </div>
+
+      <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">TMS Santiago</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1">5:25</p>
+        <p class="text-[11px] text-emerald-600 mt-1">✓ Cumpl. 90%</p>
+      </div>
+    </section>
+
+    <!-- Second row: Vistas / Alertas / CSAT -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+
+      <!-- Vistas por Ticket -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+        <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Vistas por Ticket</p>
+        <p class="text-4xl font-bold text-slate-800 mt-3">1.2</p>
+        <p class="text-[11px] text-slate-400 mt-1">Promedio Mes en curso</p>
+        <div class="mt-4 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <div class="h-full w-1/3 bg-blue-600 rounded-full"></div>
+        </div>
+      </div>
+
+      <!-- Alertas Críticas -->
+      <div class="bg-rose-50 rounded-lg border border-rose-200 p-4 shadow-sm">
+        <p class="text-[11px] font-semibold text-rose-500 uppercase tracking-wide">Alertas Críticas</p>
+        <ul class="mt-3 space-y-3 text-sm">
+          <li class="flex items-center justify-between">
+            <span class="flex items-center gap-2 text-slate-700"><span class="text-rose-500">●</span> SLA en riesgo</span>
+            <span class="font-bold text-slate-800">8</span>
+          </li>
+          <li class="flex items-center justify-between">
+            <span class="flex items-center gap-2 text-slate-700"><span class="text-amber-500">●</span> Tickets prioritarios</span>
+            <span class="font-bold text-slate-800">8</span>
+          </li>
+          <li class="flex items-center justify-between">
+            <span class="flex items-center gap-2 text-slate-700"><span class="text-rose-500">●</span> Equipos detenidos</span>
+            <span class="font-bold text-slate-800">1</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- CSAT -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+        <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">CSAT · Evaluación del Servicio</p>
+        <p class="text-4xl font-bold text-slate-800 mt-3">6.5 <span class="text-base font-medium text-slate-400">/ 7.0</span></p>
+        <p class="text-[11px] text-slate-400 mt-1">Promedio Mes en curso</p>
+        <div class="mt-4 h-2 rounded-full bg-slate-100 overflow-hidden">
+          <div class="h-full bg-amber-400 rounded-full" style="width:93%"></div>
+        </div>
+        <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+          <span>Meta: 7.0</span>
+          <span>7.0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Third row: Casos Prioritarios / Acciones -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+      <!-- Casos Prioritarios Top 5 -->
+      <div class="lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <h2 class="text-sm font-semibold text-slate-700">Casos Prioritarios Top 5</h2>
+          <span class="text-[11px] text-slate-400">Ordenado por criticidad</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-[10px] uppercase text-slate-400 tracking-wide border-b border-slate-100">
+                <th class="text-left font-semibold px-4 py-2">Cliente</th>
+                <th class="text-left font-semibold px-2 py-2">Seg.</th>
+                <th class="text-left font-semibold px-2 py-2">Caso</th>
+                <th class="text-left font-semibold px-2 py-2">Ticket</th>
+                <th class="text-left font-semibold px-2 py-2">Ciudad</th>
+                <th class="text-left font-semibold px-2 py-2">CSM</th>
+                <th class="text-left font-semibold px-2 py-2">Técnico</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+              <tr class="hover:bg-slate-50">
+                <td class="px-4 py-2.5 font-medium text-slate-700">Cliente A</td>
+                <td class="px-2 py-2.5"><span class="text-[10px] font-semibold bg-slate-100 text-slate-500 rounded px-1.5 py-0.5">XS</span></td>
+                <td class="px-2 py-2.5"><span class="text-rose-500">●</span> Equipo Crítico</td>
+                <td class="px-2 py-2.5 text-slate-500">12553654</td>
+                <td class="px-2 py-2.5 text-slate-500">Stgo</td>
+                <td class="px-2 py-2.5 text-slate-500">Lucy</td>
+                <td class="px-2 py-2.5 text-blue-600 font-medium">Pedro</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-4 py-2.5 font-medium text-slate-700">Cliente B</td>
+                <td class="px-2 py-2.5"><span class="text-[10px] font-semibold bg-amber-100 text-amber-600 rounded px-1.5 py-0.5">XL</span></td>
+                <td class="px-2 py-2.5"><span class="text-rose-500">●</span> Equipo Detenido</td>
+                <td class="px-2 py-2.5 text-slate-500">12553533</td>
+                <td class="px-2 py-2.5 text-slate-500">Stgo</td>
+                <td class="px-2 py-2.5 text-slate-500">Daniela</td>
+                <td class="px-2 py-2.5 text-blue-600 font-medium">Juan</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-4 py-2.5 font-medium text-slate-700">Cliente C</td>
+                <td class="px-2 py-2.5"><span class="text-[10px] font-semibold bg-amber-100 text-amber-600 rounded px-1.5 py-0.5">XXL</span></td>
+                <td class="px-2 py-2.5"><span class="text-amber-500">●</span> SLA 50%</td>
+                <td class="px-2 py-2.5 text-slate-500">12553256</td>
+                <td class="px-2 py-2.5 text-slate-500">Coquimbo</td>
+                <td class="px-2 py-2.5 text-slate-500">Carlos</td>
+                <td class="px-2 py-2.5 text-blue-600 font-medium">Diego</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-4 py-2.5 font-medium text-slate-700">Cliente D</td>
+                <td class="px-2 py-2.5"><span class="text-[10px] font-semibold bg-slate-100 text-slate-500 rounded px-1.5 py-0.5">M</span></td>
+                <td class="px-2 py-2.5"><span class="text-amber-500">●</span> Renovación</td>
+                <td class="px-2 py-2.5 text-slate-500">12553243</td>
+                <td class="px-2 py-2.5 text-slate-500">La Serena</td>
+                <td class="px-2 py-2.5 text-slate-500">Lucy</td>
+                <td class="px-2 py-2.5 text-slate-500">ASP</td>
+              </tr>
+              <tr class="hover:bg-slate-50">
+                <td class="px-4 py-2.5 font-medium text-slate-700">Cliente E</td>
+                <td class="px-2 py-2.5"><span class="text-[10px] font-semibold bg-amber-100 text-amber-600 rounded px-1.5 py-0.5">XXL</span></td>
+                <td class="px-2 py-2.5"><span class="text-emerald-500">●</span> NPS Bajo</td>
+                <td class="px-2 py-2.5 text-slate-500">12553256</td>
+                <td class="px-2 py-2.5 text-slate-500">Puerto Montt</td>
+                <td class="px-2 py-2.5 text-slate-500">María</td>
+                <td class="px-2 py-2.5 text-slate-500">ASP</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Acciones Sugeridas -->
+      <div class="bg-white rounded-lg border border-slate-200 shadow-sm flex flex-col">
+        <div class="bg-[#1e2a52] text-white px-4 py-3 rounded-t-lg flex items-center justify-between">
+          <h2 class="text-sm font-semibold">✦ Acciones Sugeridas</h2>
+          <span class="text-[10px] text-blue-200">IA · Reglas</span>
+        </div>
+        <div class="p-3 space-y-2 flex-1">
+          <button class="w-full flex items-center justify-between border border-slate-200 rounded-md px-3 py-2.5 text-left hover:bg-slate-50">
+            <span><span class="text-rose-500 mr-1">○</span> <span class="text-sm font-medium text-slate-700">Reasignar Ticket</span><br><span class="text-[11px] text-slate-400 ml-4">Cliente A</span></span>
+            <span class="text-slate-400">›</span>
+          </button>
+          <button class="w-full flex items-center justify-between border border-rose-200 bg-rose-50 rounded-md px-3 py-2.5 text-left hover:bg-rose-100">
+            <span><span class="text-rose-500 mr-1">○</span> <span class="text-sm font-medium text-slate-700">Escalar Ticket</span><br><span class="text-[11px] text-slate-400 ml-4">Cliente B</span></span>
+            <span class="text-slate-400">›</span>
+          </button>
+          <button class="w-full flex items-center justify-between border border-slate-200 rounded-md px-3 py-2.5 text-left hover:bg-slate-50">
+            <span><span class="text-amber-500 mr-1">○</span> <span class="text-sm font-medium text-slate-700">Despachar Backup</span><br><span class="text-[11px] text-slate-400 ml-4">Cliente C</span></span>
+            <span class="text-slate-400">›</span>
+          </button>
+          <button class="w-full flex items-center justify-between border border-rose-200 bg-rose-50 rounded-md px-3 py-2.5 text-left hover:bg-rose-100">
+            <span><span class="text-rose-500 mr-1">○</span> <span class="text-sm font-medium text-slate-700">Escalar Ticket</span><br><span class="text-[11px] text-slate-400 ml-4">Cliente D</span></span>
+            <span class="text-slate-400">›</span>
+          </button>
+          <button class="w-full flex items-center justify-between border border-emerald-200 rounded-md px-3 py-2.5 text-left hover:bg-emerald-50">
+            <span><span class="text-emerald-500 mr-1">○</span> <span class="text-sm font-medium text-slate-700">Contactar</span><br><span class="text-[11px] text-slate-400 ml-4">Cliente E</span></span>
+            <span class="text-slate-400">›</span>
+          </button>
+        </div>
+        <div class="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 text-[11px]">
+          <span class="text-slate-400">0/5 completadas</span>
+          <button class="text-blue-600 font-medium">Reiniciar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-[11px] text-slate-400 mt-6">
+      Mesa de Servicio · Sistema de Monitoreo en Tiempo Real · Datos actualizados a las 10:27
+    </footer>
+  </main>
+</body>
+</html>

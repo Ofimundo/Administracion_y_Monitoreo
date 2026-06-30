@@ -3,8 +3,8 @@
 
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { Header } from "@/components/header";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clients, services, type Service, type Client } from "@/lib/services-data";
@@ -16,6 +16,7 @@ import {
   Users,
   Terminal,
   UserCircle,
+  ArrowLeft,
 } from "lucide-react";
 
 // Lazy load components
@@ -41,7 +42,7 @@ export default function HomePage() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientDashboard, setShowClientDashboard] = useState(false);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState("heatmap");
   const [isInitialized, setIsInitialized] = useState(false);
   const mountedRef = useRef(true);
 
@@ -136,14 +137,43 @@ export default function HomePage() {
   }, []);
 
   const tabsConfig = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: DashboardMetrics, hasServiceCallback: false, hasClientCallback: false },
     { id: "heatmap", label: "Mapa de Calor", icon: Flame, component: HeatMap, hasServiceCallback: true, hasClientCallback: false },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: DashboardMetrics, hasServiceCallback: false, hasClientCallback: false },
     { id: "services", label: "Servicios", icon: Briefcase, component: ServicesList, hasServiceCallback: false, hasClientCallback: false },
     { id: "clients", label: "Clientes", icon: Users, component: ClientsList, hasServiceCallback: false, hasClientCallback: true },
     { id: "timeline", label: "Línea de Tiempo", icon: Clock, component: EventsTimeline, hasServiceCallback: true, hasClientCallback: false },
     { id: "comparison", label: "Comparador Clientes", icon: UserCircle, component: ClientComparison, hasServiceCallback: false, hasClientCallback: false },
     { id: "command-center", label: "Centro Comandos", icon: Terminal, component: CommandCenter, hasServiceCallback: false, hasClientCallback: false },
   ];
+
+  // Si se está mostrando el dashboard del cliente, renderizar solo eso
+  if (showClientDashboard && selectedClient) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-4 py-6">
+          <Button 
+            variant="ghost" 
+            onClick={handleCloseClientDashboard} 
+            className="mb-4"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver al panel principal
+          </Button>
+          <ClientDashboard 
+            key={selectedClient.id}
+            clientId={selectedClient.id} 
+            onClose={handleCloseClientDashboard}
+          />
+        </main>
+        <footer className="border-t border-border mt-8 py-4">
+          <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+            Sistema de Administración y Monitoreo de Servicios &copy; 2026
+          </div>
+        </footer>
+      </div>
+    );
+  }
 
   if (!isInitialized) {
     return <TabLoadingFallback />;
@@ -206,25 +236,6 @@ export default function HomePage() {
           Sistema de Administración y Monitoreo de Servicios &copy; 2026
         </div>
       </footer>
-
-      {/* Client Dashboard Modal */}
-      <Dialog open={showClientDashboard} onOpenChange={handleCloseClientDashboard}>
-        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <LayoutDashboard className="h-5 w-5" />
-              Dashboard del Cliente - {selectedClient?.name || ""}
-            </DialogTitle>
-          </DialogHeader>
-          {selectedClient && showClientDashboard && (
-            <ClientDashboard 
-              key={selectedClient.id}
-              clientId={selectedClient.id} 
-              onClose={handleCloseClientDashboard}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

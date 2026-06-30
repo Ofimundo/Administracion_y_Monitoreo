@@ -34,6 +34,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { services, clients, getClientById, getClientServices, type Service, type Client } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
@@ -51,6 +52,7 @@ import {
   Check,
   LayoutDashboard,
   Clock,
+  Download,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -65,6 +67,19 @@ interface Filters {
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
 
+// Definición de campos disponibles para exportación
+const EXPORT_FIELDS = [
+  { id: "id", label: "ID Servicio", default: false },
+  { id: "nombre", label: "Servicio", default: true },
+  { id: "descripcion", label: "Descripción", default: true },
+  { id: "estado", label: "Estado", default: true },
+  { id: "errorPorcentaje", label: "Porcentaje de Error", default: true },
+  { id: "errorNivel", label: "Nivel de Error", default: false },
+  { id: "clientesTotal", label: "Total Clientes", default: true },
+  { id: "clientesLista", label: "Lista de Clientes", default: false },
+  { id: "fechaExportacion", label: "Fecha Exportación", default: true },
+];
+
 export function ServicesList() {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
@@ -78,6 +93,13 @@ export function ServicesList() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientDashboard, setShowClientDashboard] = useState(false);
+  
+  // Modal de exportación
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>(
+    EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
+  );
+  const [selectAll, setSelectAll] = useState(true);
 
   // Función para verificar si un servicio está próximo
   const isComingSoon = (serviceId: string): boolean => {
@@ -152,21 +174,92 @@ export function ServicesList() {
     }));
   };
 
-  const exportToExcel = () => {
-    const excelData = filteredServices.map(service => ({
-      "Servicio": service.name,
-      "Descripción": service.isComingSoon ? "Próximamente - En desarrollo" : service.description,
-      "Porcentaje de Error": service.isComingSoon ? "N/A" : `${service.errorPercentage}%`,
-      "Estado": service.isComingSoon ? "Próximamente" : (service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"),
-      "Total Clientes": service.isComingSoon ? 0 : service.clients.length,
-    }));
+  // Abrir modal de exportación
+  const handleOpenExportModal = () => {
+    setShowExportModal(true);
+  };
+
+  // Toggle selección de todos los campos
+  const handleToggleAllFields = () => {
+    if (selectAll) {
+      setSelectedFields([]);
+    } else {
+      setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  // Toggle selección de un campo individual
+  const handleToggleField = (fieldId: string) => {
+    setSelectedFields(prev => {
+      const newSelection = prev.includes(fieldId)
+        ? prev.filter(id => id !== fieldId)
+        : [...prev, fieldId];
+      
+      setSelectAll(newSelection.length === EXPORT_FIELDS.length);
+      return newSelection;
+    });
+  };
+
+  // Exportar a Excel con campos seleccionados
+  const handleExportToExcel = () => {
+    if (selectedFields.length === 0) {
+      alert("Por favor selecciona al menos un campo para exportar.");
+      return;
+    }
+
+    const fieldMap: Record<string, (service: any) => any> = {
+      id: (s) => s.id,
+      nombre: (s) => s.name,
+      descripcion: (s) => s.isComingSoon ? "Próximamente - En desarrollo" : s.description,
+      estado: (s) => s.isComingSoon ? "Próximamente" : (s.status === "success" ? "Excelente" : s.status === "warning" ? "Atención" : "Crítico"),
+      errorPorcentaje: (s) => s.isComingSoon ? "N/A" : `${s.errorPercentage}%`,
+      errorNivel: (s) => s.isComingSoon ? "N/A" : (s.errorPercentage === 0 ? "Sin errores" : 
+                        s.errorPercentage <= 5 ? "Bajo" :
+                        s.errorPercentage <= 10 ? "Medio" :
+                        s.errorPercentage <= 20 ? "Alto" : "Crítico"),
+      clientesTotal: (s) => s.isComingSoon ? 0 : s.clients.length,
+      clientesLista: (s) => s.isComingSoon ? "" : s.clients.map((c: any) => c.name).join(", "),
+      fechaExportacion: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
+    };
+
+    const fieldLabels: Record<string, string> = {};
+    EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
+
+    const exportData = filteredServices.map(service => {
+      const row: Record<string, any> = {};
+      selectedFields.forEach(fieldId => {
+        const label = fieldLabels[fieldId] || fieldId;
+        row[label] = fieldMap[fieldId](service);
+      });
+      return row;
+    });
 
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(excelData);
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    // Ajustar anchos de columna
+    const colWidths = selectedFields.map(() => ({ wch: 30 }));
+    ws['!cols'] = colWidths;
+    
     XLSX.utils.book_append_sheet(wb, ws, "Servicios");
     
-    const fileName = `servicios_${format(new Date(), "yyyy-MM-dd_HH-mm")}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    // Resumen estadístico
+    const summaryData = [
+      { "Métrica": "Total Servicios", "Valor": filteredServices.length },
+      { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
+      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isComingSoon(s.id)).length },
+      { "Métrica": "Servicios en Atención", "Valor": filteredServices.filter(s => s.status === "warning").length },
+      { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => s.status === "error").length },
+      { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isComingSoon(s.id)).length },
+      { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+    
+    XLSX.writeFile(wb, `servicios_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+    
+    setShowExportModal(false);
   };
 
   const getStatusColor = (status: string, isComingSoonValue: boolean) => {
@@ -218,7 +311,7 @@ export function ServicesList() {
           )}
         </div>
 
-        <Button variant="outline" size="sm" onClick={exportToExcel}>
+        <Button variant="outline" size="sm" onClick={handleOpenExportModal}>
           <FileSpreadsheet className="mr-2 h-4 w-4" />
           Exportar a Excel
         </Button>
@@ -539,6 +632,71 @@ export function ServicesList() {
               }}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Exportación con selección de campos */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              Seleccionar Campos para Exportar
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectAll}
+                  onCheckedChange={handleToggleAllFields}
+                  id="select-all"
+                />
+                <Label htmlFor="select-all" className="font-semibold">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedFields.length} de {EXPORT_FIELDS.length} campos seleccionados
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {EXPORT_FIELDS.map((field) => (
+                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedFields.includes(field.id)}
+                    onCheckedChange={() => handleToggleField(field.id)}
+                    id={`field-${field.id}`}
+                  />
+                  <Label htmlFor={`field-${field.id}`} className="text-sm cursor-pointer">
+                    {field.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            {selectedFields.length === 0 && (
+              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
+                ⚠️ Debes seleccionar al menos un campo para exportar.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportModal(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleExportToExcel} 
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={selectedFields.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFields.length} campos
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

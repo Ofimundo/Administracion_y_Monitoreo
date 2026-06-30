@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -20,6 +21,13 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   LineChart,
   Line,
@@ -53,6 +61,8 @@ import {
   Zap,
   ChevronDown,
   FileText,
+  Download,
+  FileSpreadsheet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clients, getClientServices } from "@/lib/services-data";
@@ -60,6 +70,7 @@ import { StatusIndicator } from "@/components/status-indicator";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
+import * as XLSX from "xlsx";
 
 interface ClientDashboardProps {
   clientId: string;
@@ -73,6 +84,18 @@ const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabi
 const isServiceComingSoon = (serviceId: string): boolean => {
   return COMING_SOON_SERVICES.includes(serviceId);
 };
+
+// Definición de campos disponibles para exportación
+const EXPORT_FIELDS = [
+  { id: "fecha", label: "Fecha", default: true, description: "Fecha de procesamiento del documento" },
+  { id: "tipoDocumento", label: "Tipo Documento", default: true, description: "Tipo de documento (Factura, NC, etc.)" },
+  { id: "folio", label: "Folio", default: true, description: "Número de folio del documento" },
+  { id: "rutProveedor", label: "RUT Proveedor", default: false, description: "RUT del proveedor emisor" },
+  { id: "razonSocial", label: "Razón Social", default: true, description: "Nombre del proveedor" },
+  { id: "estado", label: "Estado", default: true, description: "Estado actual del documento" },
+  { id: "tipo", label: "Tipo (Infraestructura/Regla)", default: false, description: "Clasificación del resultado" },
+  { id: "motivo", label: "Motivo", default: true, description: "Motivo del estado actual" },
+];
 
 // Función para normalizar fecha
 const normalizeDate = (dateInput: any): Date => {
@@ -119,6 +142,18 @@ const generateMonthlyData = (filteredData: any[]) => {
   return Object.values(monthlyData).filter(m => m.aprobadas > 0 || m.rechazadas > 0 || m.manuales > 0 || m.pendientes > 0).slice(-6);
 };
 
+// Función para detectar errores de infraestructura
+const isInfraestructuraError = (motivo: string): boolean => {
+  if (!motivo) return false;
+  const erroresTecnicos = [
+    "error de conexión", "timeout", "servidor no responde", "softland no disponible",
+    "sii no responde", "connection failed", "failed to connect", "could not connect",
+    "connection refused", "network error", "500", "503"
+  ];
+  const motivoLower = motivo.toLowerCase();
+  return erroresTecnicos.some(term => motivoLower.includes(term.toLowerCase()));
+};
+
 export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   const { toast } = useToast();
   const [allData, setAllData] = useState<any[]>([]);
@@ -127,6 +162,12 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showFilters, setShowFilters] = useState(false);
   const [availableTipos, setAvailableTipos] = useState<string[]>([]);
+  
+  // Modal de exportación
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>(
+    EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
+  );
   
   const [filters, setFilters] = useState({
     fechaDesde: null as Date | null,
@@ -164,7 +205,6 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
             setAvailableTipos(["33", "34", "61"]);
           }
         } else {
-          // Para otros clientes, no hay datos
           setAllData([]);
           setFilteredData([]);
           setAvailableTipos([]);
@@ -274,6 +314,106 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     });
   };
 
+  // Abrir modal de exportación
+  const handleOpenExportModal = () => {
+    setShowExportModal(true);
+  };
+
+  // Cerrar modal de exportación
+  const handleCloseExportModal = () => {
+    setShowExportModal(false);
+  };
+
+  // Toggle selección de un campo individual
+  const handleToggleField = (fieldId: string) => {
+    setSelectedFields(prev => {
+      if (prev.includes(fieldId)) {
+        return prev.filter(id => id !== fieldId);
+      } else {
+        return [...prev, fieldId];
+      }
+    });
+  };
+
+  // Seleccionar/Deseleccionar todos los campos
+  const handleSelectAllFields = () => {
+    if (selectedFields.length === EXPORT_FIELDS.length) {
+      setSelectedFields([]);
+    } else {
+      setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+    }
+  };
+
+  // Exportar a Excel con campos seleccionados
+  const handleExportToExcel = () => {
+    if (selectedFields.length === 0) {
+      toast({
+        title: "Error",
+        description: "Por favor selecciona al menos un campo para exportar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const fieldMap: Record<string, (item: any) => any> = {
+      fecha: (item) => format(normalizeDate(item.fecha_proceso), "dd/MM/yyyy HH:mm"),
+      tipoDocumento: (item) => {
+        const tipo = item.tipo_documento;
+        return tipo === 33 ? "Factura (33)" : tipo === 34 ? "Factura Exenta (34)" : "Nota Crédito (61)";
+      },
+      folio: (item) => item.folio_documento || "N/A",
+      rutProveedor: (item) => item.rut_proveedor || "N/A",
+      razonSocial: (item) => item.razon_social || "N/A",
+      estado: (item) => item.estado || "N/A",
+      tipo: (item) => {
+        const motivo = item.motivo || "";
+        return isInfraestructuraError(motivo) ? "❌ Error Infraestructura" : 
+               (item.estado === "Rechazado" || item.estado === "Manual" ? "⚠️ Regla de Negocio" : "📋 Normal");
+      },
+      motivo: (item) => item.motivo || "-",
+    };
+
+    const fieldLabels: Record<string, string> = {};
+    EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
+
+    const exportData = filteredData.map(item => {
+      const row: Record<string, any> = {};
+      selectedFields.forEach(fieldId => {
+        const label = fieldLabels[fieldId] || fieldId;
+        row[label] = fieldMap[fieldId](item);
+      });
+      return row;
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    const colWidths = selectedFields.map(() => ({ wch: 30 }));
+    ws['!cols'] = colWidths;
+    
+    XLSX.utils.book_append_sheet(wb, ws, "Documentos");
+    
+    const summaryData = [
+      { "Métrica": "Total Documentos", "Valor": filteredData.length },
+      { "Métrica": "Aprobados", "Valor": filteredData.filter((e: any) => e.estado === "Aprobado").length },
+      { "Métrica": "Rechazados", "Valor": filteredData.filter((e: any) => e.estado === "Rechazado").length },
+      { "Métrica": "Manuales", "Valor": filteredData.filter((e: any) => e.estado === "Manual").length },
+      { "Métrica": "Pendientes", "Valor": filteredData.filter((e: any) => e.estado === "Pendiente" || e.estado === "Pendiente Espera").length },
+      { "Métrica": "Errores Infraestructura", "Valor": filteredData.filter((e: any) => isInfraestructuraError(e.motivo || "")).length },
+      { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+    
+    XLSX.writeFile(wb, `dashboard_cliente_${clientId}_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+    
+    setShowExportModal(false);
+    toast({
+      title: "Exportación completada",
+      description: `Se exportaron ${filteredData.length} documentos con ${selectedFields.length} campos.`,
+    });
+  };
+
   const stats = useMemo(() => {
     if (!isOfimundo) {
       return {
@@ -344,7 +484,6 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     return clients.find(c => c.id === clientId);
   }, [clientId]);
 
-  // Filtrar servicios activos (no próximos)
   const clientServices = useMemo(() => {
     if (!client) return [];
     const allServices = getClientServices(clientId);
@@ -398,14 +537,12 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-3" />
         <p className="text-muted-foreground">Cliente no encontrado</p>
         <Button onClick={handleClose} variant="outline" className="mt-4">
-          <X className="h-4 w-4 mr-2" />
           Cerrar
         </Button>
       </div>
     );
   }
 
-  // Pantalla de "Próximamente" para clientes que no son Ofimundo
   if (!isOfimundo) {
     return (
       <div className="space-y-5">
@@ -416,7 +553,6 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
             onClick={handleClose}
             className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors"
           >
-            <X className="h-4 w-4" />
             Cerrar
           </Button>
         </div>
@@ -425,12 +561,8 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
           <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-amber-100 flex items-center justify-center">
             <Clock className="h-12 w-12 text-amber-500" />
           </div>
-          <h2 className="text-2xl font-bold text-foreground mb-3">
-            {client.name}
-          </h2>
-          <p className="text-muted-foreground text-lg mb-6">
-            Dashboard en desarrollo
-          </p>
+          <h2 className="text-2xl font-bold text-foreground mb-3">{client.name}</h2>
+          <p className="text-muted-foreground text-lg mb-6">Dashboard en desarrollo</p>
           <div className="max-w-md mx-auto bg-amber-50 border border-amber-200 rounded-lg p-4 mb-8">
             <p className="text-amber-700 text-sm">
               🚀 El dashboard para este cliente se encuentra actualmente en desarrollo.
@@ -464,15 +596,24 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
 
   return (
     <div className="space-y-5">
-      {/* Botón de cierre */}
-      <div className="flex justify-end">
+      {/* Botón de cierre y exportación - CON MÁS ESPACIO EN EL BORDE */}
+      <div className="flex justify-end gap-3 pt-2 pb-1">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={handleOpenExportModal}
+          className="gap-2 px-4"
+          disabled={filteredData.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          Exportar
+        </Button>
         <Button 
           variant="ghost" 
           size="sm" 
           onClick={handleClose}
-          className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors"
+          className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors px-4"
         >
-          <X className="h-4 w-4" />
           Cerrar
         </Button>
       </div>
@@ -914,6 +1055,129 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* MODAL DE EXPORTACIÓN */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto p-6">
+          <DialogHeader className="border-b pb-4 mb-4">
+            <DialogTitle className="text-2xl flex items-center gap-3">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <FileSpreadsheet className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <span className="font-bold">Seleccionar Campos</span>
+                <p className="text-sm font-normal text-muted-foreground mt-0.5">
+                  Elige los campos que deseas incluir en el archivo Excel
+                </p>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-5 py-2">
+            <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  checked={selectedFields.length === EXPORT_FIELDS.length}
+                  onCheckedChange={handleSelectAllFields}
+                  id="select-all"
+                  className="h-5 w-5"
+                />
+                <Label htmlFor="select-all" className="font-semibold text-base cursor-pointer">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-sm px-3 py-1">
+                  {selectedFields.length} / {EXPORT_FIELDS.length} campos
+                </Badge>
+                {selectedFields.length === EXPORT_FIELDS.length && (
+                  <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                    ✅ Todos seleccionados
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {EXPORT_FIELDS.map((field) => (
+                <div 
+                  key={field.id} 
+                  className={cn(
+                    "flex items-start gap-3 p-3 rounded-lg border transition-all hover:bg-muted/30",
+                    selectedFields.includes(field.id) && "border-emerald-200 bg-emerald-50/30"
+                  )}
+                >
+                  <Checkbox
+                    checked={selectedFields.includes(field.id)}
+                    onCheckedChange={() => handleToggleField(field.id)}
+                    id={`field-${field.id}`}
+                    className="mt-0.5 h-5 w-5"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <Label htmlFor={`field-${field.id}`} className="text-sm font-medium cursor-pointer">
+                      {field.label}
+                    </Label>
+                    {field.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {field.description}
+                      </p>
+                    )}
+                  </div>
+                  {selectedFields.includes(field.id) && (
+                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px]">
+                      ✓
+                    </Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {selectedFields.length === 0 && (
+              <div className="flex items-center gap-3 p-4 bg-red-50 rounded-lg border border-red-200">
+                <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-red-700">Debes seleccionar al menos un campo</p>
+                  <p className="text-xs text-red-600">Selecciona uno o más campos para poder exportar</p>
+                </div>
+              </div>
+            )}
+
+            {selectedFields.length > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                <div className="p-1.5 bg-blue-100 rounded-full">
+                  <FileText className="h-4 w-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-blue-700">
+                    Exportarás {filteredData.length} documentos con {selectedFields.length} campos
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    Los datos se exportarán en formato Excel (.xlsx)
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4 mt-2 gap-3">
+            <Button 
+              variant="outline" 
+              onClick={handleCloseExportModal}
+              className="min-w-[100px]"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleExportToExcel} 
+              className="min-w-[140px] bg-emerald-600 hover:bg-emerald-700"
+              disabled={selectedFields.length === 0 || filteredData.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFields.length} campos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

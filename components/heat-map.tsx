@@ -35,7 +35,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { services as importedServices, type Service, type Client, clients as globalClients } from "@/lib/services-data";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -58,6 +60,7 @@ import {
   Map,
   LayoutDashboard,
   Clock,
+  FileSpreadsheet,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -105,7 +108,6 @@ const fetchRealData = async () => {
 
 // Función para obtener datos completos de un cliente por nombre
 const getClientFullData = (clientName: string): { rut: string; email: string; phone: string } => {
-  // Buscar en la lista global de clientes
   const globalClient = globalClients.find(c => c.name === clientName);
   if (globalClient) {
     return {
@@ -114,7 +116,6 @@ const getClientFullData = (clientName: string): { rut: string; email: string; ph
       phone: globalClient.phone || "No disponible",
     };
   }
-  // Si no se encuentra, generar datos basados en el nombre
   return {
     rut: `76.${Math.floor(Math.random() * 100000000).toString().padStart(8, '0')}-${Math.floor(Math.random() * 9)}`,
     email: `contacto@${clientName.toLowerCase().replace(/[^a-z0-9]/g, '')}.cl`,
@@ -123,6 +124,26 @@ const getClientFullData = (clientName: string): { rut: string; email: string; ph
 };
 
 type ViewMode = "grid" | "list" | "map";
+
+// Definición de campos disponibles para exportación
+const EXPORT_FIELDS = [
+  { id: "id", label: "ID Servicio", default: true },
+  { id: "name", label: "Servicio", default: true },
+  { id: "description", label: "Descripción", default: true },
+  { id: "status", label: "Estado", default: true },
+  { id: "errorPercentage", label: "Porcentaje Error Técnico", default: true },
+  { id: "errorLevel", label: "Nivel de Error", default: false },
+  { id: "clientCount", label: "Cantidad Clientes", default: true },
+  { id: "clientNames", label: "Lista Clientes (Nombres)", default: false },
+  { id: "clientRUTs", label: "Lista Clientes (RUTs)", default: false },
+  { id: "clientEmails", label: "Lista Clientes (Emails)", default: false },
+  { id: "clientPhones", label: "Lista Clientes (Teléfonos)", default: false },
+  { id: "clientDetails", label: "Clientes Detalle (Completo)", default: false },
+  { id: "totalRequests", label: "Total Request (mes)", default: false },
+  { id: "responseTime", label: "Tiempo Respuesta (ms)", default: false },
+  { id: "uptime", label: "Uptime (%)", default: false },
+  { id: "exportDate", label: "Fecha Exportación", default: true },
+];
 
 export function HeatMap({ onSelectService }: HeatMapProps) {
   const router = useRouter();
@@ -141,6 +162,13 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const [sortBy, setSortBy] = useState<"name" | "error" | "clients">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  
+  // Estado para el modal de exportación
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>(
+    EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
+  );
+  const [selectAll, setSelectAll] = useState(true);
 
   // Cargar servicios desde la API
   useEffect(() => {
@@ -150,7 +178,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         const realData = await fetchRealData();
         
         const updatedServices = importedServices.map(service => {
-          // Enriquecer clientes con RUT y Email desde la lista global
           const enrichedClients = service.clients.map(client => {
             const fullData = getClientFullData(client.name);
             return {
@@ -161,7 +188,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             };
           });
 
-          // Solo facturas obtiene datos reales
           if (service.id === "facturas" && realData) {
             return {
               ...service,
@@ -180,7 +206,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               }
             };
           }
-          // Servicios próximos tienen 0% error y status success
           if (isServiceComingSoon(service.id) || service.isComingSoon) {
             return {
               ...service,
@@ -326,93 +351,100 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     }
   };
 
-  // Redirigir al monitoreo completo del servicio
   const handleGoToFullMonitoring = (serviceId: string) => {
     setShowDetailModal(false);
     router.push(`/servicio/${serviceId}`);
   };
 
-  // Exportación a Excel con datos completos de clientes
-  const handleExportToExcel = () => {
-    const exportData = filteredServices.map(service => {
-      const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
-      // Obtener todos los clientes con sus datos completos
-      const clientDetails = comingSoon ? [] : service.clients.map(c => {
-        const fullData = getClientFullData(c.name);
-        return {
-          name: c.name || "N/A",
-          rut: c.rut || fullData.rut,
-          email: c.email || fullData.email,
-          phone: c.phone || fullData.phone,
-          error: c.errorPercentage || 0
-        };
-      });
+  // Abrir modal de exportación
+  const handleOpenExportModal = () => {
+    setShowExportModal(true);
+  };
+
+  // Toggle selección de todos los campos
+  const handleToggleAllFields = () => {
+    if (selectAll) {
+      setSelectedFields([]);
+    } else {
+      setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  // Toggle selección de un campo individual
+  const handleToggleField = (fieldId: string) => {
+    setSelectedFields(prev => {
+      const newSelection = prev.includes(fieldId)
+        ? prev.filter(id => id !== fieldId)
+        : [...prev, fieldId];
       
-      return {
-        "ID Servicio": service.id,
-        "Servicio": service.name,
-        "Descripción": comingSoon ? "🚀 Próximamente - En desarrollo" : service.description,
-        "Estado": comingSoon ? "Próximamente" : (service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"),
-        "Porcentaje Error Técnico": comingSoon ? "N/A" : `${service.errorPercentage}%`,
-        "Nivel de Error": comingSoon ? "N/A" : (service.errorPercentage === 0 ? "Sin errores" : 
-                        service.errorPercentage <= 5 ? "Bajo" :
-                        service.errorPercentage <= 10 ? "Medio" :
-                        service.errorPercentage <= 20 ? "Alto" : "Crítico"),
-        "Cantidad Clientes": comingSoon ? 0 : service.clients.length,
-        "Lista Clientes (Nombres)": comingSoon ? "" : clientDetails.map(c => c.name).join(" | "),
-        "Lista Clientes (RUTs)": comingSoon ? "" : clientDetails.map(c => c.rut).join(" | "),
-        "Lista Clientes (Emails)": comingSoon ? "" : clientDetails.map(c => c.email).join(" | "),
-        "Lista Clientes (Teléfonos)": comingSoon ? "" : clientDetails.map(c => c.phone).join(" | "),
-        "Clientes Detalle": comingSoon ? "" : clientDetails.map(c => `${c.name} (RUT: ${c.rut}, Email: ${c.email})`).join("; "),
-        "Total Request (mes)": comingSoon ? "N/A" : (service.metrics?.totalRequests || "N/A"),
-        "Tiempo Respuesta (ms)": comingSoon ? "N/A" : (service.metrics?.responseTime || "N/A"),
-        "Uptime (%)": comingSoon ? "N/A" : (service.metrics?.uptime || "N/A"),
-        "Fecha Exportación": format(new Date(), "dd/MM/yyyy HH:mm:ss"),
-      };
+      setSelectAll(newSelection.length === EXPORT_FIELDS.length);
+      return newSelection;
+    });
+  };
+
+  // Exportación a Excel con campos seleccionados
+  const handleExportToExcel = () => {
+    if (selectedFields.length === 0) {
+      alert("Por favor selecciona al menos un campo para exportar.");
+      return;
+    }
+
+    const fieldMap: Record<string, (service: any) => any> = {
+      id: (s) => s.id,
+      name: (s) => s.name,
+      description: (s) => s.description,
+      status: (s) => s.status === "success" ? "Excelente" : s.status === "warning" ? "Atención" : "Crítico",
+      errorPercentage: (s) => `${s.errorPercentage}%`,
+      errorLevel: (s) => s.errorPercentage === 0 ? "Sin errores" : 
+                        s.errorPercentage <= 5 ? "Bajo" :
+                        s.errorPercentage <= 10 ? "Medio" :
+                        s.errorPercentage <= 20 ? "Alto" : "Crítico",
+      clientCount: (s) => s.clients.length,
+      clientNames: (s) => s.clients.map((c: any) => c.name).join(" | "),
+      clientRUTs: (s) => s.clients.map((c: any) => c.rut || "N/A").join(" | "),
+      clientEmails: (s) => s.clients.map((c: any) => c.email || "N/A").join(" | "),
+      clientPhones: (s) => s.clients.map((c: any) => c.phone || "N/A").join(" | "),
+      clientDetails: (s) => s.clients.map((c: any) => `${c.name} (RUT: ${c.rut || "N/A"}, Email: ${c.email || "N/A"})`).join("; "),
+      totalRequests: (s) => s.metrics?.totalRequests || "N/A",
+      responseTime: (s) => s.metrics?.responseTime || "N/A",
+      uptime: (s) => s.metrics?.uptime || "N/A",
+      exportDate: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
+    };
+
+    const fieldLabels: Record<string, string> = {};
+    EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
+
+    const exportData = filteredServices.map(service => {
+      const row: Record<string, any> = {};
+      selectedFields.forEach(fieldId => {
+        const label = fieldLabels[fieldId] || fieldId;
+        row[label] = fieldMap[fieldId](service);
+      });
+      return row;
     });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // Ajustar anchos de columna para mejor visualización
-    const colWidths = [
-      { wch: 15 },   // ID Servicio
-      { wch: 35 },   // Servicio
-      { wch: 50 },   // Descripción
-      { wch: 12 },   // Estado
-      { wch: 18 },   // Porcentaje Error Técnico
-      { wch: 12 },   // Nivel de Error
-      { wch: 15 },   // Cantidad Clientes
-      { wch: 50 },   // Lista Clientes (Nombres)
-      { wch: 40 },   // Lista Clientes (RUTs)
-      { wch: 50 },   // Lista Clientes (Emails)
-      { wch: 40 },   // Lista Clientes (Teléfonos)
-      { wch: 80 },   // Clientes Detalle
-      { wch: 18 },   // Total Request
-      { wch: 18 },   // Tiempo Respuesta
-      { wch: 15 },   // Uptime
-      { wch: 22 },   // Fecha Exportación
-    ];
+    // Ajustar anchos de columna
+    const colWidths = selectedFields.map(() => ({ wch: 30 }));
     ws['!cols'] = colWidths;
     
-    XLSX.utils.book_append_sheet(wb, ws, "Mapa de Calor - Detallado");
+    XLSX.utils.book_append_sheet(wb, ws, "Mapa de Calor");
     
-    // Resumen estadístico
+    // Resumen estadístico siempre se exporta
     const summaryData = [
       { "Métrica": "Total Servicios", "Valor": filteredServices.length },
       { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
-      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id) && !s.isComingSoon).length },
-      { "Métrica": "Servicios Atención", "Valor": filteredServices.filter(s => s.status === "warning").length },
-      { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => s.status === "error").length },
-      { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isServiceComingSoon(s.id) || s.isComingSoon).length },
-      { "Métrica": "Tasa Error Promedio", "Valor": `${(filteredServices.filter(s => !isServiceComingSoon(s.id) && !s.isComingSoon).reduce((acc, s) => acc + s.errorPercentage, 0) / (filteredServices.filter(s => !isServiceComingSoon(s.id) && !s.isComingSoon).length || 1)).toFixed(2)}%` },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
-      { "Métrica": "Filtros Aplicados", "Valor": `Estado: ${selectedStatus}, Tipo: ${selectedType}, Búsqueda: ${searchTerm || "Ninguna"}` },
     ];
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen Estadístico");
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
     
-    XLSX.writeFile(wb, `mapa_calor_detallado_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+    XLSX.writeFile(wb, `mapa_calor_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+    
+    setShowExportModal(false);
   };
 
   const activeFiltersCount = useMemo(() => {
@@ -539,12 +571,12 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={handleExportToExcel}>
-                      <Download className="h-4 w-4 mr-2" />
+                    <Button variant="outline" size="sm" onClick={handleOpenExportModal}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
                       Exportar Excel
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Exportar a Excel con detalles completos</TooltipContent>
+                  <TooltipContent>Exportar a Excel con campos seleccionables</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               
@@ -693,6 +725,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         </CardHeader>
         
         <CardContent>
+          {/* Contenido del mapa de calor - sin cambios */}
           {filteredServices.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -702,6 +735,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </Button>
             </div>
           ) : viewMode === "grid" ? (
+            // Vista grid (sin cambios)
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {filteredServices.map((service) => {
                 const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
@@ -799,6 +833,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               })}
             </div>
           ) : viewMode === "list" ? (
+            // Vista lista (sin cambios)
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader className="bg-muted/50">
@@ -860,7 +895,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </Table>
             </div>
           ) : (
-            // VISTA MAPA
+            // Vista mapa (sin cambios)
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-muted-foreground">
@@ -939,7 +974,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         </CardContent>
       </Card>
 
-      {/* Modal de detalle del servicio */}
+      {/* Modal de detalle del servicio (sin cambios) */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           {selectedServiceDetail && (
@@ -953,6 +988,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </DialogHeader>
               
               <div className="space-y-6">
+                {/* Contenido del modal sin cambios */}
                 <div>
                   <h4 className="text-sm font-semibold mb-2">Descripción</h4>
                   <p className="text-sm text-muted-foreground">
@@ -997,33 +1033,31 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 </div>
 
                 {!(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
-                  <>
-                    <div>
-                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Clientes ({selectedServiceDetail.clients.length})
-                      </h4>
-                      <div className="space-y-2">
-                        {selectedServiceDetail.clients.map((client) => (
-                          <div key={client.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                            <div>
-                              <p className="font-medium">{client.name}</p>
-                              <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                                {client.rut && <span>RUT: {client.rut}</span>}
-                                {client.email && <span>Email: {client.email}</span>}
-                              </div>
+                  <div>
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Clientes ({selectedServiceDetail.clients.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedServiceDetail.clients.map((client) => (
+                        <div key={client.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                          <div>
+                            <p className="font-medium">{client.name}</p>
+                            <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                              {client.rut && <span>RUT: {client.rut}</span>}
+                              {client.email && <span>Email: {client.email}</span>}
                             </div>
-                            <Badge variant="outline" className={cn(
-                              client.errorPercentage === 0 ? "text-emerald-600" :
-                              client.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
-                            )}>
-                              {client.errorPercentage}% error
-                            </Badge>
                           </div>
-                        ))}
-                      </div>
+                          <Badge variant="outline" className={cn(
+                            client.errorPercentage === 0 ? "text-emerald-600" :
+                            client.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
+                          )}>
+                            {client.errorPercentage}% error
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
-                  </>
+                  </div>
                 )}
 
                 {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
@@ -1052,6 +1086,71 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Exportación con selección de campos */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              Seleccionar Campos para Exportar
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectAll}
+                  onCheckedChange={handleToggleAllFields}
+                  id="select-all"
+                />
+                <Label htmlFor="select-all" className="font-semibold">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedFields.length} de {EXPORT_FIELDS.length} campos seleccionados
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {EXPORT_FIELDS.map((field) => (
+                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedFields.includes(field.id)}
+                    onCheckedChange={() => handleToggleField(field.id)}
+                    id={`field-${field.id}`}
+                  />
+                  <Label htmlFor={`field-${field.id}`} className="text-sm cursor-pointer">
+                    {field.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            {selectedFields.length === 0 && (
+              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
+                ⚠️ Debes seleccionar al menos un campo para exportar.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportModal(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleExportToExcel} 
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={selectedFields.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFields.length} campos
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
