@@ -37,6 +37,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { services as importedServices, type Service, type Client, clients as globalClients } from "@/lib/services-data";
 import { cn } from "@/lib/utils";
@@ -72,7 +78,7 @@ interface HeatMapProps {
 const ERRORES_INFRAESTRUCTURA = [
   "error de conexión", "timeout", "servidor no responde", "softland no disponible",
   "sii no responde", "connection failed", "failed to connect", "could not connect",
-  "connection refused", "network error", "500", "503", "502", "504",
+  "connection refused", "network error",
   "no se pudo conectar", "softland error", "sii error", "error de red"
 ];
 
@@ -93,10 +99,14 @@ const fetchRealData = async () => {
       const totalDocs = data.data.length;
       const errorDocs = data.data.filter((e: any) => {
         const motivo = e.motivo || "";
-        return ERRORES_INFRAESTRUCTURA.some(term => motivo.toLowerCase().includes(term.toLowerCase()));
+        const motivoLower = motivo.toLowerCase();
+        const hasTextError = ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term.toLowerCase()));
+        if (hasTextError) return true;
+        return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
       }).length;
       const errPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
-      const status = errorDocs > 0 ? (errPercent > 40 ? "error" : "warning") : "success";
+      // ✅ Si el error es 100%, marcarlo como "error"
+      const status = errPercent === 100 ? "error" : (errPercent > 40 ? "error" : errPercent > 0 ? "warning" : "success");
       return { errorPercentage: errPercent, status, totalDocs, errorDocs };
     }
     return null;
@@ -161,7 +171,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "error" | "clients">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useState<ViewMode>("map");
   
   // Estado para el modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
@@ -202,7 +212,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 totalRequests: realData.totalDocs,
                 errorRate: realData.errorPercentage,
                 responseTime: 320,
-                uptime: 99.99,
+                uptime: realData.errorPercentage === 100 ? 0 : 99.99,
               }
             };
           }
@@ -245,9 +255,40 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     loadServices();
   }, []);
 
-  // Filtrar servicios
+  // ✅ Obtener solo servicios activos (excluyendo "Próximamente")
+  const activeServices = useMemo(() => {
+    return services.filter(service => 
+      !(isServiceComingSoon(service.id) || service.isComingSoon)
+    );
+  }, [services]);
+
+  // ✅ Obtener servicios próximos
+  const comingSoonServices = useMemo(() => {
+    return services.filter(service => 
+      isServiceComingSoon(service.id) || service.isComingSoon
+    );
+  }, [services]);
+
+  // ✅ Obtener clientes activos (solo de servicios activos)
+  const activeClients = useMemo(() => {
+    const clients: Client[] = [];
+    const clientIds = new Set<string>();
+    
+    activeServices.forEach(service => {
+      service.clients.forEach(client => {
+        if (!clientIds.has(client.id)) {
+          clientIds.add(client.id);
+          clients.push(client);
+        }
+      });
+    });
+    
+    return clients;
+  }, [activeServices]);
+
+  // Filtrar servicios (solo servicios activos, excluyendo "Próximamente")
   const filteredServices = useMemo(() => {
-    let filtered = [...services];
+    let filtered = [...activeServices];
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -281,7 +322,37 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     });
 
     return filtered;
-  }, [services, searchTerm, selectedStatus, selectedType, sortBy, sortOrder]);
+  }, [activeServices, searchTerm, selectedStatus, selectedType, sortBy, sortOrder]);
+
+  // ✅ Calcular estadísticas solo con servicios activos
+  const stats = useMemo(() => {
+    const totalActive = activeServices.length;
+    const totalClientsActive = activeClients.length;
+    
+    // ✅ Todos los servicios activos son considerados "saludables"
+    const healthyServices = activeServices.length;
+    
+    // ✅ Servicios con atención: errorPercentage entre 1% y 99%
+    const warningServices = activeServices.filter(s => 
+      s.status === "warning" || (s.errorPercentage > 0 && s.errorPercentage < 100)
+    ).length;
+    
+    // ✅ Servicios críticos: errorPercentage === 100% (caídos al 100%)
+    const errorServices = activeServices.filter(s => 
+      s.errorPercentage === 100 || s.status === "error"
+    ).length;
+    
+    const comingSoonCount = comingSoonServices.length;
+
+    return {
+      totalActive,
+      totalClientsActive,
+      healthyServices,
+      warningServices,
+      errorServices,
+      comingSoonCount
+    };
+  }, [activeServices, activeClients, comingSoonServices]);
 
   const getStatusColor = (status: string) => {
     if (status === "success") return "bg-emerald-500";
@@ -293,6 +364,9 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const getStatusBadge = (status: string, percentage: number, isComingSoon: boolean = false) => {
     if (isComingSoon) {
       return <Badge className="bg-gray-500 text-white gap-1 border-0"><Clock className="h-3 w-3" /> Próximamente</Badge>;
+    }
+    if (percentage === 100) {
+      return <Badge className="bg-red-600 text-white gap-1 border-0"><AlertTriangle className="h-3 w-3" /> 100% caído</Badge>;
     }
     if (status === "success") {
       return <Badge className="bg-emerald-500 text-white gap-1 border-0"><CheckCircle className="h-3 w-3" /> {percentage}% error técnico</Badge>;
@@ -306,8 +380,9 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     return <Badge variant="outline">{percentage}% error</Badge>;
   };
 
-  const getStatusIcon = (status: string, isComingSoon: boolean = false) => {
+  const getStatusIcon = (status: string, percentage: number = 0, isComingSoon: boolean = false) => {
     if (isComingSoon) return <Clock className="h-5 w-5 text-gray-500" />;
+    if (percentage === 100) return <AlertTriangle className="h-5 w-5 text-red-600" />;
     if (status === "success") return <CheckCircle className="h-5 w-5 text-emerald-500" />;
     if (status === "warning") return <AlertTriangle className="h-5 w-5 text-amber-500" />;
     if (status === "error") return <AlertTriangle className="h-5 w-5 text-red-500" />;
@@ -316,6 +391,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
 
   const getHeatColor = (errorPercentage: number, isComingSoon: boolean = false) => {
     if (isComingSoon) return "bg-gray-100 dark:bg-gray-900/30 border-gray-200";
+    if (errorPercentage === 100) return "bg-red-200 dark:bg-red-950/50 border-red-300";
     if (errorPercentage === 0) return "bg-emerald-100 dark:bg-emerald-950/30 border-emerald-200";
     if (errorPercentage <= 5) return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100";
     if (errorPercentage <= 10) return "bg-amber-50 dark:bg-amber-950/20 border-amber-100";
@@ -326,6 +402,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
 
   const getMapColor = (errorPercentage: number, isComingSoon: boolean = false) => {
     if (isComingSoon) return "bg-gray-400 hover:bg-gray-500";
+    if (errorPercentage === 100) return "bg-red-700 hover:bg-red-800";
     if (errorPercentage === 0) return "bg-emerald-500 hover:bg-emerald-600";
     if (errorPercentage <= 5) return "bg-emerald-400 hover:bg-emerald-500";
     if (errorPercentage <= 10) return "bg-amber-400 hover:bg-amber-500";
@@ -394,9 +471,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
       id: (s) => s.id,
       name: (s) => s.name,
       description: (s) => s.description,
-      status: (s) => s.status === "success" ? "Excelente" : s.status === "warning" ? "Atención" : "Crítico",
+      status: (s) => s.errorPercentage === 100 ? "100% Caído" : s.status === "success" ? "Excelente" : s.status === "warning" ? "Atención" : "Crítico",
       errorPercentage: (s) => `${s.errorPercentage}%`,
-      errorLevel: (s) => s.errorPercentage === 0 ? "Sin errores" : 
+      errorLevel: (s) => s.errorPercentage === 100 ? "100% Caído" :
+                        s.errorPercentage === 0 ? "Sin errores" : 
                         s.errorPercentage <= 5 ? "Bajo" :
                         s.errorPercentage <= 10 ? "Medio" :
                         s.errorPercentage <= 20 ? "Alto" : "Crítico",
@@ -435,8 +513,12 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     
     // Resumen estadístico siempre se exporta
     const summaryData = [
-      { "Métrica": "Total Servicios", "Valor": filteredServices.length },
-      { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
+      { "Métrica": "Total Servicios Activos", "Valor": stats.totalActive },
+      { "Métrica": "Total Clientes Activos", "Valor": stats.totalClientsActive },
+      { "Métrica": "Servicios Activos", "Valor": stats.healthyServices },
+      { "Métrica": "Servicios en Atención", "Valor": stats.warningServices },
+      { "Métrica": "Servicios Críticos (100% caídos)", "Valor": stats.errorServices },
+      { "Métrica": "Servicios Próximamente", "Valor": stats.comingSoonCount },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
     ];
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
@@ -456,16 +538,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     return count;
   }, [searchTerm, selectedStatus, selectedType, dateRange]);
 
-  const totalServices = filteredServices.length;
-  const totalClients = filteredServices.reduce((acc, service) => acc + service.clients.length, 0);
-  const avgErrorRate = filteredServices.length > 0 
-    ? filteredServices.reduce((acc, service) => acc + service.errorPercentage, 0) / filteredServices.length 
-    : 0;
-  const healthyServices = filteredServices.filter(s => s.status === "success" && !isServiceComingSoon(s.id) && !s.isComingSoon).length;
-  const warningServices = filteredServices.filter(s => s.status === "warning").length;
-  const errorServices = filteredServices.filter(s => s.status === "error").length;
-  const comingSoonCount = filteredServices.filter(s => isServiceComingSoon(s.id) || s.isComingSoon).length;
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -480,15 +552,41 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   return (
     <div className="space-y-6">
       {/* Tarjetas de estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Total Servicios</p>
-                <p className="text-2xl font-bold">{totalServices}</p>
+                <p className="text-2xl font-bold">{stats.totalActive}</p>
               </div>
-              <Briefcase className="h-8 w-8 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full" title="Ver lista de servicios activos">
+                      <List className="h-4 w-4 text-slate-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 max-h-[300px] overflow-y-auto">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1 uppercase tracking-wider">
+                      Servicios Activos ({stats.totalActive})
+                    </div>
+                    {activeServices.map(s => (
+                      <DropdownMenuItem 
+                        key={s.id} 
+                        className="cursor-pointer text-xs flex justify-between items-center py-2" 
+                        onClick={() => handleGoToFullMonitoring(s.id)}
+                      >
+                        <span className="font-medium truncate max-w-[170px]">{s.name}</span>
+                        {s.errorPercentage === 100 && (
+                          <Badge className="bg-red-500 text-white text-[9px] py-0 px-1">100%</Badge>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Briefcase className="h-8 w-8 text-muted-foreground" />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -498,65 +596,162 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Clientes Activos</p>
-                <p className="text-2xl font-bold">{totalClients}</p>
+                <p className="text-2xl font-bold">{stats.totalClientsActive}</p>
               </div>
-              <Users className="h-8 w-8 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full" title="Ver clientes activos">
+                      <List className="h-4 w-4 text-slate-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-72 max-h-[300px] overflow-y-auto">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1 uppercase tracking-wider">
+                      Clientes Activos ({stats.totalClientsActive})
+                    </div>
+                    {activeClients.map(c => (
+                      <DropdownMenuItem 
+                        key={c.id} 
+                        className="cursor-pointer text-xs flex justify-between items-center py-2"
+                      >
+                        <span className="font-medium truncate max-w-[180px]">{c.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-semibold bg-muted px-1.5 py-0.5 rounded">
+                          RUT: {c.rut || "N/A"}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                    {stats.totalClientsActive === 0 && (
+                      <div className="p-2.5 text-center text-xs text-muted-foreground font-medium">
+                        No hay clientes activos
+                      </div>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Users className="h-8 w-8 text-muted-foreground" />
+              </div>
             </div>
           </CardContent>
         </Card>
-        
+ 
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Tasa Error Promedio</p>
-                <p className={cn(
-                  "text-2xl font-bold",
-                  avgErrorRate > 10 ? "text-red-500" : avgErrorRate > 5 ? "text-amber-500" : "text-emerald-500"
-                )}>
-                  {avgErrorRate.toFixed(1)}%
-                </p>
+                <p className="text-xs text-muted-foreground">Servicios Activos</p>
+                <p className="text-2xl font-bold text-emerald-500">{stats.healthyServices}</p>
               </div>
-              {avgErrorRate > 10 ? 
-                <TrendingDown className="h-8 w-8 text-red-500" /> : 
-                <TrendingUp className="h-8 w-8 text-emerald-500" />
-              }
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full" title="Ver servicios Activos">
+                      <List className="h-4 w-4 text-emerald-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 max-h-[300px] overflow-y-auto">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-emerald-700 border-b mb-1 uppercase tracking-wider">
+                      🟢 Servicios Activos ({stats.healthyServices})
+                    </div>
+                    {activeServices.map(s => (
+                      <DropdownMenuItem 
+                        key={s.id} 
+                        className="cursor-pointer text-xs py-2" 
+                        onClick={() => handleGoToFullMonitoring(s.id)}
+                      >
+                        🟢 <span className="ml-1.5 font-medium truncate">{s.name}</span>
+                        {s.errorPercentage === 100 && (
+                          <Badge className="bg-red-500 text-white text-[9px] py-0 px-1 ml-2">100%</Badge>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <CheckCircle className="h-8 w-8 text-emerald-500" />
+              </div>
             </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Servicios Saludables</p>
-                <p className="text-2xl font-bold text-emerald-500">{healthyServices}</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-emerald-500" />
-            </div>
-          </CardContent>
-        </Card>
-
+ 
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Servicios Críticos</p>
-                <p className="text-2xl font-bold text-red-500">{errorServices}</p>
+                <p className={cn(
+                  "text-2xl font-bold",
+                  stats.errorServices > 0 ? "text-red-500" : "text-emerald-500"
+                )}>
+                  {stats.errorServices}
+                </p>
               </div>
-              <AlertTriangle className="h-8 w-8 text-red-500" />
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full" title="Ver servicios críticos">
+                      <List className={cn(
+                        "h-4 w-4",
+                        stats.errorServices > 0 ? "text-red-500" : "text-muted-foreground"
+                      )} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 max-h-[300px] overflow-y-auto">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-red-700 border-b mb-1 uppercase tracking-wider">
+                      🔴 Servicios Críticos (100% caídos) ({stats.errorServices})
+                    </div>
+                    {activeServices.filter(s => s.errorPercentage === 100).map(s => (
+                      <DropdownMenuItem 
+                        key={s.id} 
+                        className="cursor-pointer text-xs py-2" 
+                        onClick={() => handleGoToFullMonitoring(s.id)}
+                      >
+                        🔴 <span className="ml-1.5 font-medium truncate text-red-650">{s.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                    {stats.errorServices === 0 && (
+                      <div className="p-2.5 text-center text-xs text-muted-foreground font-medium">
+                        ✅ No hay servicios caídos.                      </div>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <AlertTriangle className={cn(
+                  "h-8 w-8",
+                  stats.errorServices > 0 ? "text-red-500" : "text-muted-foreground"
+                )} />
+              </div>
             </div>
           </CardContent>
         </Card>
-
+ 
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Próximamente</p>
-                <p className="text-2xl font-bold text-gray-500">{comingSoonCount}</p>
+                <p className="text-2xl font-bold text-gray-500">{stats.comingSoonCount}</p>
               </div>
-              <Clock className="h-8 w-8 text-gray-500" />
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full" title="Ver servicios por venir">
+                      <List className="h-4 w-4 text-gray-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 max-h-[300px] overflow-y-auto">
+                    <div className="px-2 py-1.5 text-xs font-semibold text-slate-650 border-b mb-1 uppercase tracking-wider">
+                      ⏳ En Desarrollo ({stats.comingSoonCount})
+                    </div>
+                    {comingSoonServices.map(s => (
+                      <DropdownMenuItem 
+                        key={s.id} 
+                        className="cursor-pointer text-xs py-2" 
+                        onClick={() => handleGoToFullMonitoring(s.id)}
+                      >
+                        ⏳ <span className="ml-1.5 font-medium truncate">{s.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Clock className="h-8 w-8 text-gray-500" />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -566,7 +761,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-wrap justify-between items-center gap-4">
-            <CardTitle className="text-lg">Mapa de Calor de Servicios</CardTitle>
+            <CardTitle className="text-lg">Mapa de Calor de Servicios Activos</CardTitle>
             <div className="flex items-center gap-2">
               <TooltipProvider>
                 <Tooltip>
@@ -681,8 +876,8 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                     <SelectContent>
                       <SelectItem value="todos">📋 Todos</SelectItem>
                       <SelectItem value="healthy">🟢 Saludables (0% error)</SelectItem>
-                      <SelectItem value="warning">🟡 Atención (1-10% error)</SelectItem>
-                      <SelectItem value="critical">🔴 Críticos (&gt;10% error)</SelectItem>
+                      <SelectItem value="warning">🟡 Atención (1-99% error)</SelectItem>
+                      <SelectItem value="critical">🔴 Críticos (100% caído)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -725,20 +920,19 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         </CardHeader>
         
         <CardContent>
-          {/* Contenido del mapa de calor - sin cambios */}
+          {/* Contenido del mapa de calor */}
           {filteredServices.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No se encontraron servicios con los filtros aplicados</p>
+              <p>No se encontraron servicios activos con los filtros aplicados</p>
               <Button variant="link" onClick={handleResetFilters} className="mt-2">
                 Limpiar filtros
               </Button>
             </div>
           ) : viewMode === "grid" ? (
-            // Vista grid (sin cambios)
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {filteredServices.map((service) => {
-                const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
+                const comingSoon = false;
                 return (
                   <div
                     key={service.id}
@@ -750,82 +944,70 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        {getStatusIcon(service.status, comingSoon)}
+                        {getStatusIcon(service.status, service.errorPercentage, comingSoon)}
                         <h3 className="font-semibold text-base">{service.name}</h3>
-                        {comingSoon && (
-                          <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600">
-                            🚀 Próximamente
-                          </Badge>
-                        )}
                       </div>
                       {getStatusBadge(service.status, service.errorPercentage, comingSoon)}
                     </div>
                     
                     <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                      {comingSoon ? "🚀 Servicio en desarrollo. Próximamente estará disponible el monitoreo completo." : service.description}
+                      {service.description}
                     </p>
                     
                     <div className="grid grid-cols-3 gap-2 mb-3">
                       <div className="text-center">
                         <p className="text-xs text-muted-foreground">Clientes</p>
-                        <p className="text-lg font-bold">{comingSoon ? 0 : service.clients.length}</p>
+                        <p className="text-lg font-bold">{service.clients.length}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-muted-foreground">Error técnico</p>
                         <p className={cn(
                           "text-lg font-bold",
-                          comingSoon ? "text-gray-500" :
+                          service.errorPercentage === 100 ? "text-red-600" :
                           service.errorPercentage === 0 ? "text-emerald-600" :
                           service.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
                         )}>
-                          {comingSoon ? "N/A" : `${service.errorPercentage}%`}
+                          {service.errorPercentage === 100 ? "100% ❌" : `${service.errorPercentage}%`}
                         </p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-muted-foreground">Estado</p>
                         <p className="text-sm font-medium">
-                          {comingSoon ? "⏳ Próximamente" :
-                            service.status === "success" ? "✅ Excelente" :
-                            service.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
+                          {service.errorPercentage === 100 ? "❌ 100% Caído" :
+                           service.status === "success" ? "✅ Excelente" :
+                           service.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
                         </p>
                       </div>
                     </div>
 
-                    {!comingSoon && (
-                      <>
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span>Salud del servicio</span>
-                            <span>{100 - service.errorPercentage}%</span>
-                          </div>
-                          <Progress value={100 - service.errorPercentage} className="h-2" />
-                        </div>
-
-                        {service.clients.length > 0 && (
-                          <div className="mt-3 pt-2 border-t">
-                            <div className="flex flex-wrap gap-1">
-                              {service.clients.slice(0, 3).map((client) => (
-                                <Badge key={client.id} variant="outline" className="text-[10px]">
-                                  {client.name.length > 20 ? client.name.substring(0, 20) + "..." : client.name}
-                                </Badge>
-                              ))}
-                              {service.clients.length > 3 && (
-                                <Badge variant="outline" className="text-[10px]">
-                                  +{service.clients.length - 3} más
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Salud del servicio</span>
+                        <span>{service.errorPercentage === 100 ? "0%" : `${100 - service.errorPercentage}%`}</span>
+                      </div>
+                      <Progress 
+                        value={service.errorPercentage === 100 ? 0 : 100 - service.errorPercentage} 
+                        className={cn(
+                          "h-2",
+                          service.errorPercentage === 100 && "bg-red-200"
                         )}
-                      </>
-                    )}
+                      />
+                    </div>
 
-                    {comingSoon && (
-                      <div className="mt-3 pt-2 border-t text-center">
-                        <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200">
-                          <Clock className="h-3 w-3 mr-1" />
-                          En desarrollo
-                        </Badge>
+                    {service.clients.length > 0 && (
+                      <div className="mt-3 pt-2 border-t">
+                        <div className="flex flex-wrap gap-1">
+                          {service.clients.slice(0, 3).map((client) => (
+                            <Badge key={client.id} variant="outline" className="text-[10px]">
+                              {client.name.length > 20 ? client.name.substring(0, 20) + "..." : client.name}
+                            </Badge>
+                          ))}
+                          {service.clients.length > 3 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              +{service.clients.length - 3} más
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -833,7 +1015,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               })}
             </div>
           ) : viewMode === "list" ? (
-            // Vista lista (sin cambios)
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader className="bg-muted/50">
@@ -848,7 +1029,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                 </TableHeader>
                 <TableBody>
                   {filteredServices.map((service) => {
-                    const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
+                    const comingSoon = false;
                     return (
                       <TableRow 
                         key={service.id}
@@ -857,26 +1038,21 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                       >
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
-                            {getStatusIcon(service.status, comingSoon)}
+                            {getStatusIcon(service.status, service.errorPercentage, comingSoon)}
                             {service.name}
-                            {comingSoon && (
-                              <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600">
-                                🚀 Próximamente
-                              </Badge>
-                            )}
                           </div>
                         </TableCell>
                         <TableCell className="max-w-[300px] truncate text-muted-foreground">
-                          {comingSoon ? "🚀 Servicio en desarrollo" : service.description}
+                          {service.description}
                         </TableCell>
-                        <TableCell className="text-center">{comingSoon ? 0 : service.clients.length}</TableCell>
+                        <TableCell className="text-center">{service.clients.length}</TableCell>
                         <TableCell className="text-center">
                           <Badge variant="outline" className={cn(
-                            comingSoon ? "text-gray-500 border-gray-200" :
+                            service.errorPercentage === 100 ? "text-red-600 border-red-300 bg-red-50" :
                             service.errorPercentage === 0 ? "text-emerald-600 border-emerald-200" :
                             service.errorPercentage <= 10 ? "text-amber-600 border-amber-200" : "text-red-600 border-red-200"
                           )}>
-                            {comingSoon ? "N/A" : `${service.errorPercentage}%`}
+                            {service.errorPercentage === 100 ? "100% ❌" : `${service.errorPercentage}%`}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-center">
@@ -895,11 +1071,11 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </Table>
             </div>
           ) : (
-            // Vista mapa (sin cambios)
+            // Vista mapa
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-muted-foreground">
-                  Vista de mapa de calor - {filteredServices.length} servicios
+                  Vista de mapa de calor - {filteredServices.length} servicios activos
                 </p>
                 <div className="flex items-center gap-3 text-xs">
                   <div className="flex items-center gap-1">
@@ -908,26 +1084,18 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   </div>
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-3 rounded-full bg-amber-400"></div>
-                    <span>Atención (1-10%)</span>
+                    <span>Atención (1-99%)</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                    <span>Alto (11-40%)</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    <span>Crítico (&gt;40%)</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-                    <span>Próximamente</span>
+                    <div className="w-3 h-3 rounded-full bg-red-700"></div>
+                    <span>Crítico (100% caído)</span>
                   </div>
                 </div>
               </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                 {filteredServices.map((service) => {
-                  const comingSoon = isServiceComingSoon(service.id) || service.isComingSoon;
+                  const comingSoon = false;
                   return (
                     <TooltipProvider key={service.id}>
                       <Tooltip>
@@ -944,19 +1112,17 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                               {service.name}
                             </p>
                             <p className="text-xs opacity-90 mt-1">
-                              {comingSoon ? "Próximamente" : `${service.errorPercentage}% error`}
+                              {service.errorPercentage === 100 ? "100% ❌" : `${service.errorPercentage}% error`}
                             </p>
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs">
                           <div className="space-y-1">
                             <p className="font-semibold">{service.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {comingSoon ? "Servicio en desarrollo - Próximamente disponible" : service.description}
-                            </p>
-                            <p className="text-xs">📊 {comingSoon ? "Estado: En desarrollo" : `Error: ${service.errorPercentage}%`}</p>
-                            <p className="text-xs">👥 Clientes: {comingSoon ? 0 : service.clients.length}</p>
-                            <p className="text-xs">✅ Estado: {comingSoon ? "⏳ Próximamente" : (service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico")}</p>
+                            <p className="text-xs text-muted-foreground">{service.description}</p>
+                            <p className="text-xs">📊 Error: {service.errorPercentage}%</p>
+                            <p className="text-xs">👥 Clientes: {service.clients.length}</p>
+                            <p className="text-xs">✅ Estado: {service.errorPercentage === 100 ? "100% Caído" : service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"}</p>
                           </div>
                         </TooltipContent>
                       </Tooltip>
@@ -966,29 +1132,28 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               </div>
 
               <div className="mt-6 pt-4 border-t text-center text-xs text-muted-foreground">
-                <p>💡 Los colores representan el nivel de error técnico de cada servicio</p>
-                <p className="mt-1">Haz clic en cualquier servicio para ver detalles completos</p>
+                <p>💡 Los colores representan el nivel de error técnico de cada servicio activo</p>
+                <p className="mt-1">🔴 Rojo oscuro = 100% caído | 🟢 Verde = 0% error</p>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Modal de detalle del servicio (sin cambios) */}
+      {/* Modal de detalle del servicio */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           {selectedServiceDetail && (
             <>
               <DialogHeader>
                 <div className="flex items-center gap-3">
-                  {getStatusIcon(selectedServiceDetail.status, isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon)}
+                  {getStatusIcon(selectedServiceDetail.status, selectedServiceDetail.errorPercentage, isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon)}
                   <DialogTitle className="text-xl">{selectedServiceDetail.name}</DialogTitle>
                   {getStatusBadge(selectedServiceDetail.status, selectedServiceDetail.errorPercentage, isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon)}
                 </div>
               </DialogHeader>
               
               <div className="space-y-6">
-                {/* Contenido del modal sin cambios */}
                 <div>
                   <h4 className="text-sm font-semibold mb-2">Descripción</h4>
                   <p className="text-sm text-muted-foreground">
@@ -1010,16 +1175,19 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                     <p className={cn(
                       "text-2xl font-bold",
                       (isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "text-gray-500" :
+                      selectedServiceDetail.errorPercentage === 100 ? "text-red-600" :
                       selectedServiceDetail.errorPercentage === 0 ? "text-emerald-600" :
                       selectedServiceDetail.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
                     )}>
-                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : `${selectedServiceDetail.errorPercentage}%`}
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : 
+                        selectedServiceDetail.errorPercentage === 100 ? "100% ❌" : `${selectedServiceDetail.errorPercentage}%`}
                     </p>
                   </div>
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Estado</p>
                     <p className="text-lg font-medium">
                       {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "⏳ Próximamente" :
+                        selectedServiceDetail.errorPercentage === 100 ? "❌ 100% Caído" :
                         selectedServiceDetail.status === "success" ? "✅ Excelente" :
                         selectedServiceDetail.status === "warning" ? "⚠️ Atención" : "❌ Crítico"}
                     </p>
@@ -1027,7 +1195,8 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                   <div className="text-center p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground">Uptime</p>
                     <p className="text-2xl font-bold text-emerald-600">
-                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : "99.9%"}
+                      {(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) ? "N/A" : 
+                        selectedServiceDetail.errorPercentage === 100 ? "0%" : "99.9%"}
                     </p>
                   </div>
                 </div>
@@ -1049,10 +1218,11 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                             </div>
                           </div>
                           <Badge variant="outline" className={cn(
+                            client.errorPercentage === 100 ? "text-red-600 border-red-300 bg-red-50" :
                             client.errorPercentage === 0 ? "text-emerald-600" :
                             client.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
                           )}>
-                            {client.errorPercentage}% error
+                            {client.errorPercentage === 100 ? "100% ❌" : `${client.errorPercentage}% error`}
                           </Badge>
                         </div>
                       ))}
@@ -1089,7 +1259,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Exportación con selección de campos */}
+      {/* Modal de Exportación */}
       <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>

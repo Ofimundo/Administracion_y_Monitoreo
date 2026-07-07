@@ -16,6 +16,10 @@ import {
   ResponsiveContainer,
   ComposedChart,
   Area,
+  RadialBarChart,
+  RadialBar,
+  BarChart,
+  Bar,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -68,6 +72,31 @@ import {
   History,
   CheckCircle,
   Download,
+  Cloud,
+  Code,
+  DollarSign,
+  FolderKanban,
+  Clock,
+  Users,
+  GitBranch,
+  Trophy,
+  Plus,
+  ListChecks,
+  Bug,
+  Timer,
+  Gauge,
+  AlertTriangle,
+  Shield,
+  ZapIcon,
+  Briefcase,
+  FileText,
+  Target,
+  BarChart3,
+  PieChart as PieChartIcon,
+  LineChart as LineChartIcon,
+  Ticket,
+  Layers,
+  User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, subDays, parseISO, startOfDay, endOfDay, isWithinInterval } from "date-fns";
@@ -117,17 +146,76 @@ const EXPORT_FIELDS = [
   { id: "tiempoRespuesta", label: "Tiempo Respuesta Promedio (ms)", default: false },
 ];
 
-export function DashboardMetrics() {
+export function DashboardMetrics({
+  onNavigateToServices,
+  onNavigateToTimeline,
+}: {
+  onNavigateToServices?: () => void;
+  onNavigateToTimeline?: () => void;
+}) {
   const router = useRouter();
   const [allData, setAllData] = useState<MetricDataPoint[]>([]);
   const [realInvoiceData, setRealInvoiceData] = useState<InvoiceData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Modales
-  const [showInternosModal, setShowInternosModal] = useState(false);
-  const [showExternosModal, setShowExternosModal] = useState(false);
-  const [showErroresModal, setShowErroresModal] = useState(false);
+  // Datos reales de TODOS los servicios
+  const [oficoreData, setOficoreData] = useState<any[]>([]);
+  const [ofitecData, setOfitecData] = useState<any[]>([]);
+  const [sgcData, setSgcData] = useState<any[]>([]);
+  const [serviciosData, setServiciosData] = useState<any[]>([]);
+  
+  // Estados para proyectos (Panel 3 - Próximamente)
+  const [proyectosActivos, setProyectosActivos] = useState<Array<{
+    id: number;
+    nombre: string;
+    responsable: string;
+    progreso: number;
+    estado: string;
+    prioridad: "Crítica" | "Alta" | "Media" | "Baja";
+  }>>([]);
+
+  const [entregasPorEstado, setEntregasPorEstado] = useState([
+    { name: "Completadas", value: 0, color: "#10b981", icon: "✅" },
+    { name: "En Progreso", value: 0, color: "#3b82f6", icon: "🔄" },
+    { name: "Retrasadas", value: 0, color: "#ef4444", icon: "⚠️" },
+    { name: "Pendientes", value: 0, color: "#f59e0b", icon: "⏳" },
+  ]);
+
+  const [saludProyectos, setSaludProyectos] = useState([
+    { name: "Salud Técnica", value: 0, color: "#8b5cf6" },
+    { name: "Cumplimiento", value: 0, color: "#3b82f6" },
+    { name: "Recursos", value: 0, color: "#f59e0b" },
+    { name: "Riesgos", value: 0, color: "#ef4444" },
+  ]);
+
+  const [proyectosMetrics, setProyectosMetrics] = useState({
+    entregasATiempo: 0,
+    tareasPendientes: 0,
+    bugsAbiertos: 0,
+    proyectosActivos: 0,
+    avancePromedio: 0,
+  });
+
+  // Datos detallados para modales del Panel 1
+  const [detalleDisponibilidad, setDetalleDisponibilidad] = useState<any[]>([]);
+  const [detalleIncidentes, setDetalleIncidentes] = useState<any[]>([]);
+  const [detalleAlertas, setDetalleAlertas] = useState<any[]>([]);
+  const [detalleCambios, setDetalleCambios] = useState<any[]>([]);
+  const [detalleTickets, setDetalleTickets] = useState<any[]>([]);
+  
+  // Estados para modales del Panel 1
+  const [showDisponibilidadModal, setShowDisponibilidadModal] = useState(false);
+  const [showIncidentesModal, setShowIncidentesModal] = useState(false);
+  const [showAlertasModal, setShowAlertasModal] = useState(false);
+  const [showCambiosModal, setShowCambiosModal] = useState(false);
+  const [showTicketsModal, setShowTicketsModal] = useState(false);
+  
+  // Estados para modales del Panel 3 (Próximamente)
+  const [showProyectosModal, setShowProyectosModal] = useState(false);
+  const [showEntregasModal, setShowEntregasModal] = useState(false);
+  const [showTareasModal, setShowTareasModal] = useState(false);
+  const [showBugsModal, setShowBugsModal] = useState(false);
   
   // Modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
@@ -136,7 +224,7 @@ export function DashboardMetrics() {
   );
   const [selectAll, setSelectAll] = useState(true);
   
-  // FILTRO UNIFICADO - SIN FECHA PREDETERMINADA
+  // FILTRO UNIFICADO
   const [filters, setFilters] = useState({
     service: "todos",
     dateRange: { from: undefined as Date | undefined, to: undefined as Date | undefined },
@@ -144,105 +232,759 @@ export function DashboardMetrics() {
     metric: "all" as "all" | "success" | "errors" | "rules",
   });
 
+  // Estado para controlar el filtro de fechas
+  const [tempDateRange, setTempDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
+    from: undefined,
+    to: undefined,
+  });
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [dateFilterApplied, setDateFilterApplied] = useState(false);
+
   const [showFilters, setShowFilters] = useState(false);
+
+  const [infraStats, setInfraStats] = useState({
+    online: true,
+    equiposPrincipales: 99.4,
+    servidoresCore: 100,
+    database: 100,
+    enlacesRed: 98.2,
+    version: null as string | null,
+    error: null as string | null
+  });
+
+  // Polling de infraestructura
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchInfra = async () => {
+      try {
+        const res = await fetch("/api/infraestructura/status");
+        const data = await res.json();
+        if (isMounted && data.success) {
+          setInfraStats({
+            online: data.online,
+            equiposPrincipales: parseFloat(data.equiposPrincipales.toFixed(2)),
+            servidoresCore: data.servidoresCore,
+            database: data.database,
+            enlacesRed: parseFloat(data.enlacesRed.toFixed(2)),
+            version: data.version || null,
+            error: data.error
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching infra status:", err);
+      }
+    };
+
+    fetchInfra();
+    const interval = setInterval(fetchInfra, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleZabbixRedirect = () => {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'https://zabbix.ofimundo.cl/index.php';
+    form.target = '_blank';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'hidden';
+    nameInput.name = 'name';
+    nameInput.value = 'reporte_api';
+    form.appendChild(nameInput);
+
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'hidden';
+    passwordInput.name = 'password';
+    passwordInput.value = 'Soporte0101';
+    form.appendChild(passwordInput);
+
+    const autologinInput = document.createElement('input');
+    autologinInput.type = 'hidden';
+    autologinInput.name = 'autologin';
+    autologinInput.value = '1';
+    form.appendChild(autologinInput);
+
+    const requestInput = document.createElement('input');
+    requestInput.type = 'hidden';
+    requestInput.name = 'request';
+    requestInput.value = 'zabbix.php?action=dashboard.view&dashboardid=392';
+    form.appendChild(requestInput);
+
+    const enterInput = document.createElement('input');
+    enterInput.type = 'hidden';
+    enterInput.name = 'enter';
+    enterInput.value = 'Sign in';
+    form.appendChild(enterInput);
+
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  };
+
+  // Función para cargar datos de todos los servicios activos con filtro de fechas
+  const fetchAllServicesData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
+    try {
+      const serviceIds = ["facturas", "oficore", "ofitec", "sgc"];
+      const results: any = {};
+
+      let queryParams = "";
+      if (dateRange?.from) {
+        const fromStr = format(dateRange.from, "yyyyMMdd");
+        queryParams += `?fechaDesde=${fromStr}`;
+        if (dateRange.to) {
+          const toStr = format(dateRange.to, "yyyyMMdd");
+          queryParams += `&fechaHasta=${toStr}`;
+        }
+      }
+
+      for (const serviceId of serviceIds) {
+        try {
+          let url = "";
+          if (serviceId === "facturas") {
+            url = "/api/facturas/bitacora?estado=todos";
+            if (dateRange?.from) {
+              const fromStr = format(dateRange.from, "yyyy-MM-dd");
+              url += `&fechaDesde=${fromStr}`;
+            }
+            if (dateRange?.to) {
+              const toStr = format(dateRange.to, "yyyy-MM-dd");
+              url += `&fechaHasta=${toStr}`;
+            }
+          } else if (serviceId === "oficore") {
+            url = `/api/oficore/stats${queryParams}`;
+          } else if (serviceId === "ofitec") {
+            url = `/api/ofitec/stats${queryParams}`;
+          } else if (serviceId === "sgc") {
+            url = `/api/sgc/stats${queryParams}`;
+          }
+
+          console.log(`📊 [fetchAllServicesData] Llamando a: ${url}`);
+          const res = await fetch(url);
+          const data = await res.json();
+          
+          if (data.success) {
+            results[serviceId] = data;
+          }
+        } catch (e) {
+          console.error(`Error fetching ${serviceId}:`, e);
+          results[serviceId] = null;
+        }
+      }
+
+      return results;
+    } catch (error) {
+      console.error("Error fetching services data:", error);
+      return null;
+    }
+  };
+
+  // Función para calcular métricas de todos los servicios
+  const calculateAllMetrics = (servicesData: any, facturasData: any[]) => {
+    // PANEL 1 - MÉTRICAS DE OPERACIONES (TODOS LOS SERVICIOS)
+    
+    // 1. FACTURAS
+    const facturasTotal = facturasData.length;
+    const facturasAprobadas = facturasData.filter(f => f.estado === "Aprobado").length;
+    const facturasRechazadas = facturasData.filter(f => f.estado === "Rechazado").length;
+    const facturasManuales = facturasData.filter(f => f.estado === "Manual").length;
+    const facturasPendientes = facturasData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
+    const facturasErrorInfra = facturasData.filter(f => isInfraestructuraError(f.motivo)).length;
+    
+    // 2. OFICORE
+    const oficoreTotal = servicesData.oficore?.detalles?.length || 0;
+    const oficoreResueltas = servicesData.oficore?.detalles?.filter((d: any) => d.id_accion === 5).length || 0;
+    const oficoreNoResueltas = oficoreTotal - oficoreResueltas;
+    
+    // 3. OFITEC
+    const ofitecTotal = servicesData.ofitec?.detalles?.length || 0;
+    const resolvedStatuses = ['4','24','6','8','9','15','16','7'];
+    const ofitecResueltas = servicesData.ofitec?.detalles?.filter((d: any) => resolvedStatuses.includes(d.LLA_ESTADO)).length || 0;
+    const ofitecIngresadas = servicesData.ofitec?.detalles?.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
+    const ofitecPendientes = ofitecIngresadas - ofitecResueltas;
+    
+    // 4. SGC
+    const sgcTotal = servicesData.sgc?.data?.length || 0;
+    const sgcPicking = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "picking").length || 0;
+    const sgcOd = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "od").length || 0;
+    const sgcOtros = sgcTotal - sgcPicking - sgcOd;
+
+    // TOTALES GENERALES
+    const totalDocumentos = facturasTotal + oficoreTotal + ofitecTotal + sgcTotal;
+    const totalResueltos = facturasAprobadas + facturasRechazadas + facturasManuales + oficoreResueltas + ofitecResueltas + sgcPicking + sgcOd;
+    const totalPendientes = facturasPendientes + oficoreNoResueltas + ofitecPendientes + sgcOtros;
+    const totalErroresInfra = facturasErrorInfra;
+
+    // Calcular tasas globales
+    const tasaExitoGlobal = totalDocumentos > 0 ? Math.round((totalResueltos / totalDocumentos) * 100) : 0;
+    const disponibilidadGlobal = totalDocumentos > 0 ? (100 - Math.round((totalErroresInfra / totalDocumentos) * 100)) : 100;
+    const infraestructuraGlobal = totalDocumentos > 0 ? Math.round((totalErroresInfra / totalDocumentos) * 100) : 0;
+
+    // Detalle para Disponibilidad - TODOS LOS SERVICIOS
+    setDetalleDisponibilidad([
+      { 
+        id: "facturas", 
+        nombre: "Aceptación y Rechazo", 
+        valor: facturasTotal > 0 ? (100 - Math.round((facturasErrorInfra / facturasTotal) * 100)) : 100,
+        total: facturasTotal,
+        errorDocs: facturasErrorInfra,
+        estado: facturasErrorInfra === 0 ? "Disponible" : "Atención"
+      },
+      { 
+        id: "oficore", 
+        nombre: "OFICORE", 
+        valor: oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 100,
+        total: oficoreTotal,
+        errorDocs: 0,
+        estado: oficoreResueltas > oficoreTotal * 0.8 ? "Disponible" : "Atención"
+      },
+      { 
+        id: "ofitec", 
+        nombre: "OFITEC", 
+        valor: ofitecIngresadas > 0 ? Math.round((ofitecResueltas / ofitecIngresadas) * 100) : 100,
+        total: ofitecIngresadas,
+        errorDocs: 0,
+        estado: ofitecResueltas > ofitecIngresadas * 0.8 ? "Disponible" : "Atención"
+      },
+      { 
+        id: "sgc", 
+        nombre: "SGC", 
+        valor: sgcTotal > 0 ? Math.round(((sgcPicking + sgcOd) / sgcTotal) * 100) : 100,
+        total: sgcTotal,
+        errorDocs: 0,
+        estado: (sgcPicking + sgcOd) > sgcTotal * 0.8 ? "Disponible" : "Atención"
+      },
+    ]);
+
+    // Detalle para Incidentes Abiertos - TODOS LOS SERVICIOS
+    const incidentesDetalle = [
+      { id: "facturas-manuales", nombre: "Facturas Manuales", valor: facturasManuales, servicio: "Facturas", estado: "Manual" },
+      { id: "facturas-rechazadas", nombre: "Facturas Rechazadas", valor: facturasRechazadas, servicio: "Facturas", estado: "Rechazado" },
+      { id: "oficore-pendientes", nombre: "Incidencias No Resueltas", valor: oficoreNoResueltas, servicio: "OFICORE", estado: "Pendiente" },
+      { id: "ofitec-pendientes", nombre: "Llamadas Pendientes", valor: ofitecPendientes, servicio: "OFITEC", estado: "Pendiente" },
+      { id: "sgc-otros", nombre: "Documentos Otros", valor: sgcOtros, servicio: "SGC", estado: "Pendiente" },
+    ].filter(i => i.valor > 0);
+    setDetalleIncidentes(incidentesDetalle);
+
+    // ALERTAS CRÍTICAS - SOLO ERRORES DE INFRAESTRUCTURA
+    const alertasCriticas = [
+      { 
+        id: "errorInfra", 
+        nombre: "Errores Infraestructura", 
+        valor: facturasErrorInfra, 
+        servicio: "Facturas", 
+        estado: "Crítico",
+        descripcion: "Errores técnicos (conexión, timeout, servidor caído)"
+      },
+    ].filter(i => i.valor > 0);
+    
+    setDetalleAlertas(alertasCriticas);
+
+    // Detalle para Cambios Exitosos - TODOS LOS SERVICIOS
+    setDetalleCambios([
+      { id: "facturas", nombre: "Facturas Aprobadas", valor: facturasAprobadas, total: facturasTotal, porcentaje: facturasTotal > 0 ? Math.round((facturasAprobadas / facturasTotal) * 100) : 0, estado: "Exitoso" },
+      { id: "oficore", nombre: "Incidencias Resueltas", valor: oficoreResueltas, total: oficoreTotal, porcentaje: oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 0, estado: "Exitoso" },
+      { id: "ofitec", nombre: "Llamadas Resueltas", valor: ofitecResueltas, total: ofitecIngresadas, porcentaje: ofitecIngresadas > 0 ? Math.round((ofitecResueltas / ofitecIngresadas) * 100) : 0, estado: "Exitoso" },
+      { id: "sgc", nombre: "Documentos Procesados", valor: sgcPicking + sgcOd, total: sgcTotal, porcentaje: sgcTotal > 0 ? Math.round(((sgcPicking + sgcOd) / sgcTotal) * 100) : 0, estado: "Exitoso" },
+    ]);
+
+    // Detalle de Tickets por día (de todos los servicios)
+    const ticketsPorDia: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
+    
+    facturasData.forEach((f: any) => {
+      const fecha = f.fecha_proceso?.split('T')[0];
+      if (fecha) {
+        if (!ticketsPorDia[fecha]) {
+          ticketsPorDia[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
+        }
+        ticketsPorDia[fecha].ingresados++;
+        if (f.estado === "Aprobado" || f.estado === "Rechazado") {
+          ticketsPorDia[fecha].resueltos++;
+        }
+        if (f.estado === "Manual") {
+          ticketsPorDia[fecha].asignados++;
+        }
+        if (f.estado === "Rechazado") {
+          ticketsPorDia[fecha].cerrados++;
+        }
+      }
+    });
+
+    (servicesData.oficore?.detalles || []).forEach((d: any) => {
+      const fecha = d.fecha_detalle?.split('T')[0];
+      if (fecha) {
+        if (!ticketsPorDia[fecha]) {
+          ticketsPorDia[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
+        }
+        ticketsPorDia[fecha].ingresados++;
+        if (d.id_accion === 5) {
+          ticketsPorDia[fecha].resueltos++;
+        }
+        if (d.id_accion !== 5 && d.id_accion !== 3) {
+          ticketsPorDia[fecha].asignados++;
+        }
+        if (d.id_accion === 3) {
+          ticketsPorDia[fecha].cerrados++;
+        }
+      }
+    });
+
+    (servicesData.ofitec?.detalles || []).forEach((d: any) => {
+      const fecha = d.LLA_FEC_LLAMADA?.split('T')[0];
+      if (fecha) {
+        if (!ticketsPorDia[fecha]) {
+          ticketsPorDia[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
+        }
+        if (d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1) {
+          ticketsPorDia[fecha].ingresados++;
+        }
+        const est = d.LLA_ESTADO?.toString().trim();
+        if (['4','24','6','8','9','15','16','7'].includes(est)) {
+          ticketsPorDia[fecha].resueltos++;
+        }
+        if (['1','2','17','20','5','30'].includes(est)) {
+          ticketsPorDia[fecha].asignados++;
+        }
+        if (['8','9','11','12'].includes(est)) {
+          ticketsPorDia[fecha].cerrados++;
+        }
+      }
+    });
+
+    (servicesData.sgc?.data || []).forEach((d: any) => {
+      const fecha = d.fecha_documento?.split('T')[0];
+      if (fecha) {
+        if (!ticketsPorDia[fecha]) {
+          ticketsPorDia[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
+        }
+        ticketsPorDia[fecha].ingresados++;
+        if (d.tipo_de_venta === "picking" || d.tipo_de_venta === "od") {
+          ticketsPorDia[fecha].resueltos++;
+        }
+        if (d.tipo_de_venta === "venta directa") {
+          ticketsPorDia[fecha].asignados++;
+        }
+        if (d.tipo_de_venta === "distribución") {
+          ticketsPorDia[fecha].cerrados++;
+        }
+      }
+    });
+
+    const ticketsData = Object.keys(ticketsPorDia).sort().map(fecha => ({
+      fecha,
+      ...ticketsPorDia[fecha]
+    }));
+
+    setDetalleTickets(ticketsData);
+
+    // PANEL 3 - MÉTRICAS DE PROYECTOS (PRÓXIMAMENTE - DATOS DE DEMO)
+    const proyectos: any[] = [];
+    const detalleEntregas: any[] = [];
+    const detalleTareas: any[] = [];
+    const detalleBugs: any[] = [];
+
+    const tasaExitoFacturas = facturasTotal > 0 ? Math.round((facturasAprobadas / facturasTotal) * 100) : 0;
+    proyectos.push({
+      id: 1,
+      nombre: "Aceptación y Rechazo de Facturas",
+      responsable: "RPA",
+      progreso: tasaExitoFacturas,
+      estado: tasaExitoFacturas >= 80 ? "En Progreso" : "Retrasada",
+      prioridad: "Alta" as const,
+    });
+    detalleEntregas.push({
+      id: "facturas",
+      nombre: "Facturas Aprobadas",
+      valor: facturasAprobadas,
+      total: facturasTotal,
+      porcentaje: tasaExitoFacturas,
+      estado: "Completadas",
+      color: "#10b981"
+    });
+    detalleTareas.push({
+      id: "facturas",
+      nombre: "Facturas Pendientes",
+      valor: facturasManuales + facturasPendientes,
+      detalle: `Manuales: ${facturasManuales}, Pendientes: ${facturasPendientes}`,
+      estado: "Pendiente"
+    });
+    detalleBugs.push({
+      id: "facturas",
+      nombre: "Facturas Rechazadas",
+      valor: facturasRechazadas,
+      detalle: `Rechazadas por reglas de negocio`,
+      estado: "Bug"
+    });
+
+    const tasaExitoOficore = oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 0;
+    proyectos.push({
+      id: 2,
+      nombre: "OFICORE - Incidencias",
+      responsable: "Soporte Técnico",
+      progreso: tasaExitoOficore,
+      estado: tasaExitoOficore >= 80 ? "En Progreso" : tasaExitoOficore >= 50 ? "En Progreso" : "Retrasada",
+      prioridad: "Media" as const,
+    });
+    detalleEntregas.push({
+      id: "oficore",
+      nombre: "Incidencias Resueltas",
+      valor: oficoreResueltas,
+      total: oficoreTotal,
+      porcentaje: tasaExitoOficore,
+      estado: "Completadas",
+      color: "#10b981"
+    });
+    detalleTareas.push({
+      id: "oficore",
+      nombre: "Incidencias Pendientes",
+      valor: oficoreNoResueltas,
+      detalle: `No resueltas (id_accion !== 5)`,
+      estado: "Pendiente"
+    });
+    detalleBugs.push({
+      id: "oficore",
+      nombre: "Incidencias No Resueltas",
+      valor: oficoreNoResueltas,
+      detalle: `Requieren atención técnica`,
+      estado: "Bug"
+    });
+
+    const tasaExitoOfitec = ofitecIngresadas > 0 ? Math.round((ofitecResueltas / ofitecIngresadas) * 100) : 0;
+    proyectos.push({
+      id: 3,
+      nombre: "OFITEC - Llamadas",
+      responsable: "Soporte Técnico",
+      progreso: tasaExitoOfitec,
+      estado: tasaExitoOfitec >= 80 ? "En Progreso" : tasaExitoOfitec >= 50 ? "En Progreso" : "Retrasada",
+      prioridad: "Media" as const,
+    });
+    detalleEntregas.push({
+      id: "ofitec",
+      nombre: "Llamadas Resueltas",
+      valor: ofitecResueltas,
+      total: ofitecIngresadas,
+      porcentaje: tasaExitoOfitec,
+      estado: "Completadas",
+      color: "#10b981"
+    });
+    detalleTareas.push({
+      id: "ofitec",
+      nombre: "Llamadas Pendientes",
+      valor: ofitecPendientes,
+      detalle: `No resueltas (estados no resueltos)`,
+      estado: "Pendiente"
+    });
+    detalleBugs.push({
+      id: "ofitec",
+      nombre: "Llamadas No Resueltas",
+      valor: ofitecPendientes,
+      detalle: `Requieren seguimiento técnico`,
+      estado: "Bug"
+    });
+
+    const tasaExitoSgc = sgcTotal > 0 ? Math.round(((sgcPicking + sgcOd) / sgcTotal) * 100) : 0;
+    proyectos.push({
+      id: 4,
+      nombre: "SGC - Documentos",
+      responsable: "Logística",
+      progreso: tasaExitoSgc,
+      estado: tasaExitoSgc >= 80 ? "En Progreso" : tasaExitoSgc >= 50 ? "En Progreso" : "Retrasada",
+      prioridad: "Media" as const,
+    });
+    detalleEntregas.push({
+      id: "sgc",
+      nombre: "Documentos Procesados",
+      valor: sgcPicking + sgcOd,
+      total: sgcTotal,
+      porcentaje: tasaExitoSgc,
+      estado: "Completadas",
+      color: "#10b981"
+    });
+    detalleTareas.push({
+      id: "sgc",
+      nombre: "Documentos Otros",
+      valor: sgcOtros,
+      detalle: `Documentos no clasificados`,
+      estado: "Pendiente"
+    });
+    detalleBugs.push({
+      id: "sgc",
+      nombre: "Documentos No Procesados",
+      valor: sgcOtros,
+      detalle: `Requieren revisión`,
+      estado: "Bug"
+    });
+
+    // SALUD DE PROYECTOS
+    const totalProblemas = facturasRechazadas + oficoreNoResueltas + ofitecPendientes + sgcOtros;
+    const problemasPorcentaje = totalDocumentos > 0 
+      ? Math.round((totalProblemas / totalDocumentos) * 100) 
+      : 0;
+    const erroresInfraPorcentaje = totalDocumentos > 0 
+      ? Math.round((totalErroresInfra / totalDocumentos) * 100) 
+      : 0;
+
+    const saludTecnica = Math.min(100, tasaExitoGlobal);
+    const cumplimiento = Math.min(100, tasaExitoGlobal + 5);
+    const recursos = Math.max(0, Math.min(100, 100 - Math.min(erroresInfraPorcentaje, 30)));
+    const riesgos = Math.max(0, Math.min(100, 100 - Math.min(problemasPorcentaje, 30)));
+
+    setSaludProyectos([
+      { 
+        name: "Salud Técnica", 
+        value: Math.round(saludTecnica), 
+        color: saludTecnica > 70 ? "#8b5cf6" : saludTecnica > 40 ? "#f59e0b" : "#ef4444" 
+      },
+      { 
+        name: "Cumplimiento", 
+        value: Math.round(cumplimiento), 
+        color: cumplimiento > 70 ? "#3b82f6" : cumplimiento > 40 ? "#f59e0b" : "#ef4444" 
+      },
+      { 
+        name: "Recursos", 
+        value: Math.round(recursos), 
+        color: recursos > 70 ? "#10b981" : recursos > 40 ? "#f59e0b" : "#ef4444" 
+      },
+      { 
+        name: "Riesgos", 
+        value: Math.round(riesgos), 
+        color: riesgos > 70 ? "#10b981" : riesgos > 40 ? "#f59e0b" : "#ef4444" 
+      },
+    ]);
+
+    const numProyectos = proyectos.length || 1;
+    const avancePromedio = Math.round(proyectos.reduce((sum, p) => sum + p.progreso, 0) / numProyectos);
+    const completadas = detalleEntregas.reduce((sum, p) => sum + p.valor, 0);
+    const pendientesTotal = detalleTareas.reduce((sum, p) => sum + p.valor, 0);
+    const bugsTotal = detalleBugs.reduce((sum, p) => sum + p.valor, 0);
+
+    setProyectosActivos(proyectos);
+    setProyectosMetrics({
+      entregasATiempo: avancePromedio,
+      tareasPendientes: pendientesTotal,
+      bugsAbiertos: Math.round(bugsTotal / 4),
+      proyectosActivos: proyectos.length,
+      avancePromedio: avancePromedio,
+    });
+
+    setEntregasPorEstado([
+      { name: "Completadas", value: completadas, color: "#10b981", icon: "✅" },
+      { name: "En Progreso", value: pendientesTotal, color: "#3b82f6", icon: "🔄" },
+      { name: "Retrasadas", value: bugsTotal, color: "#ef4444", icon: "⚠️" },
+      { name: "Pendientes", value: pendientesTotal, color: "#f59e0b", icon: "⏳" },
+    ]);
+
+    return { 
+      proyectos, 
+      metrics: { 
+        avancePromedio, 
+        completadas, 
+        pendientesTotal, 
+        bugsTotal,
+        disponibilidadGlobal,
+        infraestructuraGlobal
+      } 
+    };
+  };
+
+  // Ordenar dinámicamente los servicios
+  const sortedServices = useMemo(() => {
+    const active = services.filter(s => !s.isComingSoon);
+    const soon = services.filter(s => s.isComingSoon);
+    return [...active, ...soon];
+  }, []);
+
+  const serviceAvailabilities = useMemo(() => {
+    return {
+      facturas: 99.85,
+      oficore: 99.80,
+      ofitec: 99.85,
+      sgc: 96.90
+    };
+  }, []);
 
   const navigateToService = (serviceId: string) => {
     router.push(`/servicio/${serviceId}`);
   };
 
-  // Cargar datos reales
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/facturas/bitacora?estado=todos");
-        const data = await res.json();
-        
-        if (data.success && data.data) {
-          setRealInvoiceData(data.data);
-          
-          const dailyStats: { [key: string]: any } = {};
-          
-          data.data.forEach((item: any) => {
-            const fecha = item.fecha_proceso.split('T')[0];
-            const estado = item.estado;
-            const motivo = item.motivo || "";
-            const esErrorInfra = isInfraestructuraError(motivo);
-            
-            if (!dailyStats[fecha]) {
-              dailyStats[fecha] = {
-                fecha,
-                aprobadas: 0,
-                rechazadasReglaNegocio: 0,
-                manualesReglaNegocio: 0,
-                pendientes: 0,
-                erroresInfraestructura: 0,
-                total: 0
-              };
-            }
-            
-            if (estado === "Aprobado") {
-              dailyStats[fecha].aprobadas++;
-            } else if (estado === "Rechazado") {
-              if (esErrorInfra) {
-                dailyStats[fecha].erroresInfraestructura++;
-              } else {
-                dailyStats[fecha].rechazadasReglaNegocio++;
-              }
-            } else if (estado === "Manual") {
-              if (esErrorInfra) {
-                dailyStats[fecha].erroresInfraestructura++;
-              } else {
-                dailyStats[fecha].manualesReglaNegocio++;
-              }
-            } else {
-              dailyStats[fecha].pendientes++;
-            }
-            dailyStats[fecha].total++;
-          });
-          
-          const metricsData: MetricDataPoint[] = [];
-          const sortedDates = Object.keys(dailyStats).sort();
-          
-          sortedDates.forEach(date => {
-            const stats = dailyStats[date];
-            metricsData.push({
-              id: `facturas_${date}`,
-              timestamp: date,
-              date: parseISO(date),
-              successCount: stats.aprobadas,
-              errorCount: stats.erroresInfraestructura,
-              reglaNegocioCount: stats.rechazadasReglaNegocio + stats.manualesReglaNegocio,
-              responseTime: 300 + Math.floor(Math.random() * 100),
-              throughput: Math.floor(stats.total / 24),
-              serviceName: "Aceptación y Rechazo de Facturas",
-              endpoint: "/api/facturas/bitacora",
-            });
-          });
-          
-          const simulatedData = generateMetricsData();
-          const otherServicesData = simulatedData.filter(s => s.serviceName !== "Aceptación y Rechazo de Facturas");
-          setAllData([...metricsData, ...otherServicesData]);
-        } else {
-          setAllData(generateMetricsData());
-        }
-      } catch (error) {
-        console.error("Error loading data:", error);
-        setAllData(generateMetricsData());
-      } finally {
-        setLoading(false);
+  // Filtrar registros de facturas reales según los filtros seleccionados
+  const filteredInvoices = useMemo(() => {
+    return realInvoiceData.filter(item => {
+      const itemDate = new Date(item.fecha_proceso);
+      if (isNaN(itemDate.getTime())) return false;
+
+      if (filters.dateRange.from) {
+        const from = startOfDay(filters.dateRange.from);
+        if (itemDate < from) return false;
       }
+      if (filters.dateRange.to) {
+        const to = endOfDay(filters.dateRange.to);
+        if (itemDate > to) return false;
+      }
+
+      return true;
+    });
+  }, [realInvoiceData, filters.dateRange]);
+
+  // Cálculos dinámicos para la FILA 1
+  const operacionStats = useMemo(() => {
+    const totalDocs = filteredInvoices.length;
+    const errorDocs = filteredInvoices.filter(f => isInfraestructuraError(f.motivo)).length;
+    
+    const errorRate = totalDocs > 0 ? (errorDocs / totalDocs) * 100 : 0;
+    const disponibilidadGlobal = (100 - errorRate).toFixed(2);
+
+    const incidentesAbiertos = filteredInvoices.filter(f => ["Manual", "Rechazado"].includes(f.estado)).length;
+    const aprobadas = filteredInvoices.filter(f => f.estado === "Aprobado").length;
+    const cambiosExitosos = totalDocs > 0 ? Math.round((aprobadas / totalDocs) * 100) : 100;
+    const ticketsResueltos = filteredInvoices.filter(f => ["Aprobado", "Rechazado", "Manual"].includes(f.estado)).length;
+
+    return {
+      disponibilidadGlobal,
+      incidentesAbiertos,
+      cambiosExitosos,
+      errorDocs,
+      ticketsResueltos
     };
-    loadData();
+  }, [filteredInvoices]);
+
+  const getServiceAvailability = (serviceId: string) => {
+    const srv = services.find(s => s.id === serviceId);
+    if (srv) {
+      if (srv.id === "facturas") {
+        return parseFloat(operacionStats.disponibilidadGlobal);
+      }
+      return 100 - srv.errorPercentage;
+    }
+    return (serviceAvailabilities as Record<string, number>)[serviceId] || 100;
+  };
+
+  // CARGA DE DATOS PRINCIPAL
+  const loadAllData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
+    setLoading(true);
+    try {
+      const fechaDesde = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
+      const fechaHasta = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
+
+      let facturasUrl = "/api/facturas/bitacora?estado=todos";
+      if (fechaDesde) facturasUrl += `&fechaDesde=${fechaDesde}`;
+      if (fechaHasta) facturasUrl += `&fechaHasta=${fechaHasta}`;
+      
+      const facturasRes = await fetch(facturasUrl);
+      const facturasData = await facturasRes.json();
+      const facturasArray = facturasData.success && facturasData.data ? facturasData.data : [];
+      
+      setRealInvoiceData(facturasArray);
+      
+      const servicesData = await fetchAllServicesData(dateRange);
+      
+      if (servicesData) {
+        calculateAllMetrics(servicesData, facturasArray);
+      }
+
+      if (facturasArray.length > 0) {
+        const dailyStats: { [key: string]: any } = {};
+        
+        facturasArray.forEach((item: any) => {
+          const fecha = item.fecha_proceso.split('T')[0];
+          const estado = item.estado;
+          const motivo = item.motivo || "";
+          const esErrorInfra = isInfraestructuraError(motivo);
+          
+          if (!dailyStats[fecha]) {
+            dailyStats[fecha] = {
+              fecha,
+              aprobadas: 0,
+              rechazadasReglaNegocio: 0,
+              manualesReglaNegocio: 0,
+              pendientes: 0,
+              erroresInfraestructura: 0,
+              total: 0
+            };
+          }
+          
+          if (estado === "Aprobado") {
+            dailyStats[fecha].aprobadas++;
+          } else if (estado === "Rechazado") {
+            if (esErrorInfra) {
+              dailyStats[fecha].erroresInfraestructura++;
+            } else {
+              dailyStats[fecha].rechazadasReglaNegocio++;
+            }
+          } else if (estado === "Manual") {
+            if (esErrorInfra) {
+              dailyStats[fecha].erroresInfraestructura++;
+            } else {
+              dailyStats[fecha].manualesReglaNegocio++;
+            }
+          } else {
+            dailyStats[fecha].pendientes++;
+          }
+          dailyStats[fecha].total++;
+        });
+        
+        const metricsData: MetricDataPoint[] = [];
+        const sortedDates = Object.keys(dailyStats).sort();
+        
+        sortedDates.forEach(date => {
+          const stats = dailyStats[date];
+          metricsData.push({
+            id: `facturas_${date}`,
+            timestamp: date,
+            date: parseISO(date),
+            successCount: stats.aprobadas,
+            errorCount: stats.erroresInfraestructura,
+            reglaNegocioCount: stats.rechazadasReglaNegocio + stats.manualesReglaNegocio,
+            responseTime: 300 + Math.floor(Math.random() * 100),
+            throughput: Math.floor(stats.total / 24),
+            serviceName: "Aceptación y Rechazo de Facturas",
+            endpoint: "/api/facturas/bitacora",
+          });
+        });
+        
+        const simulatedData = generateMetricsData();
+        const otherServicesData = simulatedData.filter(s => s.serviceName !== "Aceptación y Rechazo de Facturas");
+        setAllData([...metricsData, ...otherServicesData]);
+      } else {
+        setAllData(generateMetricsData());
+      }
+
+    } catch (error) {
+      console.error("Error loading data:", error);
+      setAllData(generateMetricsData());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAllData();
   }, []);
 
-  // Servicios disponibles
+  const applyDateFilter = () => {
+    const newRange = { from: tempDateRange.from, to: tempDateRange.to };
+    setFilters({ ...filters, dateRange: newRange });
+    setDateFilterApplied(true);
+    setCalendarOpen(false);
+    loadAllData(newRange);
+  };
+
+  const clearDateFilter = () => {
+    setTempDateRange({ from: undefined, to: undefined });
+    setFilters({ ...filters, dateRange: { from: undefined, to: undefined } });
+    setDateFilterApplied(false);
+    setCalendarOpen(false);
+    loadAllData();
+  };
+
   const availableServices = useMemo(() => {
     const servicesSet = new Set(allData.map(item => item.serviceName));
     return Array.from(servicesSet).sort();
   }, [allData]);
 
-  // Obtener lista de servicios reales
   const serviciosInternos = useMemo(() => {
     return services.filter(s => 
       s.id === "facturas" || 
@@ -260,12 +1002,10 @@ export function DashboardMetrics() {
     );
   }, []);
 
-  // Servicios con errores de infraestructura
   const serviciosConErrores = useMemo(() => {
     return services.filter(s => s.errorPercentage > 0);
   }, []);
 
-  // Estadísticas generales (TODOS los datos sin filtro de fecha)
   const globalStats = useMemo(() => {
     const totalSuccess = allData.reduce((sum, d) => sum + d.successCount, 0);
     const totalInfraErrors = allData.reduce((sum, d) => sum + (d.errorCount || 0), 0);
@@ -285,16 +1025,13 @@ export function DashboardMetrics() {
     };
   }, [allData, serviciosInternos, serviciosExternos, serviciosConErrores]);
 
-  // Datos filtrados por SERVICIO y FECHA (si el usuario selecciona)
   const filteredData = useMemo(() => {
     let data = allData;
     
-    // Filtrar por servicio
     if (filters.service !== "todos") {
       data = data.filter(d => d.serviceName === filters.service);
     }
     
-    // Filtrar por rango de fechas SOLO si el usuario seleccionó fechas
     if (filters.dateRange.from && filters.dateRange.to) {
       data = data.filter(d => {
         const date = new Date(d.date);
@@ -308,7 +1045,6 @@ export function DashboardMetrics() {
     return data;
   }, [allData, filters]);
 
-  // Datos para el gráfico de evolución
   const evolutionChartData = useMemo(() => {
     if (filteredData.length === 0) return [];
     
@@ -348,7 +1084,6 @@ export function DashboardMetrics() {
     return Object.values(grouped).sort((a, b) => a.key.localeCompare(b.key));
   }, [filteredData, filters.view]);
 
-  // Datos para el gráfico de distribución
   const distributionChartData = useMemo(() => {
     const totalSuccess = filteredData.reduce((sum, d) => sum + d.successCount, 0);
     const totalInfraErrors = filteredData.reduce((sum, d) => sum + (d.errorCount || 0), 0);
@@ -368,14 +1103,16 @@ export function DashboardMetrics() {
       view: "todos",
       metric: "all",
     });
+    setTempDateRange({ from: undefined, to: undefined });
+    setDateFilterApplied(false);
+    setCalendarOpen(false);
+    loadAllData();
   };
 
-  // Abrir modal de exportación
   const handleOpenExportModal = () => {
     setShowExportModal(true);
   };
 
-  // Toggle selección de todos los campos
   const handleToggleAllFields = () => {
     if (selectAll) {
       setSelectedFields([]);
@@ -385,7 +1122,6 @@ export function DashboardMetrics() {
     setSelectAll(!selectAll);
   };
 
-  // Toggle selección de un campo individual
   const handleToggleField = (fieldId: string) => {
     setSelectedFields(prev => {
       const newSelection = prev.includes(fieldId)
@@ -397,7 +1133,6 @@ export function DashboardMetrics() {
     });
   };
 
-  // Exportar a Excel con campos seleccionados
   const handleExportToExcel = () => {
     if (selectedFields.length === 0) {
       alert("Por favor selecciona al menos un campo para exportar.");
@@ -405,7 +1140,14 @@ export function DashboardMetrics() {
     }
 
     const fieldMap: Record<string, (item: any) => any> = {
-      fecha: (item) => item.date || format(new Date(), "dd/MM/yyyy"),
+      fecha: (item) => {
+        try {
+          const d = item.date ? new Date(item.date) : new Date(item.timestamp);
+          return format(d, "dd/MM/yyyy");
+        } catch {
+          return item.timestamp || format(new Date(), "dd/MM/yyyy");
+        }
+      },
       servicio: (item) => item.serviceName || "Todos los servicios",
       exitosas: (item) => item.successCount || 0,
       erroresInfraestructura: (item) => item.errorCount || 0,
@@ -425,39 +1167,7 @@ export function DashboardMetrics() {
     const fieldLabels: Record<string, string> = {};
     EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
 
-    // Determinar qué datos exportar
-    let exportDataItems = [];
-    if (filters.service !== "todos") {
-      // Si hay un servicio específico, usar datos filtrados por servicio
-      exportDataItems = filteredData;
-    } else {
-      // Si es "todos", agrupar por fecha
-      const groupedByDate: Record<string, any> = {};
-      filteredData.forEach(item => {
-        const dateKey = format(item.date, "yyyy-MM-dd");
-        if (!groupedByDate[dateKey]) {
-          groupedByDate[dateKey] = {
-            date: dateKey,
-            serviceName: "Todos los servicios",
-            successCount: 0,
-            errorCount: 0,
-            reglaNegocioCount: 0,
-            responseTime: 0,
-            count: 0,
-          };
-        }
-        groupedByDate[dateKey].successCount += item.successCount;
-        groupedByDate[dateKey].errorCount += (item.errorCount || 0);
-        groupedByDate[dateKey].reglaNegocioCount += (item.reglaNegocioCount || 0);
-        groupedByDate[dateKey].responseTime += item.responseTime;
-        groupedByDate[dateKey].count++;
-      });
-      // Calcular promedio de response time
-      Object.values(groupedByDate).forEach((item: any) => {
-        item.responseTime = Math.round(item.responseTime / (item.count || 1));
-      });
-      exportDataItems = Object.values(groupedByDate);
-    }
+    const exportDataItems = filteredData;
 
     const exportData = exportDataItems.map(item => {
       const row: Record<string, any> = {};
@@ -471,13 +1181,11 @@ export function DashboardMetrics() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // Ajustar anchos de columna
     const colWidths = selectedFields.map(() => ({ wch: 25 }));
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Dashboard Metrics");
     
-    // Resumen estadístico
     const summaryData = [
       { "Métrica": "Tasa Éxito General", "Valor": `${globalStats.successRate}%` },
       { "Métrica": "Total Peticiones Exitosas", "Valor": globalStats.totalSuccess.toLocaleString() },
@@ -502,74 +1210,46 @@ export function DashboardMetrics() {
     }, 500);
   };
 
-  const MetricCard = ({ 
-    title, 
-    value, 
-    subtitle, 
-    icon: Icon, 
-    color, 
-    onClick,
-    badge,
-  }: { 
-    title: string; 
-    value: string | number; 
-    subtitle: string; 
-    icon: any; 
-    color: string;
-    onClick?: () => void;
-    badge?: React.ReactNode;
-  }) => (
-    <Card 
-      className={cn(
-        "transition-all hover:shadow-lg",
-        onClick && "cursor-pointer hover:scale-[1.02] active:scale-[0.98]",
-        "border-l-4",
-        color === "emerald" && "border-l-emerald-500",
-        color === "red" && "border-l-red-500",
-        color === "amber" && "border-l-amber-500",
-        color === "blue" && "border-l-blue-500",
-        color === "purple" && "border-l-purple-500",
-        color === "cyan" && "border-l-cyan-500",
-      )}
-      onClick={onClick}
-    >
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold mt-1">{value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
-            {badge && <div className="mt-2">{badge}</div>}
-          </div>
-          <div className={cn(
-            "p-3 rounded-full flex-shrink-0",
-            color === "emerald" && "bg-emerald-100",
-            color === "red" && "bg-red-100",
-            color === "amber" && "bg-amber-100",
-            color === "blue" && "bg-blue-100",
-            color === "purple" && "bg-purple-100",
-            color === "cyan" && "bg-cyan-100",
-          )}>
-            <Icon className={cn(
-              "h-5 w-5",
-              color === "emerald" && "text-emerald-600",
-              color === "red" && "text-red-600",
-              color === "amber" && "text-amber-600",
-              color === "blue" && "text-blue-600",
-              color === "purple" && "text-purple-600",
-              color === "cyan" && "text-cyan-600",
-            )} />
-          </div>
-        </div>
-        {onClick && (
-          <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
-            <span>Click para ver detalles</span>
-            <ArrowRight className="h-3 w-3" />
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+  // ✅ Obtener métricas para los indicadores
+  const totalClientesActivos = services.filter(s => !s.isComingSoon).reduce((acc, s) => acc + s.clients.length, 0);
+  const totalServiciosActivos = services.filter(s => !s.isComingSoon).length;
+  
+  // Calcular disponibilidad con regla de 3 (desde facturas)
+  const totalDocs = realInvoiceData.length;
+  const errorInfraDocs = realInvoiceData.filter(f => isInfraestructuraError(f.motivo)).length;
+  const disponibilidad = totalDocs > 0 ? ((totalDocs - errorInfraDocs) / totalDocs) * 100 : 100;
+
+  // ✅ INFRAESTRUCTURA: Usar el porcentaje de Zabbix (equipos principales)
+  const infraestructuraZabbix = infraStats.equiposPrincipales;
+
+  // Calcular tickets por día para el gráfico
+  const ticketsPorDia = useMemo(() => {
+    const tickets: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
+    
+    realInvoiceData.forEach((f: any) => {
+      const fecha = f.fecha_proceso?.split('T')[0];
+      if (fecha) {
+        if (!tickets[fecha]) {
+          tickets[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
+        }
+        tickets[fecha].ingresados++;
+        if (f.estado === "Aprobado" || f.estado === "Rechazado") {
+          tickets[fecha].resueltos++;
+        }
+        if (f.estado === "Manual") {
+          tickets[fecha].asignados++;
+        }
+        if (f.estado === "Rechazado") {
+          tickets[fecha].cerrados++;
+        }
+      }
+    });
+
+    return Object.keys(tickets).sort().map(fecha => ({
+      fecha: format(new Date(fecha), "dd/MM"),
+      ...tickets[fecha]
+    })).slice(-14);
+  }, [realInvoiceData]);
 
   if (loading) {
     return (
@@ -584,531 +1264,881 @@ export function DashboardMetrics() {
 
   return (
     <div className="space-y-6">
-      {/* INDICADORES CLAVE - AHORA EN LA PARTE SUPERIOR */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard
-          title="Tasa Éxito"
-          value={`${globalStats.successRate}%`}
-          subtitle={`${globalStats.totalSuccess.toLocaleString()} exitosas`}
-          icon={TrendingUp}
-          color="emerald"
-        />
-
-        <MetricCard
-          title="Errores Infraestructura"
-          value={globalStats.totalInfraErrors}
-          subtitle={`${globalStats.errorRate}% del total`}
-          icon={AlertCircle}
-          color="red"
-          onClick={() => setShowErroresModal(true)}
-          badge={
-            <Badge variant="outline" className="text-[10px] gap-1">
-              <List className="h-3 w-3" />
-              Ver servicios con errores
-            </Badge>
-          }
-        />
-
-        <MetricCard
-          title="Sistemas Internos"
-          value={globalStats.sistemasInternos}
-          subtitle="Servicios propios"
-          icon={Server}
-          color="purple"
-          onClick={() => setShowInternosModal(true)}
-          badge={
-            <Badge variant="outline" className="text-[10px] gap-1">
-              <List className="h-3 w-3" />
-              Ver lista
-            </Badge>
-          }
-        />
-
-        <MetricCard
-          title="Sistemas Externos"
-          value={globalStats.sistemasExternos}
-          subtitle="Integraciones"
-          icon={Globe}
-          color="cyan"
-          onClick={() => setShowExternosModal(true)}
-          badge={
-            <Badge variant="outline" className="text-[10px] gap-1">
-              <List className="h-3 w-3" />
-              Ver lista
-            </Badge>
-          }
-        />
-      </div>
-
-      {/* Barra de acciones superior (filtros) */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Collapsible open={showFilters} onOpenChange={setShowFilters}>
-            <div className="flex items-center gap-2">
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Filter className="h-4 w-4" />
-                  <span>Filtros</span>
-                  <ChevronDown className={cn("h-4 w-4 transition-transform", showFilters && "rotate-180")} />
-                </Button>
-              </CollapsibleTrigger>
-            </div>
-            <CollapsibleContent className="mt-3 pt-3 border-t space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div>
-                  <Label className="text-xs font-medium mb-1 block">Servicio</Label>
-                  <Select 
-                    value={filters.service} 
-                    onValueChange={(v) => setFilters({ ...filters, service: v })}
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">🌐 Todos</SelectItem>
-                      {availableServices.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium mb-1 block">Período</Label>
-                  <Select 
-                    value={filters.view} 
-                    onValueChange={(v: any) => setFilters({ ...filters, view: v })}
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">📊 Todos</SelectItem>
-                      <SelectItem value="daily">📅 Diario</SelectItem>
-                      <SelectItem value="weekly">📊 Semanal</SelectItem>
-                      <SelectItem value="monthly">📈 Mensual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium mb-1 block">Métrica</Label>
-                  <Select 
-                    value={filters.metric} 
-                    onValueChange={(v: any) => setFilters({ ...filters, metric: v })}
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">📊 Todas</SelectItem>
-                      <SelectItem value="success">✅ Exitosas</SelectItem>
-                      <SelectItem value="errors">❌ Errores</SelectItem>
-                      <SelectItem value="rules">⚠️ Reglas</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium mb-1 block">Rango de Fechas</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        className={cn(
-                          "w-full justify-start text-left h-8 text-sm",
-                          !filters.dateRange.from && !filters.dateRange.to && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-3 w-3" />
-                        {filters.dateRange.from ? (
-                          filters.dateRange.to ? (
-                            `${format(filters.dateRange.from, "dd/MM/yy")} - ${format(filters.dateRange.to, "dd/MM/yy")}`
-                          ) : format(filters.dateRange.from, "dd/MM/yy")
-                        ) : (
-                          "Seleccionar fechas"
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="range"
-                        selected={filters.dateRange}
-                        onSelect={(range) => setFilters({ 
-                          ...filters, 
-                          dateRange: range || { from: undefined, to: undefined } 
-                        })}
-                        numberOfMonths={2}
-                        locale={es}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                {filters.dateRange.from || filters.dateRange.to ? (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setFilters({ ...filters, dateRange: { from: undefined, to: undefined } })}
-                    className="h-7 text-xs text-blue-500"
-                  >
-                    <X className="h-3 w-3 mr-1" />
-                    Limpiar fechas
-                  </Button>
-                ) : null}
-                <Button variant="ghost" size="sm" onClick={resetFilters} className="h-7 text-xs text-red-500">
-                  <X className="h-3 w-3 mr-1" />
-                  Limpiar todos
-                </Button>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+      {/* Cabecera Principal */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-200 gap-4">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-[#1e293b] flex items-center gap-2">
+            VISTA EJECUTIVA
+          </h1>
+          <p className="text-[10px] text-slate-500 font-semibold tracking-wider uppercase">
+            RESUMEN INTEGRAL DE TECNOLOGÍA
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleOpenExportModal}>
-            <FileSpreadsheet className="h-4 w-4 mr-2" />
+        
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 text-xs bg-white border-slate-200 shadow-sm font-semibold text-slate-700">
+                <CalendarIcon className="mr-1.5 h-3.5 w-3.5 text-slate-400" />
+                {dateFilterApplied && filters.dateRange.from && filters.dateRange.to ? (
+                  <>
+                    {format(filters.dateRange.from, "dd MMM yyyy", { locale: es })} - {format(filters.dateRange.to, "dd MMM yyyy", { locale: es })}
+                  </>
+                ) : (
+                  "Seleccionar período"
+                )}
+                {dateFilterApplied && (
+                  <Badge variant="secondary" className="ml-1 text-[8px] bg-emerald-100 text-emerald-700 border-emerald-200">
+                    Activo
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={{ 
+                  from: tempDateRange.from || undefined, 
+                  to: tempDateRange.to || undefined 
+                }}
+                onSelect={(range) => {
+                  if (range) {
+                    setTempDateRange({ 
+                      from: range.from || undefined, 
+                      to: range.to || undefined 
+                    });
+                  }
+                }}
+                initialFocus
+                locale={es}
+              />
+              <div className="p-2 border-t flex justify-between">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={clearDateFilter}
+                  className="text-xs text-red-500 hover:text-red-600"
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  Limpiar
+                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    onClick={() => setCalendarOpen(false)}
+                    variant="outline"
+                    className="text-xs"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    onClick={applyDateFilter}
+                    className="text-xs bg-emerald-600 hover:bg-emerald-700"
+                    disabled={!tempDateRange.from || !tempDateRange.to}
+                  >
+                    Aplicar
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {dateFilterApplied && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={clearDateFilter}
+              className="h-9 text-xs text-red-500 hover:text-red-600"
+            >
+              <X className="h-3 w-3 mr-1" />
+              Quitar filtro
+            </Button>
+          )}
+
+          <Button variant="outline" size="sm" onClick={handleOpenExportModal} className="h-9 text-xs bg-white border-slate-200 shadow-sm font-semibold text-slate-700">
+            <Download className="mr-1.5 h-3.5 w-3.5 text-slate-400" />
             Exportar
           </Button>
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+
+          <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw className={cn("h-3.5 w-3.5 text-slate-500", isRefreshing && "animate-spin")} />
           </Button>
         </div>
       </div>
 
-      {/* GRÁFICOS AL MISMO NIVEL */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Gráfico 1: Evolución Temporal */}
-        <Card className="flex flex-col">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Evolución Temporal</CardTitle>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>{filters.service === "todos" ? "Todos los servicios" : filters.service}</span>
-              <span>·</span>
-              <span>
-                {filters.view === "todos" ? "Todos los períodos" : 
-                 filters.view === "daily" ? "Diario" : 
-                 filters.view === "weekly" ? "Semanal" : "Mensual"}
-              </span>
-              {filters.dateRange.from && filters.dateRange.to && (
-                <>
-                  <span>·</span>
-                  <span className="text-emerald-600">
-                    {format(filters.dateRange.from, "dd/MM/yy")} - {format(filters.dateRange.to, "dd/MM/yy")}
-                  </span>
-                </>
-              )}
-              {!filters.dateRange.from && !filters.dateRange.to && (
-                <>
-                  <span>·</span>
-                  <span className="text-muted-foreground/60">Todos los datos</span>
-                </>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1">
-            <div className="h-[300px]">
-              {evolutionChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={evolutionChartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis 
-                      dataKey="date" 
-                      tick={{ fontSize: 10 }}
-                      interval={evolutionChartData.length > 10 ? Math.floor(evolutionChartData.length / 8) : 0}
-                    />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip 
-                      contentStyle={{ fontSize: '11px', borderRadius: '8px' }}
-                      formatter={(value: any, name: string) => {
-                        const labels: Record<string, string> = {
-                          exitosas: '✅ Exitosas',
-                          reglasNegocio: '⚠️ Reglas de Negocio',
-                          erroresInfraestructura: '❌ Errores Infraestructura'
-                        };
-                        return [value, labels[name] || name];
-                      }}
-                    />
-                    
-                    {(filters.metric === "all" || filters.metric === "success") && (
-                      <Line 
-                        type="monotone" 
-                        dataKey="exitosas" 
-                        stroke="#10b981" 
-                        name="Exitosas" 
-                        strokeWidth={2.5} 
-                        dot={{ r: 3, fill: "#10b981" }}
-                        activeDot={{ r: 5 }}
-                      />
-                    )}
-                    
-                    {(filters.metric === "all" || filters.metric === "rules") && (
-                      <Line 
-                        type="monotone" 
-                        dataKey="reglasNegocio" 
-                        stroke="#f59e0b" 
-                        name="Reglas de Negocio" 
-                        strokeWidth={2} 
-                        strokeDasharray="6 3"
-                        dot={{ r: 3, fill: "#f59e0b" }}
-                      />
-                    )}
-                    
-                    {(filters.metric === "all" || filters.metric === "errors") && (
-                      <Line 
-                        type="monotone" 
-                        dataKey="erroresInfraestructura" 
-                        stroke="#ef4444" 
-                        name="Errores Infraestructura" 
-                        strokeWidth={2} 
-                        strokeDasharray="3 3"
-                        dot={{ r: 3, fill: "#ef4444" }}
-                      />
-                    )}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                  {filters.dateRange.from && filters.dateRange.to ? (
-                    <div className="text-center">
-                      <p>No hay datos en el rango seleccionado</p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        Prueba con un rango de fechas diferente
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="text-center">
-                      <p>No hay datos disponibles</p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        Selecciona un rango de fechas para ver los datos
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            {/* Leyenda compacta */}
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-3 text-[10px]">
-              <div className="flex items-center gap-1">
-                <div className="w-4 h-0.5 bg-emerald-500" />
-                <span className="text-emerald-700">Exitosas</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-4 h-0.5 bg-amber-500 border-t border-dashed border-amber-500" />
-                <span className="text-amber-700">Reglas</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-4 h-0.5 bg-red-500 border-t border-dotted border-red-500" />
-                <span className="text-red-700">Errores</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ============================================================
+          PANEL 1: OPERACIONES Y DISPONIBILIDAD - Servicios e Infraestructura (ACTIVO)
+          ============================================================ */}
+      <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#1e40af] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">1</div>
+          <div className="flex flex-col items-center gap-1.5 my-auto">
+            <Cloud className="h-7 w-7 text-white/90" />
+            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Operaciones y Disponibilidad</p>
+            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Servicios e Infraestructura</p>
+          </div>
+          <div className="hidden lg:block h-6 w-6" />
+        </div>
 
-        {/* Gráfico 2: Distribución */}
-        <Card className="flex flex-col">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Distribución de Peticiones</CardTitle>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>{filters.service === "todos" ? "Todos los servicios" : filters.service}</span>
-              {filters.dateRange.from && filters.dateRange.to && (
-                <>
-                  <span>·</span>
-                  <span className="text-emerald-600">
-                    {format(filters.dateRange.from, "dd/MM/yy")} - {format(filters.dateRange.to, "dd/MM/yy")}
-                  </span>
-                </>
-              )}
-              {!filters.dateRange.from && !filters.dateRange.to && (
-                <>
-                  <span>·</span>
-                  <span className="text-muted-foreground/60">Todos los datos</span>
-                </>
-              )}
+        <div className="flex-1 p-4 space-y-4 bg-slate-50/20">
+          {/* ✅ INDICADORES: Clientes, Servicios, Disponibilidad, Infraestructura (Zabbix), Ticket */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Clientes</span>
+                <User className="h-4 w-4 text-blue-500" />
+              </div>
+              <p className="text-xl font-black text-slate-800 mt-1">{totalClientesActivos}</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Activos</span>
             </div>
-          </CardHeader>
-          <CardContent className="flex-1">
-            <div className="h-[300px]">
-              {distributionChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={distributionChartData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={true}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                      outerRadius={90}
-                      dataKey="value"
-                    >
-                      {distributionChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ fontSize: '11px', borderRadius: '8px' }}
-                      formatter={(value: any) => [value.toLocaleString(), 'Cantidad']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                  {filters.dateRange.from && filters.dateRange.to ? (
-                    <div className="text-center">
-                      <p>No hay datos en el rango seleccionado</p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        Prueba con un rango de fechas diferente
-                      </p>
+
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Servicios</span>
+                <Layers className="h-4 w-4 text-purple-500" />
+              </div>
+              <p className="text-xl font-black text-slate-800 mt-1">{totalServiciosActivos}</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Activos</span>
+            </div>
+
+            {/* ✅ DISPONIBILIDAD - Sin "Ver detalle", solo el valor */}
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Disponibilidad</span>
+                <Gauge className="h-4 w-4 text-emerald-500" />
+              </div>
+              <p className="text-xl font-black text-slate-800 mt-1">{disponibilidad.toFixed(2)}%</p>
+              <span className="text-[8px] text-slate-400 block mt-1">SLA General</span>
+            </div>
+
+            {/* ✅ INFRAESTRUCTURA - Usando datos de Zabbix */}
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Infraestructura</span>
+                <Server className="h-4 w-4 text-blue-500" />
+              </div>
+              <p className={cn(
+                "text-xl font-black mt-1",
+                infraestructuraZabbix >= 99 ? "text-emerald-600" : 
+                infraestructuraZabbix >= 95 ? "text-amber-600" : "text-red-500"
+              )}>
+                {infraestructuraZabbix.toFixed(2)}%
+              </p>
+              <span className="text-[8px] text-slate-400 block mt-1">Equipos Principales</span>
+            </div>
+
+            {/* ✅ TICKET - Con "Ver detalle" */}
+            <div 
+              className="bg-white border rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
+              onClick={() => setShowTicketsModal(true)}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ticket</span>
+                <Ticket className="h-4 w-4 text-amber-500" />
+              </div>
+              <p className="text-xl font-black text-slate-800 mt-1">
+                {realInvoiceData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length}
+              </p>
+              <div className="flex items-center gap-1 text-[8px] text-amber-600 font-semibold">
+                <span>Ver detalle</span>
+                <ArrowRight className="h-3 w-3" />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* ✅ DISPONIBILIDAD POR SERVICIO - Con "Ver detalle" que navega a Servicios */}
+            <Card 
+              className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
+              onClick={onNavigateToServices}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Disponibilidad por Servicio</span>
+                <ArrowRight className="h-3 w-3 text-emerald-500" />
+              </div>
+              <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1 mt-2">
+                {sortedServices.map(s => {
+                  if (s.isComingSoon) {
+                    return (
+                      <div key={s.id} className="space-y-0.5">
+                        <div className="flex justify-between text-[9px] font-bold text-slate-450">
+                          <span className="truncate max-w-[120px]">{s.name}</span>
+                          <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-100">Próximamente</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const avail = getServiceAvailability(s.id);
+                  const color = avail >= 99 ? "bg-emerald-500" : (avail >= 96 ? "bg-emerald-500" : "bg-amber-500");
+                  return (
+                    <div key={s.id} className="space-y-0.5">
+                      <div className="flex justify-between text-[9px] font-bold text-slate-650">
+                        <span className="truncate max-w-[140px]">{s.name}</span>
+                        <span>{avail.toFixed(2)}%</span>
+                      </div>
+                      <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full", color)} style={{ width: `${avail}%` }} />
+                      </div>
                     </div>
-                  ) : (
-                    <div className="text-center">
-                      <p>No hay datos disponibles</p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        Selecciona un rango de fechas para ver los datos
-                      </p>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Estado de Servicios</span>
+              <div className="text-[9px] space-y-1.5 font-semibold text-slate-700 max-h-[170px] overflow-y-auto pr-1">
+                {sortedServices.map(s => {
+                  if (s.isComingSoon) {
+                    return (
+                      <div key={s.id} className="flex justify-between items-center">
+                        <span className="text-slate-400 font-semibold truncate max-w-[120px]">{s.name}</span>
+                        <span className="flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                          <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-100">Próximamente</span>
+                        </span>
+                      </div>
+                    );
+                  }
+                  
+                  const activeService = services.find(srv => srv.id === s.id);
+                  let statusText = "Operativo";
+                  let statusColor = "bg-emerald-500";
+                  if (activeService) {
+                    if (activeService.status === "error") {
+                      statusText = "Crítico";
+                      statusColor = "bg-red-500";
+                    } else if (activeService.status === "warning") {
+                      statusText = "Intermitente";
+                      statusColor = "bg-amber-500";
+                    }
+                  }
+                  
+                  return (
+                    <div key={s.id} className="flex justify-between items-center">
+                      <span className="truncate max-w-[140px]">{s.name}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", statusColor)} />
+                        <span className="text-slate-500 text-[8px]">{statusText}</span>
+                      </span>
                     </div>
-                  )}
+                  );
+                })}
+              </div>
+            </Card>
+
+            {/* ✅ CUADRO DE INFRAESTRUCTURA - ZABBIX */}
+            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col justify-between">
+              <div className="flex justify-between items-center border-b pb-1 mb-2">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Infraestructura</span>
+                {infraStats.online && infraStats.version && (
+                  <span className="text-[7.5px] font-extrabold text-emerald-600 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                    Zabbix v{infraStats.version}
+                  </span>
+                )}
+              </div>
+              
+              <div className="text-[9px] space-y-1.5 font-semibold text-slate-700">
+                <div className="flex justify-between items-center">
+                  <span>Equipos Principales</span>
+                  <span className={cn("text-[9.5px] font-bold", infraStats.equiposPrincipales >= 99 ? "text-emerald-600" : "text-amber-600")}>
+                    {infraStats.equiposPrincipales}%
+                  </span>
                 </div>
-              )}
-            </div>
-            {/* Resumen compacto */}
-            {distributionChartData.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-3 text-[10px]">
-                {distributionChartData.map((item) => (
-                  <div key={item.name} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-muted-foreground">{item.name}:</span>
-                    <span className="font-medium">{item.value}</span>
-                  </div>
-                ))}
-                <div className="flex items-center gap-1 text-blue-600">
-                  <span>Total:</span>
-                  <span className="font-medium">
-                    {distributionChartData.reduce((sum, d) => sum + d.value, 0)}
-                  </span>
+                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                  <div className={cn("h-full rounded-full", infraStats.equiposPrincipales >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.equiposPrincipales}%` }} />
+                </div>
+
+                <div className="flex justify-between items-center pt-0.5">
+                  <span>Servidores Core</span>
+                  <span className="text-slate-500">{infraStats.servidoresCore}%</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Bases de Datos</span>
+                  <span className="text-slate-500">{infraStats.database}%</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Enlaces de Red</span>
+                  <span className="text-slate-500">{infraStats.enlacesRed}%</span>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              <Button variant="ghost" size="sm" className="mt-3 w-full text-[9px] h-7 font-bold text-[#1e40af] hover:text-[#1d4ed8] hover:bg-blue-50 flex items-center justify-center gap-1 border border-blue-100 rounded" onClick={handleZabbixRedirect}>
+                Ver más
+                <ArrowRight className="h-3 w-3" />
+              </Button>
+            </Card>
+
+            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-1">Incidentes por Severidad</span>
+                <div className="flex items-center justify-between mt-2">
+                  <div className="h-[90px] w-[90px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: "Crítico", value: 3, color: "#ef4444" },
+                            { name: "Alto", value: 8, color: "#f97316" },
+                            { name: "Medio", value: 15, color: "#f59e0b" },
+                            { name: "Bajo", value: 27, color: "#3b82f6" }
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={25}
+                          outerRadius={40}
+                          dataKey="value"
+                        >
+                          {[
+                            { color: "#ef4444" },
+                            { color: "#f97316" },
+                            { color: "#f59e0b" },
+                            { color: "#3b82f6" }
+                          ].map((cell, idx) => <Cell key={idx} fill={cell.color} />)}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="text-[8px] text-slate-600 space-y-1 pr-2 font-medium">
+                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-red-500 block" /> Crítico: 3</div>
+                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-orange-500 block" /> Alto: 8</div>
+                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-500 block" /> Medio: 15</div>
+                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-blue-500 block" /> Bajo: 27</div>
+                  </div>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" className="mt-3 w-full text-[9px] h-7 font-bold text-[#1e40af] hover:text-[#1d4ed8] hover:bg-blue-50 flex items-center justify-center gap-1 border border-blue-100 rounded" onClick={onNavigateToTimeline}>
+                Ver más
+                <ArrowRight className="h-3 w-3" />
+              </Button>
+            </Card>
+
+            {/* ✅ GRÁFICO DE TICKETS POR DÍA */}
+            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Tickets por Día</span>
+              <div className="w-full h-[90px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={ticketsPorDia}>
+                    <Bar dataKey="ingresados" stackId="a" fill="#3b82f6" name="Ingresados" />
+                    <Bar dataKey="asignados" stackId="a" fill="#f59e0b" name="Asignados" />
+                    <Bar dataKey="resueltos" stackId="a" fill="#10b981" name="Resueltos" />
+                    <Bar dataKey="cerrados" stackId="a" fill="#ef4444" name="Cerrados" />
+                    <Tooltip 
+                      contentStyle={{ fontSize: '10px', padding: '4px 8px' }}
+                      formatter={(value) => [value, '']}
+                      labelFormatter={(label) => `Fecha: ${label}`}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex justify-center gap-2 mt-1 flex-wrap">
+                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> Ingresados
+                </span>
+                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Asignados
+                </span>
+                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Resueltos
+                </span>
+                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> Cerrados
+                </span>
+              </div>
+            </Card>
+          </div>
+        </div>
       </div>
 
-      {/* Modal de Errores */}
-      <Dialog open={showErroresModal} onOpenChange={setShowErroresModal}>
-        <DialogContent className="max-w-md">
+      {/* ============================================================
+          PANEL 2: NEGOCIOS - Lit / Propuestas / Cierres (PRÓXIMAMENTE)
+          ============================================================ */}
+      <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#10b981] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">2</div>
+          <div className="flex flex-col items-center gap-1.5 my-auto">
+            <DollarSign className="h-7 w-7 text-white/90" />
+            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Negocios</p>
+            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Lit / Propuestas / Cierres</p>
+          </div>
+          <div className="hidden lg:block h-6 w-6" />
+        </div>
+
+        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6">
+            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-full mb-3 border border-emerald-100 shadow-sm animate-bounce">
+              <TrendingUp className="h-6 w-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800 tracking-tight uppercase">Módulo de Negocios</h3>
+            <p className="text-xs text-slate-500 max-w-md mt-1">
+              Próximamente: Integración con CRM, seguimiento de oportunidades, análisis de conversión y métricas de ventas.
+            </p>
+            <span className="mt-3 text-[10px] font-extrabold text-emerald-600 bg-emerald-100/60 px-2.5 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">
+              Próximamente
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 opacity-30 select-none pointer-events-none">
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Oportunidades</span>
+              <p className="text-xl font-black text-slate-800 mt-1">24</p>
+              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">↑ +12% vs mes ant.</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Propuestas</span>
+              <p className="text-xl font-black text-slate-800 mt-1">18</p>
+              <span className="text-[8px] text-slate-400 block mt-1">En revisión</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cierres</span>
+              <p className="text-xl font-black text-slate-800 mt-1">8</p>
+              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">↑ +5% vs mes ant.</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Tasa Conversión</span>
+              <p className="text-xl font-black text-slate-800 mt-1">33%</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Promedio Q2</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Pipeline</span>
+              <p className="text-xl font-black text-slate-800 mt-1">$456M</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Valor total</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================
+          PANEL 3: PROYECTOS (PRÓXIMAMENTE)
+          ============================================================ */}
+      <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#7c3aed] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">3</div>
+          <div className="flex flex-col items-center gap-1.5 my-auto">
+            <FolderKanban className="h-7 w-7 text-white/90" />
+            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Proyectos</p>
+            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Gestión y Entregas</p>
+          </div>
+          <div className="hidden lg:block h-6 w-6" />
+        </div>
+
+        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6">
+            <div className="bg-purple-50 text-purple-700 p-3 rounded-full mb-3 border border-purple-100 shadow-sm animate-bounce">
+              <GitBranch className="h-6 w-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800 tracking-tight uppercase">Módulo de Proyectos</h3>
+            <p className="text-xs text-slate-500 max-w-md mt-1">
+              Próximamente: Gestión completa de proyectos, seguimiento de hitos, recursos y entregables.
+            </p>
+            <span className="mt-3 text-[10px] font-extrabold text-purple-600 bg-purple-100/60 px-2.5 py-1 rounded-full border border-purple-200 uppercase tracking-wider">
+              Próximamente
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 opacity-30 select-none pointer-events-none">
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Proyectos Activos</span>
+              <p className="text-xl font-black text-slate-800 mt-1">12</p>
+              <span className="text-[8px] text-slate-400 block mt-1">En ejecución</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">% Avance Promedio</span>
+              <p className="text-xl font-black text-slate-800 mt-1">68%</p>
+              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">↑ +5% vs mes ant.</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Entregas a Tiempo</span>
+              <p className="text-xl font-black text-slate-800 mt-1">82%</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Cumplimiento SLA</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Tareas Pendientes</span>
+              <p className="text-xl font-black text-slate-800 mt-1">45</p>
+              <span className="text-[8px] text-amber-600 block mt-1 font-semibold">Priorizadas</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bugs Abiertos</span>
+              <p className="text-xl font-black text-slate-800 mt-1">23</p>
+              <span className="text-[8px] text-red-600 block mt-1 font-semibold">Requieren atención</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================
+          PANEL 4: PRESUPUESTO Y CONTRATOS (PRÓXIMAMENTE)
+          ============================================================ */}
+      <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#f59e0b] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">4</div>
+          <div className="flex flex-col items-center gap-1.5 my-auto">
+            <FileText className="h-7 w-7 text-white/90" />
+            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Presupuesto y Contratos</p>
+            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Finanzas / Legal</p>
+          </div>
+          <div className="hidden lg:block h-6 w-6" />
+        </div>
+
+        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6">
+            <div className="bg-amber-50 text-amber-700 p-3 rounded-full mb-3 border border-amber-100 shadow-sm animate-bounce">
+              <FileSpreadsheet className="h-6 w-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800 tracking-tight uppercase">Módulo de Presupuesto y Contratos</h3>
+            <p className="text-xs text-slate-500 max-w-md mt-1">
+              Próximamente: Gestión de presupuestos, contratos, seguimiento de costos y análisis financiero.
+            </p>
+            <span className="mt-3 text-[10px] font-extrabold text-amber-600 bg-amber-100/60 px-2.5 py-1 rounded-full border border-amber-200 uppercase tracking-wider">
+              Próximamente
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 opacity-30 select-none pointer-events-none">
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Presupuesto Anual</span>
+              <p className="text-xl font-black text-slate-800 mt-1">$2.4B</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Asignado 2026</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ejecutado</span>
+              <p className="text-xl font-black text-slate-800 mt-1">$1.8B</p>
+              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">75% del presupuesto</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Contratos Activos</span>
+              <p className="text-xl font-black text-slate-800 mt-1">34</p>
+              <span className="text-[8px] text-slate-400 block mt-1">En vigencia</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ahorros Identificados</span>
+              <p className="text-xl font-black text-slate-800 mt-1">$186M</p>
+              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">YTD</span>
+            </div>
+            <div className="bg-white border rounded-lg p-3 shadow-xs">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">ROI Promedio</span>
+              <p className="text-xl font-black text-slate-800 mt-1">2.8x</p>
+              <span className="text-[8px] text-slate-400 block mt-1">Proyectos</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================
+          MODALES - Panel 1 (ACTIVO)
+          ============================================================ */}
+      <Dialog open={showDisponibilidadModal} onOpenChange={setShowDisponibilidadModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-500" />
-              Servicios con Errores de Infraestructura
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Gauge className="h-5 w-5 text-emerald-500" />
+              Disponibilidad por Servicio
+              <Badge variant="secondary" className="ml-2">
+                {detalleDisponibilidad.length > 0 ? Math.round(detalleDisponibilidad.reduce((sum, d) => sum + parseFloat(d.valor), 0) / detalleDisponibilidad.length) : 0}%
+              </Badge>
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground mb-3">
-              Servicios que presentan errores técnicos ({serviciosConErrores.length})
-            </p>
-            {serviciosConErrores.length > 0 ? (
-              serviciosConErrores.map((service) => (
-                <div
-                  key={service.id}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors border-l-4 border-l-red-500"
-                  onClick={() => {
-                    setShowErroresModal(false);
-                    navigateToService(service.id);
-                  }}
-                >
-                  <div>
-                    <p className="font-medium">{service.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {service.errorPercentage}% de errores técnicos
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="gap-1 bg-red-50 text-red-600 border-red-200">
-                    <ExternalLink className="h-3 w-3" />
-                    Ver
-                  </Badge>
-                </div>
-              ))
-            ) : (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">Disponibilidad de cada servicio (SLA)</p>
+            {detalleDisponibilidad.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto mb-3" />
-                <p>No hay servicios con errores de infraestructura</p>
-                <p className="text-xs">Todos los servicios están funcionando correctamente</p>
+                <p>No hay datos disponibles</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {detalleDisponibilidad.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{item.nombre}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.errorDocs > 0 ? `${item.errorDocs} errores técnicos` : "Sin errores"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 ml-2">
+                      <div className="w-12 text-right">
+                        <span className={cn("text-sm font-bold", 
+                          parseFloat(item.valor) >= 99 ? "text-emerald-600" : 
+                          parseFloat(item.valor) >= 95 ? "text-amber-600" : "text-red-600"
+                        )}>
+                          {typeof item.valor === 'string' ? item.valor : item.valor}%
+                        </span>
+                      </div>
+                      <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full transition-all",
+                          parseFloat(item.valor) >= 99 ? "bg-emerald-500" : 
+                          parseFloat(item.valor) >= 95 ? "bg-amber-500" : "bg-red-500"
+                        )} style={{ width: `${item.valor}%` }} />
+                      </div>
+                      <Badge variant="outline" className={cn(
+                        item.estado === "Disponible" && "bg-emerald-50 text-emerald-600 border-emerald-200",
+                        item.estado === "Atención" && "bg-amber-50 text-amber-600 border-amber-200",
+                        item.estado === "Crítico" && "bg-red-50 text-red-600 border-red-200"
+                      )}>
+                        {item.estado}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Sistemas Internos */}
-      <Dialog open={showInternosModal} onOpenChange={setShowInternosModal}>
-        <DialogContent className="max-w-md">
+      <Dialog open={showIncidentesModal} onOpenChange={setShowIncidentesModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Server className="h-5 w-5 text-purple-500" />
-              Sistemas Internos
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Incidentes Abiertos
+              <Badge variant="secondary" className="ml-2">
+                {detalleIncidentes.reduce((sum, d) => sum + d.valor, 0)}
+              </Badge>
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground mb-3">
-              Servicios internos del sistema ({serviciosInternos.length})
-            </p>
-            {serviciosInternos.map((service) => (
-              <div
-                key={service.id}
-                className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                onClick={() => {
-                  setShowInternosModal(false);
-                  navigateToService(service.id);
-                }}
-              >
-                <div>
-                  <p className="font-medium">{service.name}</p>
-                  <p className="text-xs text-muted-foreground">{service.description}</p>
-                </div>
-                <Badge variant="outline" className="gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Ver
-                </Badge>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">Detalle de incidentes abiertos por tipo y servicio</p>
+            {detalleIncidentes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto mb-3" />
+                <p>No hay incidentes abiertos</p>
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {detalleIncidentes.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{item.nombre}</p>
+                      <p className="text-xs text-muted-foreground">Servicio: {item.servicio}</p>
+                    </div>
+                    <div className="flex items-center gap-3 ml-2">
+                      <span className="text-sm font-bold text-amber-600">{item.valor}</span>
+                      <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200">
+                        {item.estado}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Sistemas Externos */}
-      <Dialog open={showExternosModal} onOpenChange={setShowExternosModal}>
-        <DialogContent className="max-w-md">
+      <Dialog open={showAlertasModal} onOpenChange={setShowAlertasModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5 text-cyan-500" />
-              Sistemas Externos
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              Alertas Críticas
+              <Badge variant="secondary" className="ml-2">
+                {detalleAlertas.reduce((sum, d) => sum + d.valor, 0)}
+              </Badge>
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground mb-3">
-              Integraciones con sistemas externos ({serviciosExternos.length})
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {detalleAlertas.length === 0 
+                ? "✅ No hay alertas críticas. Todos los servicios funcionan correctamente." 
+                : "Alertas críticas por tipo"}
             </p>
-            {serviciosExternos.map((service) => (
-              <div
-                key={service.id}
-                className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                onClick={() => {
-                  setShowExternosModal(false);
-                  navigateToService(service.id);
-                }}
-              >
-                <div>
-                  <p className="font-medium">{service.name}</p>
-                  <p className="text-xs text-muted-foreground">{service.description}</p>
-                </div>
-                <Badge variant="outline" className="gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Ver
-                </Badge>
+            {detalleAlertas.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto mb-3" />
+                <p className="text-lg font-medium text-emerald-600">Todo funcionando correctamente</p>
+                <p className="text-sm">No hay errores de infraestructura reportados</p>
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {detalleAlertas.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border border-red-200 bg-red-50/30 hover:bg-red-50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm truncate text-red-700">{item.nombre}</p>
+                        <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 text-[10px]">
+                          {item.estado}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-red-600">Servicio: {item.servicio}</p>
+                      <p className="text-[10px] text-red-500 mt-0.5">{item.descripcion}</p>
+                    </div>
+                    <div className="flex items-center gap-3 ml-2">
+                      <span className="text-xl font-bold text-red-600">{item.valor}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Exportación con selección de campos */}
+      <Dialog open={showCambiosModal} onOpenChange={setShowCambiosModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <TrendingUp className="h-5 w-5 text-emerald-500" />
+              Cambios Exitosos
+              <Badge variant="secondary" className="ml-2">
+                {detalleCambios.length > 0 ? Math.round(detalleCambios.reduce((sum, d) => sum + d.porcentaje, 0) / detalleCambios.length) : 0}%
+              </Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">Detalle de cambios exitosos por servicio</p>
+            {detalleCambios.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No hay datos disponibles</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {detalleCambios.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{item.nombre}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.valor} de {item.total}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 ml-2">
+                      <div className="w-12 text-right">
+                        <span className="text-sm font-bold text-emerald-600">
+                          {item.porcentaje}%
+                        </span>
+                      </div>
+                      <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${item.porcentaje}%` }} />
+                      </div>
+                      <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">
+                        {item.estado}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTicketsModal} onOpenChange={setShowTicketsModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Ticket className="h-5 w-5 text-amber-500" />
+              Tickets - Detalle por Día
+              <Badge variant="secondary" className="ml-2">
+                {realInvoiceData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length} Pendientes
+              </Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">Distribución de tickets por día</p>
+            {ticketsPorDia.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No hay tickets registrados</p>
+              </div>
+            ) : (
+              <div className="w-full h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={ticketsPorDia}>
+                    <XAxis dataKey="fecha" fontSize={10} />
+                    <YAxis fontSize={10} />
+                    <Tooltip 
+                      contentStyle={{ fontSize: '11px', padding: '8px 12px' }}
+                    />
+                    <Legend fontSize={10} />
+                    <Bar dataKey="ingresados" stackId="a" fill="#3b82f6" name="Ingresados" />
+                    <Bar dataKey="asignados" stackId="a" fill="#f59e0b" name="Asignados" />
+                    <Bar dataKey="resueltos" stackId="a" fill="#10b981" name="Resueltos" />
+                    <Bar dataKey="cerrados" stackId="a" fill="#ef4444" name="Cerrados" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============================================================
+          MODALES - Panel 3 (PRÓXIMAMENTE - Opcionales)
+          ============================================================ */}
+      <Dialog open={showProyectosModal} onOpenChange={setShowProyectosModal}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <FolderKanban className="h-5 w-5 text-purple-500" />
+              Proyectos Activos (Próximamente)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="text-center py-12 text-muted-foreground">
+              <FolderKanban className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+              <p className="text-lg font-medium text-slate-600">Módulo en desarrollo</p>
+              <p className="text-sm text-slate-500">Próximamente disponible</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEntregasModal} onOpenChange={setShowEntregasModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <ListChecks className="h-5 w-5 text-emerald-500" />
+              Entregas a Tiempo (Próximamente)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="text-center py-12 text-muted-foreground">
+              <ListChecks className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+              <p className="text-lg font-medium text-slate-600">Módulo en desarrollo</p>
+              <p className="text-sm text-slate-500">Próximamente disponible</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTareasModal} onOpenChange={setShowTareasModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Timer className="h-5 w-5 text-amber-500" />
+              Tareas Pendientes (Próximamente)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="text-center py-12 text-muted-foreground">
+              <Timer className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+              <p className="text-lg font-medium text-slate-600">Módulo en desarrollo</p>
+              <p className="text-sm text-slate-500">Próximamente disponible</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBugsModal} onOpenChange={setShowBugsModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Bug className="h-5 w-5 text-red-500" />
+              Bugs Abiertos (Próximamente)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="text-center py-12 text-muted-foreground">
+              <Bug className="h-16 w-16 mx-auto mb-4 text-slate-300" />
+              <p className="text-lg font-medium text-slate-600">Módulo en desarrollo</p>
+              <p className="text-sm text-slate-500">Próximamente disponible</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============================================================
+          MODAL - Exportación
+          ============================================================ */}
       <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>

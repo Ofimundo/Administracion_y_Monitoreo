@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +68,43 @@ interface Filters {
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
 
+// Mapeo de códigos de estado de OFITEC a sus descripciones
+const OFITEC_STATUS_MAP: Record<string, string> = {
+  "1": "PENDIENTE",
+  "2": "DESPACHADO",
+  "3": "INCOMPLETO",
+  "4": "FINALIZADO",
+  "5": "SOPORTE TELEFONICO INICIO",
+  "6": "SOPORTE TELEFONICO FINALIZADO",
+  "7": "POR COORDINAR",
+  "8": "ANULADA CON ASIGNACION",
+  "9": "ANULADA SIN ASIGNACION",
+  "10": "INCOMPLETA REALIZADA",
+  "11": "PRESUPUESTO PENDIENTE",
+  "12": "CHEQUEO PENDIENTE",
+  "15": "REPORTE COMPLETADO POR SOLUCION TEL.",
+  "16": "LLAMADAS SIN SOLUCION",
+  "17": "SOPORTE TELEFONICO",
+  "20": "HABILITACION POR COORDINAR",
+  "22": "INCOMPLETO TECNICO EN TERRENO",
+  "24": "TERMINADO",
+  "30": "DESPACHADA HISTORICO",
+  "33": "INCOMPLETO POR REPUESTO",
+  "75": "CONFIRMACION DE EQUIPO EN CLIENTE"
+};
+
+// Mapeo detallado de estados de OFICORE a sus explicaciones breves
+const OFICORE_STATUS_EXPLANATIONS: Record<number | string, { name: string; reason: string }> = {
+  1: { name: "Recibido", reason: "Incidencia registrada." },
+  3: { name: "Asignado", reason: "Técnico asignado al caso." },
+  4: { name: "Gestionando", reason: "Trabajando en la solución." },
+  5: { name: "Resuelto", reason: "Caso solucionado con éxito." },
+  6: { name: "Incompleto", reason: "Faltan datos o repuestos." },
+  7: { name: "Serv. Técnico", reason: "Derivado a taller técnico." },
+  8: { name: "Anulado", reason: "Incidencia cancelada." },
+  9: { name: "Re-Abierto", reason: "Caso reabierto para revisión." }
+};
+
 const isServiceComingSoon = (serviceId: string): boolean => COMING_SOON_SERVICES.includes(serviceId);
 const ACTIVE_SERVICE_ID = "facturas";
 
@@ -111,76 +149,209 @@ const EVENT_STYLES = {
 
 const DEFAULT_FILTERS: Filters = {
   search: "",
-  types: ["success", "error", "warning", "info"],
+  types: ["success", "error", "warning", "info", "comingSoon"],
   serviceId: "all",
   dateRange: { from: undefined, to: undefined },
 };
 
 export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
+  const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
-  const [realLogs, setRealLogs] = useState<LogEntry[]>([]);
+  const [realLogs, setRealLogs] = useState<Record<string, LogEntry[]>>({
+    facturas: [],
+    oficore: [],
+    ofitec: [],
+    sgc: [],
+  });
   const [loading, setLoading] = useState(true);
 
+  // Generadores locales de simulación
+  const generateMockFacturasLogs = (): LogEntry[] => [
+    { id: "mock_f1", message: "Documento aprobado exitosamente en Softland y SII", details: "Folio #4492 · JOSE LUIS GONZALEZ DIAZ · RUT: 7179224-2", timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_f2", message: "Error al conectar con el SII: No ha sido posible aprobar o rechazar en el SII", details: "Folio #4491 · MARIA ELENA PEREZ SOTO · RUT: 8543210-5", timestamp: new Date(Date.now() - 3600000 * 5).toISOString(), type: "error", estado: "Manual" },
+    { id: "mock_f3", message: "Documento aprobado exitosamente en Softland y SII", details: "Folio #4490 · CARLOS MARTINEZ RUIZ · RUT: 9345678-1", timestamp: new Date(Date.now() - 3600000 * 8).toISOString(), type: "success", estado: "Aprobado" }
+  ];
+
+  const generateMockOficoreLogs = (): LogEntry[] => [
+    { id: "mock_oc1", message: "Incidencia aprobada y cerrada", details: "Incidencia #872 · Cliente: Ofimundo S.A. · Técnico: Juan Perez", timestamp: new Date(Date.now() - 3600000 * 3).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_oc2", message: "Incidencia en revisión técnica", details: "Incidencia #871 · Cliente: Distribuidora Santiago · Técnico: Ana Soto", timestamp: new Date(Date.now() - 3600000 * 6).toISOString(), type: "warning", estado: "Pendiente" }
+  ];
+
+  const generateMockOfitecLogs = (): LogEntry[] => [
+    { id: "mock_ot1", message: "Llamada finalizada y resuelta", details: "Llamada #12093 · Contacto: Pedro Ramirez · Cliente: Soporte Ofimundo", timestamp: new Date(Date.now() - 3600000 * 1).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_ot2", message: "Llamada en progreso con operador", details: "Llamada #12092 · Contacto: Luis Rojas · Cliente: Ofimundo Soporte", timestamp: new Date(Date.now() - 3600000 * 4).toISOString(), type: "warning", estado: "Manual" }
+  ];
+
+  const generateMockSgcLogs = (): LogEntry[] => [
+    { id: "mock_sg1", message: "Integración de FACTURA SGC", details: "Sistema Origen: SOFTLAND ERP · Canal: PICKING · Cantidad: 125", timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_sg2", message: "Integración de GUIA SGC", details: "Sistema Origen: SOFTLAND ERP · Canal: OD · Cantidad: 45", timestamp: new Date(Date.now() - 3600000 * 7).toISOString(), type: "warning", estado: "Pendiente" }
+  ];
+
+  const getLogType = (estado: string, motivo: string): LogEntry["type"] => {
+    const motivoLower = (motivo || "").toLowerCase();
+    const erroresInfraestructura = [
+      "error de conexión", "timeout", "servidor no responde", "softland no disponible",
+      "sii no responde", "connection failed", "failed to connect", "could not connect",
+      "connection refused", "network error", "500", "503",
+      "no se pudo conectar", "softland error", "sii error", "error de red"
+    ];
+    
+    if (erroresInfraestructura.some(term => motivoLower.includes(term))) {
+      return "error";
+    }
+    
+    if (estado === "Aprobado") return "success";
+    if (estado === "Rechazado" || estado === "Manual") return "warning";
+    return "info";
+  };
+
   useEffect(() => {
-    const fetchRealLogs = async () => {
+    const hasFrom = !!filters.dateRange.from;
+    const hasTo = !!filters.dateRange.to;
+    if (hasFrom && !hasTo) {
+      return;
+    }
+
+    const fetchAllLogs = async () => {
+      setLoading(true);
+      const newLogs: Record<string, LogEntry[]> = {
+        facturas: [],
+        oficore: [],
+        ofitec: [],
+        sgc: [],
+      };
+
       try {
-        const res = await fetch("/api/facturas/bitacora?estado=todos");
-        const data = await res.json();
-        
-        if (data.success && data.data) {
-          const getLogTypeFromEntry = (entry: any): LogEntry["type"] => {
-            const motivo = entry.motivo || "";
-            const erroresInfraestructura = [
-              "error de conexión", "timeout", "servidor no responde", "softland no disponible",
-              "sii no responde", "connection failed", "failed to connect", "could not connect",
-              "connection refused", "network error", "500", "503",
-              "no se pudo conectar", "softland error", "sii error", "error de red"
-            ];
-            
-            const esErrorInfraestructura = erroresInfraestructura.some(term => 
-              motivo.toLowerCase().includes(term.toLowerCase())
-            );
-            
-            if (esErrorInfraestructura) return "error";
-            
-            switch (entry.estado) {
-              case "Aprobado": return "success";
-              case "Rechazado": return "info";
-              case "Manual": return "info";
-              default: return "info";
-            }
-          };
-          
-          const mappedLogs: LogEntry[] = data.data.map((entry: any, index: number) => ({
-            id: entry.id_proceso ? `bitacora_${entry.id_proceso}` : `bitacora_${index}`,
-            message: entry.motivo || `Documento ${entry.estado} correctamente`,
-            details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
-            timestamp: entry.fecha_proceso,
-            type: getLogTypeFromEntry(entry),
-            estado: entry.estado,
-          }));
-          
-          setRealLogs(mappedLogs);
+        let queryParams = "";
+        if (filters.dateRange.from && filters.dateRange.to) {
+          const fromStr = format(filters.dateRange.from, "yyyy-MM-dd");
+          const toStr = format(filters.dateRange.to, "yyyy-MM-dd");
+          queryParams = `?fechaDesde=${fromStr}&fechaHasta=${toStr}`;
         }
-        setLoading(false);
-      } catch (error) {
-        console.error("Error fetching logs:", error);
+
+        // 1. Fetch facturas
+        try {
+          const url = `/api/facturas/bitacora?estado=todos${queryParams ? `&${queryParams.slice(1)}` : ""}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          if (data.success && data.data) {
+            newLogs.facturas = data.data.slice(0, 200).map((entry: any, index: number) => ({
+              id: `factura_${entry.id_proceso || index}_${index}`,
+              message: entry.motivo || `Documento ${entry.estado} correctamente`,
+              details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
+              timestamp: entry.fecha_proceso,
+              type: getLogType(entry.estado, entry.motivo),
+              estado: entry.estado,
+            }));
+          }
+        } catch (e) {
+          console.error("Error fetching facturas logs:", e);
+        }
+
+        // 2. Fetch OFICORE
+        try {
+          const res = await fetch(`/api/oficore/stats${queryParams}`);
+          const data = await res.json();
+          if (data.success && data.detalles) {
+            newLogs.oficore = data.detalles.slice(0, 200).map((entry: any, index: number) => {
+              const actionId = entry.id_accion;
+              const explanation = OFICORE_STATUS_EXPLANATIONS[actionId] || { 
+                name: entry.estado_descripcion || `Acción #${actionId}`, 
+                reason: "Estado de la incidencia actualizado." 
+              };
+              
+              let type: "success" | "error" | "warning" | "info" = "info";
+              if (actionId === 5) type = "success";
+              else if (actionId === 8) type = "info";
+              else if (actionId === 6) type = "error";
+              else type = "warning";
+
+              return {
+                id: `oficore_${entry.id_incidencia || index}_${index}`,
+                message: `Estado: ${explanation.name} - ${explanation.reason}`,
+                details: `Incidencia #${entry.id_incidencia} · Cliente: ${entry.contacto_nombre || 'N/A'} (${entry.codigo_cliente || 'N/A'}) · Técnico: ${entry.tecnico || 'N/A'}`,
+                timestamp: entry.fecha_detalle,
+                type,
+                estado: explanation.name,
+              };
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching OFICORE logs:", e);
+        }
+
+        // 3. Fetch OFITEC
+        try {
+          const res = await fetch(`/api/ofitec/stats${queryParams}`);
+          const data = await res.json();
+          if (data.success && data.detalles) {
+            newLogs.ofitec = data.detalles.slice(0, 200).map((entry: any, index: number) => {
+              const estStr = entry.LLA_ESTADO?.toString().trim();
+              const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
+              const incompletoStatuses = ['3', '10', '22', '33', '11', '12'];
+              const type = resolvedStatuses.includes(estStr) ? "success" : (incompletoStatuses.includes(estStr) ? "error" : "warning");
+              return {
+                id: `ofitec_${entry.LLA_CORRELATIVO || index}_${index}`,
+                message: entry.motivo || `Llamada SAST Estado: ${entry.LLA_ESTADO_DESC || OFITEC_STATUS_MAP[estStr] || entry.LLA_ESTADO}`,
+                details: `Llamada #${entry.LLA_CORRELATIVO} · Contacto: ${entry.contacto_nombre || 'N/A'} · Cliente: ${entry.codigo_cliente || 'N/A'}`,
+                timestamp: entry.LLA_FEC_LLAMADA,
+                type,
+                estado: resolvedStatuses.includes(estStr) ? "Aprobado" : (incompletoStatuses.includes(estStr) ? "Rechazado" : "Manual"),
+              };
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching OFITEC logs:", e);
+        }
+
+        // 4. Fetch SGC
+        try {
+          const res = await fetch(`/api/sgc/stats${queryParams}`);
+          const data = await res.json();
+          if (data.success && data.data) {
+            newLogs.sgc = data.data.slice(0, 200).map((entry: any, index: number) => ({
+              id: `sgc_${index}_${index}`,
+              message: `Integración de ${entry.tipo_de_documento || 'documento'} SGC`,
+              details: `Sistema Origen: ${entry.SISTEMA_ORIGEN} · Canal: ${entry.tipo_de_venta || 'N/A'} · Cantidad: ${entry.cantidad || 0}`,
+              timestamp: entry.fecha_documento,
+              type: entry.tipo_de_documento === "FACTURA" ? "success" : (entry.tipo_de_documento === "GUIA" ? "warning" : "info"),
+              estado: entry.tipo_de_documento === "FACTURA" ? "Aprobado" : "Pendiente",
+            }));
+          }
+        } catch (e) {
+          console.error("Error fetching SGC logs:", e);
+        }
+
+        // Si todos los logs reales están vacíos (por ej: error base datos), cargamos simulación
+        const totalLogsCount = Object.values(newLogs).reduce((acc, arr) => acc + arr.length, 0);
+        if (totalLogsCount === 0) {
+          newLogs.facturas = generateMockFacturasLogs();
+          newLogs.oficore = generateMockOficoreLogs();
+          newLogs.ofitec = generateMockOfitecLogs();
+          newLogs.sgc = generateMockSgcLogs();
+        }
+
+        setRealLogs(newLogs);
+      } catch (err) {
+        console.error("Error global in fetchAllLogs:", err);
+      } finally {
         setLoading(false);
       }
     };
-    
-    fetchRealLogs();
-  }, []);
+
+    fetchAllLogs();
+  }, [filters.dateRange.from, filters.dateRange.to]);
 
   const allEvents: TimelineEvent[] = useMemo(() => {
     const events: TimelineEvent[] = [];
     
     for (const service of services) {
       const comingSoon = isServiceComingSoon(service.id);
+      const serviceLogs = realLogs[service.id] || [];
       
-      if (service.id === ACTIVE_SERVICE_ID && realLogs.length > 0) {
-        realLogs.forEach((log) => {
+      if (serviceLogs.length > 0) {
+        serviceLogs.forEach((log) => {
           events.push({
             id: `${service.id}-${log.id}`,
             serviceName: service.name,
@@ -200,8 +371,9 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
             message: "🚀 Servicio en fase de desarrollo",
             details: "Próximamente estará disponible el monitoreo completo con todas las métricas en tiempo real.",
             timestamp: new Date().toISOString(),
-            type: "info",
-          } as any,
+            type: "comingSoon",
+            estado: "Pendiente"
+          },
           service,
           isComingSoon: true,
         });
@@ -223,8 +395,8 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
       );
     }
 
-    if (filters.types.length > 0 && filters.types.length < 4) {
-      result = result.filter(event => !event.isComingSoon && filters.types.includes(event.log.type));
+    if (filters.types.length > 0 && filters.types.length < 5) {
+      result = result.filter(event => filters.types.includes(event.log.type));
     }
 
     if (filters.serviceId !== "all") {
@@ -247,7 +419,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (filters.search) count++;
-    if (filters.types.length !== 4) count++;
+    if (filters.types.length !== 5) count++;
     if (filters.serviceId !== "all") count++;
     if (filters.dateRange.from || filters.dateRange.to) count++;
     return count;
@@ -376,7 +548,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                     <Calendar
                       mode="range"
                       selected={filters.dateRange}
-                      onSelect={(range) => setFilters({ ...filters, dateRange: range || { from: undefined, to: undefined } })}
+                      onSelect={(range) => setFilters({ ...filters, dateRange: range ? { from: range.from, to: range.to } : { from: undefined, to: undefined } })}
                       numberOfMonths={2}
                       locale={es}
                     />
@@ -393,6 +565,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                   { value: "error", label: "Error", emoji: "❌" },
                   { value: "warning", label: "Alerta", emoji: "⚠️" },
                   { value: "info", label: "Info", emoji: "ℹ️" },
+                  { value: "comingSoon", label: "En Desarrollo", emoji: "🚀" },
                 ].map(type => (
                   <Button
                     key={type.value}
@@ -439,7 +612,14 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                     !event.isComingSoon && "cursor-pointer",
                     !isLast && "border-b border-gray-100"
                   )}
-                  onClick={() => !event.isComingSoon && onSelectService && onSelectService(event.service)}
+                  onClick={() => {
+                    if (!event.isComingSoon) {
+                      router.push(`/servicio/${event.serviceId}`);
+                      if (onSelectService) {
+                        onSelectService(event.service);
+                      }
+                    }
+                  }}
                 >
                   {/* Indicador de tiempo */}
                   <div className="absolute left-6 top-4 bottom-0 w-px bg-gradient-to-b from-gray-200 to-transparent" />

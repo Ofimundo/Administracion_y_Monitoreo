@@ -23,6 +23,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { clients, getClientServices, type Client, type Service } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
@@ -99,13 +105,16 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
             "error de conexión", "timeout", "servidor no responde",
             "softland no disponible", "sii no responde", "connection failed",
             "failed to connect", "could not connect", "connection refused",
-            "network error", "500", "503", "no se pudo conectar",
+            "network error", "no se pudo conectar",
             "softland error", "sii error", "error de red"
           ];
           
           const errorDocs = data.data.filter((e: any) => {
             const motivo = e.motivo || "";
-            return erroresTecnicos.some(term => motivo.toLowerCase().includes(term.toLowerCase()));
+            const motivoLower = motivo.toLowerCase();
+            const hasTextError = erroresTecnicos.some(term => motivoLower.includes(term.toLowerCase()));
+            if (hasTextError) return true;
+            return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
           }).length;
           
           const errPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
@@ -413,7 +422,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                     </div>
                     <StatusIndicator 
                       status={clientWithData.status} 
-                      errorPercentage={clientWithData.errorPercentage} 
+                      percentage={clientWithData.errorPercentage} 
                       size="md" 
                     />
                   </div>
@@ -478,17 +487,20 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                   {/* Servicios contratados activos */}
                   {clientServices.length > 0 && (
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {clientServices.slice(0, 3).map(service => (
-                        <Badge key={service.id} variant="outline" className="text-[10px]">
-                          <Briefcase className="h-2 w-2 mr-1" />
-                          {service.name.length > 20 ? service.name.substring(0, 20) + "..." : service.name}
+                      {clientServices.map(service => (
+                        <Badge 
+                          key={service.id} 
+                          variant="outline" 
+                          className="text-[10px] bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGoToServiceMonitoring(service.id, service.name);
+                          }}
+                        >
+                          <Briefcase className="h-2.5 w-2.5 mr-1 text-emerald-500" />
+                          {service.name}
                         </Badge>
                       ))}
-                      {clientServices.length > 3 && (
-                        <Badge variant="outline" className="text-[10px]">
-                          +{clientServices.length - 3} más
-                        </Badge>
-                      )}
                     </div>
                   )}
 
@@ -506,7 +518,36 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                       Dashboard
                     </Button>
                     
-                    {firstService && (
+                    {clientServices.length > 1 ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button 
+                            variant="default"
+                            size="sm" 
+                            className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <LayoutDashboard className="h-3 w-3" />
+                            Monitorear...
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          {clientServices.map(service => (
+                            <DropdownMenuItem
+                              key={service.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleGoToServiceMonitoring(service.id, service.name);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <Briefcase className="h-3.5 w-3.5 mr-2 text-emerald-500" />
+                              <span>{service.name}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : firstService ? (
                       <Button 
                         variant="default"
                         size="sm" 
@@ -520,7 +561,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                         Monitorear Servicio
                         <ArrowRight className="h-3 w-3" />
                       </Button>
-                    )}
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>

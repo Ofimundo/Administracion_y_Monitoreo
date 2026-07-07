@@ -56,11 +56,14 @@ import {
   X,
   Calendar as CalendarIcon,
   Filter,
+  FileSpreadsheet,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import * as XLSX from "xlsx";
 
 interface BitacoraEntry {
   id_proceso?: number;
@@ -226,6 +229,49 @@ export function InvoiceAcceptanceDashboard() {
     setTimeout(() => {
       fetchBitacora();
     }, 100);
+  };
+
+  const handleExportExcel = () => {
+    if (bitacora.length === 0) {
+      toast.error("No hay datos para exportar");
+      return;
+    }
+    try {
+      const exportData = bitacora.map(entry => ({
+        "Tipo": entry.tipo_documento === 33 ? "33" : entry.tipo_documento === 34 ? "34" : "61",
+        "Folio": entry.folio_documento,
+        "RUT Proveedor": entry.rut_proveedor,
+        "Razón Social": entry.razon_social,
+        "OC": entry.orden_compra || "—",
+        "Días": entry.dias_por_vencer,
+        "Estado": entry.estado === "Pendiente Espera" ? "Espera Express" : (entry.estado === "Manual" ? "Revisión Manual" : (entry.estado || "No Procesado")),
+        "Fecha Proceso": format(new Date(entry.fecha_proceso), "dd/MM/yyyy HH:mm:ss"),
+        "Motivo": entry.motivo || "—",
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      const colWidths = [
+        { wch: 10 }, // Tipo
+        { wch: 12 }, // Folio
+        { wch: 15 }, // RUT
+        { wch: 30 }, // Razón Social
+        { wch: 18 }, // OC
+        { wch: 10 }, // Días
+        { wch: 18 }, // Estado
+        { wch: 22 }, // Fecha Proceso
+        { wch: 45 }, // Motivo
+      ];
+      ws['!cols'] = colWidths;
+      
+      XLSX.utils.book_append_sheet(wb, ws, "Bitacora RPA");
+      XLSX.writeFile(wb, `reporte_aceptacion_rechazo_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
+      toast.success("Reporte Excel descargado exitosamente");
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al exportar a Excel");
+    }
   };
 
   const handleRunRpa = async () => {
@@ -452,6 +498,10 @@ export function InvoiceAcceptanceDashboard() {
           <Button onClick={handleSyncSoftland} variant="outline" className="gap-2">
             <RefreshCw className="h-4 w-4" />
             Sincronizar Softland
+          </Button>
+          <Button onClick={handleExportExcel} variant="outline" className="gap-2 border-emerald-600/30 hover:bg-emerald-50 text-emerald-700 font-semibold">
+            <FileSpreadsheet className="h-4 w-4" />
+            Descargar Reporte
           </Button>
           <Button onClick={handleResetDb} variant="destructive" size="sm" className="gap-2">
             <Trash2 className="h-4 w-4" />

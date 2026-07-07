@@ -26,7 +26,11 @@ export interface Log {
   message: string;
   timestamp: string;
   type: "success" | "error" | "warning" | "info";
+  details?: string;
 }
+
+export type ServiceStatus = "success" | "warning" | "error";
+export type LogEntry = Log;
 
 export interface MetricDataPoint {
   id: string;
@@ -38,11 +42,12 @@ export interface MetricDataPoint {
   throughput: number;
   serviceName: string;
   endpoint: string;
+  reglaNegocioCount?: number;
 }
 
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
-  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas"] },
+  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc"] },
   { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
   { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: [] },
   { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: [] },
@@ -142,6 +147,42 @@ const baseServices: Service[] = [
     clients: [],
     logs: [],
     isComingSoon: true,
+  },
+  {
+    id: "oficore",
+    name: "OFICORE",
+    description: "Servicio de consulta e información sobre incidencias, tickets ingresados, tickets resueltos y técnicos resolutores de la plataforma OFICORE.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
+  {
+    id: "ofitec",
+    name: "OFITEC",
+    description: "Monitoreo y consulta de llamadas de servicio técnico en terreno, incluyendo tickets ingresados, resueltos y asignación de técnicos.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
+  {
+    id: "sgc",
+    name: "SGC",
+    description: "Control de gestión y visualización de documentos y ventas de tipo Picking y OD, origen SGC y Softland.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+    ],
+    logs: [],
+    isComingSoon: false,
   },
 ];
 

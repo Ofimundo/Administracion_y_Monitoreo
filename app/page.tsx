@@ -42,7 +42,8 @@ export default function HomePage() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientDashboard, setShowClientDashboard] = useState(false);
-  const [activeTab, setActiveTab] = useState("heatmap");
+  // ✅ CAMBIADO: Dashboard como pestaña activa por defecto
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [isInitialized, setIsInitialized] = useState(false);
   const mountedRef = useRef(true);
 
@@ -63,45 +64,180 @@ export default function HomePage() {
 
     const syncData = async () => {
       try {
-        const res = await fetch("/api/facturas/bitacora?estado=todos");
-        const data = await res.json();
-        
-        if (!isSubscribed || !mountedRef.current) return;
-        
-        if (data.success && data.data) {
-          const totalDocs = data.data.length;
+        // 1. Monitoreo de Facturas desde la Base de Datos
+        let facturasErrPercent = 0;
+        let facturasStatus = "success";
+        try {
+          const resFacturas = await fetch("/api/facturas/bitacora?estado=todos");
+          const dataFacturas = await resFacturas.json();
           
-          const technicalErrors = [
-            "error de conexión", "timeout", "servidor no responde",
-            "softland no disponible", "sii no responde", "connection failed",
-            "failed to connect", "could not connect", "connection refused",
-            "network error", "500", "503", "no se pudo conectar",
-            "softland error", "sii error", "error de red"
-          ];
+          if (!isSubscribed || !mountedRef.current) return;
           
-          const errorDocs = data.data.filter((e: any) => {
-            const motivo = e.motivo || "";
-            return technicalErrors.some(term => motivo.toLowerCase().includes(term.toLowerCase()));
-          }).length;
-          
-          const errPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
-          const status = errorDocs > 0 ? (errPercent > 40 ? "error" : "warning") : "success";
-          
-          const globalClient = clients.find(c => c.id === "cl_ofimundo");
-          if (globalClient && mountedRef.current) {
-            globalClient.errorPercentage = errPercent;
-            globalClient.status = status as any;
+          if (dataFacturas.success && dataFacturas.data) {
+            const totalDocs = dataFacturas.data.length;
+            const technicalErrors = [
+              "error de conexión", "timeout", "servidor no responde",
+              "softland no disponible", "sii no responde", "connection failed",
+              "failed to connect", "could not connect", "connection refused",
+              "network error", "no se pudo conectar",
+              "softland error", "sii error", "error de red"
+            ];
+            
+            const errorDocs = dataFacturas.data.filter((e: any) => {
+              const motivo = e.motivo || "";
+              const motivoLower = motivo.toLowerCase();
+              const hasTextError = technicalErrors.some(term => motivoLower.includes(term.toLowerCase()));
+              if (hasTextError) return true;
+              return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
+            }).length;
+            
+            facturasErrPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
+            facturasStatus = errorDocs > 0 ? (facturasErrPercent > 40 ? "error" : "warning") : "success";
+          } else {
+            facturasErrPercent = 100;
+            facturasStatus = "error";
           }
-          
-          const globalService = services.find(s => s.id === "facturas");
-          if (globalService && mountedRef.current) {
-            globalService.errorPercentage = errPercent;
-            globalService.status = status as any;
-            if (globalService.clients && globalService.clients[0]) {
-              globalService.clients[0].errorPercentage = errPercent;
-              globalService.clients[0].status = status as any;
+        } catch (err) {
+          facturasErrPercent = 100;
+          facturasStatus = "error";
+        }
+        
+        const srvFacturas = services.find(s => s.id === "facturas");
+        if (srvFacturas && mountedRef.current) {
+          srvFacturas.errorPercentage = facturasErrPercent;
+          srvFacturas.status = facturasStatus as any;
+          if (srvFacturas.clients && srvFacturas.clients[0]) {
+            srvFacturas.clients[0].errorPercentage = facturasErrPercent;
+            srvFacturas.clients[0].status = facturasStatus as any;
+          }
+          if (facturasStatus === "error") {
+            srvFacturas.logs = [
+              { id: "err_bd", message: "Error crítico de base de datos o consulta de facturas fallida", timestamp: new Date().toISOString(), type: "error" },
+              ...srvFacturas.logs.filter(l => l.id !== "err_bd")
+            ];
+          }
+        }
+
+        // 2. Monitoreo de OFICORE desde la Base de Datos
+        let oficoreErrPercent = 0;
+        let oficoreStatus = "success";
+        try {
+          const resOficore = await fetch("/api/oficore/stats");
+          const dataOficore = await resOficore.json();
+          if (!isSubscribed || !mountedRef.current) return;
+
+          if (dataOficore.success) {
+            oficoreStatus = "success";
+            oficoreErrPercent = 0;
+          } else {
+            oficoreStatus = "error";
+            oficoreErrPercent = 100;
+            const srvOficore = services.find(s => s.id === "oficore");
+            if (srvOficore) {
+              srvOficore.logs = [
+                { id: "err_oficore", message: `Error BD MDA: ${dataOficore.message || "Consulta fallida"}`, timestamp: new Date().toISOString(), type: "error" },
+                ...srvOficore.logs.filter(l => l.id !== "err_oficore")
+              ];
             }
           }
+        } catch (errOfi) {
+          oficoreStatus = "error";
+          oficoreErrPercent = 100;
+        }
+        
+        const srvOficore = services.find(s => s.id === "oficore");
+        if (srvOficore && mountedRef.current) {
+          srvOficore.status = oficoreStatus as any;
+          srvOficore.errorPercentage = oficoreErrPercent;
+          if (srvOficore.clients && srvOficore.clients[0]) {
+            srvOficore.clients[0].errorPercentage = oficoreErrPercent;
+            srvOficore.clients[0].status = oficoreStatus as any;
+          }
+        }
+
+        // 3. Monitoreo de OFITEC desde la Base de Datos
+        let ofitecErrPercent = 0;
+        let ofitecStatus = "success";
+        try {
+          const resOfitec = await fetch("/api/ofitec/stats");
+          const dataOfitec = await resOfitec.json();
+          if (!isSubscribed || !mountedRef.current) return;
+
+          if (dataOfitec.success) {
+            ofitecStatus = "success";
+            ofitecErrPercent = 0;
+          } else {
+            ofitecStatus = "error";
+            ofitecErrPercent = 100;
+            const srvOfitec = services.find(s => s.id === "ofitec");
+            if (srvOfitec) {
+              srvOfitec.logs = [
+                { id: "err_ofitec", message: `Error BD OFITEC: ${dataOfitec.message || "Consulta fallida"}`, timestamp: new Date().toISOString(), type: "error" },
+                ...srvOfitec.logs.filter(l => l.id !== "err_ofitec")
+              ];
+            }
+          }
+        } catch (errTec) {
+          ofitecStatus = "error";
+          ofitecErrPercent = 100;
+        }
+        
+        const srvOfitec = services.find(s => s.id === "ofitec");
+        if (srvOfitec && mountedRef.current) {
+          srvOfitec.status = ofitecStatus as any;
+          srvOfitec.errorPercentage = ofitecErrPercent;
+          if (srvOfitec.clients && srvOfitec.clients[0]) {
+            srvOfitec.clients[0].errorPercentage = ofitecErrPercent;
+            srvOfitec.clients[0].status = ofitecStatus as any;
+          }
+        }
+
+        // 4. Monitoreo de SGC desde la Base de Datos (captura errores de permisos reales)
+        let sgcErrPercent = 0;
+        let sgcStatus = "success";
+        try {
+          const resSgc = await fetch("/api/sgc/stats");
+          const dataSgc = await resSgc.json();
+          if (!isSubscribed || !mountedRef.current) return;
+
+          if (dataSgc.success) {
+            sgcStatus = "success";
+            sgcErrPercent = 0;
+          } else {
+            sgcStatus = "error";
+            sgcErrPercent = 100;
+            const srvSgc = services.find(s => s.id === "sgc");
+            if (srvSgc) {
+              srvSgc.logs = [
+                { id: "err_sgc", message: dataSgc.message || "Error al conectar con la base de datos SGC", timestamp: new Date().toISOString(), type: "error" },
+                ...srvSgc.logs.filter(l => l.id !== "err_sgc")
+              ];
+            }
+          }
+        } catch (errSgc) {
+          sgcStatus = "error";
+          sgcErrPercent = 100;
+        }
+        
+        const srvSgc = services.find(s => s.id === "sgc");
+        if (srvSgc && mountedRef.current) {
+          srvSgc.status = sgcStatus as any;
+          srvSgc.errorPercentage = sgcErrPercent;
+          if (srvSgc.clients && srvSgc.clients[0]) {
+            srvSgc.clients[0].errorPercentage = sgcErrPercent;
+            srvSgc.clients[0].status = sgcStatus as any;
+          }
+        }
+
+        // Sincronizar estado global del cliente Ofimundo
+        const globalClient = clients.find(c => c.id === "cl_ofimundo");
+        if (globalClient && mountedRef.current) {
+          const clientServices = [srvFacturas, srvOficore, srvOfitec, srvSgc];
+          const hasError = clientServices.some(s => s && s.status === "error");
+          const hasWarning = clientServices.some(s => s && s.status === "warning");
+          
+          globalClient.status = hasError ? "error" : (hasWarning ? "warning" : "success");
+          globalClient.errorPercentage = hasError ? 100 : (hasWarning ? 15 : 0);
         }
       } catch (err) {
         console.error("Error syncing data:", err);
@@ -136,9 +272,10 @@ export default function HomePage() {
     setSelectedClient(null);
   }, []);
 
+  // ✅ Configuración de tabs - Dashboard primero
   const tabsConfig = [
-    { id: "heatmap", label: "Mapa de Calor", icon: Flame, component: HeatMap, hasServiceCallback: true, hasClientCallback: false },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: DashboardMetrics, hasServiceCallback: false, hasClientCallback: false },
+    { id: "heatmap", label: "Mapa de Calor", icon: Flame, component: HeatMap, hasServiceCallback: true, hasClientCallback: false },
     { id: "services", label: "Servicios", icon: Briefcase, component: ServicesList, hasServiceCallback: false, hasClientCallback: false },
     { id: "clients", label: "Clientes", icon: Users, component: ClientsList, hasServiceCallback: false, hasClientCallback: true },
     { id: "timeline", label: "Línea de Tiempo", icon: Clock, component: EventsTimeline, hasServiceCallback: true, hasClientCallback: false },
@@ -210,6 +347,12 @@ export default function HomePage() {
                   const props: any = {};
                   if (tab.hasServiceCallback) props.onSelectService = handleSelectService;
                   if (tab.hasClientCallback) props.onSelectClient = handleSelectClient;
+                  if (tab.id === "dashboard") {
+                    props.onNavigateToServices = () => setActiveTab("services");
+                    props.onNavigateToTimeline = () => setActiveTab("timeline");
+                    props.onNavigateToHeatMap = () => setActiveTab("heatmap");
+                    props.onNavigateToClients = () => setActiveTab("clients");
+                  }
                   return <tab.component {...props} />;
                 })()}
               </Suspense>

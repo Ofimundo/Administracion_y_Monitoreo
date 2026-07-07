@@ -554,7 +554,7 @@ export function ServicesList() {
                     {!comingSoon && (
                       <StatusIndicator 
                         status={service.status} 
-                        errorPercentage={service.errorPercentage} 
+                        percentage={service.errorPercentage} 
                         size="lg"
                       />
                     )}

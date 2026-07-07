@@ -1,0 +1,876 @@
+{
+  "dte_doccab": [
+    {
+      "TipoDTE": 33,
+      "Folio": 101,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 1250000,
+      "FechaEmision": "2026-05-10",
+      "FechaVencimiento": "2026-06-10",
+      "EnProceso": 1,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 44: Documento cumple satisfactoriamente con la totalidad de las reglas de negocio de RPA. Aprobación y registro en SII automático realizado."
+    },
+    {
+      "TipoDTE": 61,
+      "Folio": 201,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 250000,
+      "FechaEmision": "2026-05-12",
+      "FechaVencimiento": "2026-06-12",
+      "EnProceso": 1,
+      "AceptadoCliente": 1,
+      "Motivo": "Factura referenciada #101 está Aprobada"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 102,
+      "RutEmisor": "77.234.567-8",
+      "RazonSocialEmisor": "Servicios Industriales Ltda.",
+      "MontoTotal": 500000,
+      "FechaEmision": "2026-05-17",
+      "FechaVencimiento": "2026-05-19",
+      "EnProceso": 4,
+      "AceptadoCliente": null,
+      "Motivo": "Regla 2: Documento con plazo crítico (<= 2 días) con OC. En espera de resolución express (24 horas)."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 103,
+      "RutEmisor": "79.999.999-9",
+      "RazonSocialEmisor": "Servicios Fantasma SpA",
+      "MontoTotal": 850000,
+      "FechaEmision": "2026-05-14",
+      "FechaVencimiento": "2026-06-14",
+      "EnProceso": 4,
+      "AceptadoCliente": null,
+      "Motivo": "Regla 4: Proveedor RUT 79.999.999-9 no tiene asignado tipo de proveedor (Atributo 18 en Softland)."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 104,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 950000,
+      "FechaEmision": "2026-05-12",
+      "FechaVencimiento": "2026-06-12",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 12: La Orden de Compra referenciada OC-8004 NO existe en la base de datos de Softland."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 105,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 1500000,
+      "FechaEmision": "2026-05-11",
+      "FechaVencimiento": "2026-06-11",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 14: La Orden de Compra OC-8005 tiene una fecha de emisión de más de 4 meses (5.6 meses). Rechazo por antigüedad."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 106,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 3000000,
+      "FechaEmision": "2026-05-10",
+      "FechaVencimiento": "2026-06-10",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 18: El RUT del emisor del DTE (76.123.456-7) no coincide con el RUT del proveedor registrado en la Orden de Compra (99.888.777-6)."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 107,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 1800000,
+      "FechaEmision": "2026-05-12",
+      "FechaVencimiento": "2026-06-12",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 20: La Orden de Compra OC-8007 está en estado \"NULA\" en Softland."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 108,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 1200000,
+      "FechaEmision": "2026-05-13",
+      "FechaVencimiento": "2026-06-13",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 22: La Orden de Compra OC-8008 se encuentra en estado \"PENDIENTE DE APROBACIÓN\". Rechazo para evitar facturar OCs no autorizadas."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 109,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 4500000,
+      "FechaEmision": "2026-05-13",
+      "FechaVencimiento": "2026-06-13",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 31: Desviación excesiva de moneda extranjera. Monto factura $4.500.000 vs OC en UF ($100 * $38240.5 = $3.824.050). Desvío de 17.7%."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 110,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 2000000,
+      "FechaEmision": "2026-05-14",
+      "FechaVencimiento": "2026-06-14",
+      "EnProceso": 2,
+      "AceptadoCliente": 1,
+      "Motivo": "Regla 27: Recepción Parcial Excedida. Producto PROD-03 facturó cantidad 10 superando lo recibido físicamente (5)."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 111,
+      "RutEmisor": "76.123.456-7",
+      "RazonSocialEmisor": "Distribuidora Mayorista S.A.",
+      "MontoTotal": 450000,
+      "FechaEmision": "2026-05-14",
+      "FechaVencimiento": "2026-06-14",
+      "EnProceso": 4,
+      "AceptadoCliente": null,
+      "Motivo": "Regla 9: Falta ingresar referencia a Orden de Compra (campo 801 del DTE). En espera por 96 horas."
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 112,
+      "RutEmisor": "78.345.678-9",
+      "RazonSocialEmisor": "Servicios Generales A&B SpA",
+      "MontoTotal": 1200000,
+      "FechaEmision": "2026-05-15",
+      "FechaVencimiento": "2026-06-15",
+      "EnProceso": 3,
+      "AceptadoCliente": null,
+      "Motivo": "Regla 7: El monto facturado ($1.200.000) se desvía más del 10% del promedio de los últimos 6 meses ($960.000) para el proveedor de servicios."
+    }
+  ],
+  "dte_docref": [
+    {
+      "TipoDTE": 33,
+      "Folio": 101,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8001"
+    },
+    {
+      "TipoDTE": 61,
+      "Folio": 201,
+      "TpoDocRef": "33",
+      "FolioRef": "101",
+      "FchRef": "2026-05-10"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 102,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8002"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 103,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8003"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 104,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8004"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 105,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8005"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 106,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8006"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 107,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8007"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 108,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8008"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 109,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8009"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 110,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8010"
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 112,
+      "TpoDocRef": "801",
+      "FolioRef": "OC-8012"
+    }
+  ],
+  "dte_docdet": [
+    {
+      "TipoDTE": 33,
+      "Folio": 101,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 10,
+      "PrecioUnitario": 125000,
+      "MontoLinea": 1250000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 102,
+      "Linea": 1,
+      "CodigoProducto": "SERV-01",
+      "NombreProducto": "Soporte TI Urgente",
+      "Cantidad": 1,
+      "PrecioUnitario": 500000,
+      "MontoLinea": 500000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 103,
+      "Linea": 1,
+      "CodigoProducto": "SERV-99",
+      "NombreProducto": "Servicio General",
+      "Cantidad": 1,
+      "PrecioUnitario": 850000,
+      "MontoLinea": 850000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 104,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 8,
+      "PrecioUnitario": 118750,
+      "MontoLinea": 950000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 105,
+      "Linea": 1,
+      "CodigoProducto": "PROD-02",
+      "NombreProducto": "Silla Ergonomica Gamer",
+      "Cantidad": 20,
+      "PrecioUnitario": 75000,
+      "MontoLinea": 1500000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 106,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 24,
+      "PrecioUnitario": 125000,
+      "MontoLinea": 3000000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 107,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 14,
+      "PrecioUnitario": 128571,
+      "MontoLinea": 1800000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 108,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 10,
+      "PrecioUnitario": 120000,
+      "MontoLinea": 1200000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 109,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 10,
+      "PrecioUnitario": 450000,
+      "MontoLinea": 4500000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 110,
+      "Linea": 1,
+      "CodigoProducto": "PROD-03",
+      "NombreProducto": "Monitor Curvo 34'' LG",
+      "Cantidad": 10,
+      "PrecioUnitario": 200000,
+      "MontoLinea": 2000000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 111,
+      "Linea": 1,
+      "CodigoProducto": "PROD-01",
+      "NombreProducto": "Escritorio Ejecutivo Moderno",
+      "Cantidad": 4,
+      "PrecioUnitario": 112500,
+      "MontoLinea": 450000
+    },
+    {
+      "TipoDTE": 33,
+      "Folio": 112,
+      "Linea": 1,
+      "CodigoProducto": "SERV-02",
+      "NombreProducto": "Servicio de Limpieza e Higienización",
+      "Cantidad": 1,
+      "PrecioUnitario": 1200000,
+      "MontoLinea": 1200000
+    }
+  ],
+  "owordencom": [
+    {
+      "NroOrden": "OC-8001",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2026-05-05",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "PES",
+      "MontoTotal": 1250000
+    },
+    {
+      "NroOrden": "OC-8002",
+      "RutProveedor": "77.234.567-8",
+      "FechaOrden": "2026-05-15",
+      "Estado": "Aprobada",
+      "Etapa": "Sin Recepción",
+      "Moneda": "PES",
+      "MontoTotal": 500000
+    },
+    {
+      "NroOrden": "OC-8003",
+      "RutProveedor": "79.999.999-9",
+      "FechaOrden": "2026-05-10",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "PES",
+      "MontoTotal": 850000
+    },
+    {
+      "NroOrden": "OC-8005",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2025-12-01",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "PES",
+      "MontoTotal": 1500000
+    },
+    {
+      "NroOrden": "OC-8006",
+      "RutProveedor": "99.888.777-6",
+      "FechaOrden": "2026-05-02",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "PES",
+      "MontoTotal": 3000000
+    },
+    {
+      "NroOrden": "OC-8007",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2026-05-05",
+      "Estado": "Nula",
+      "Etapa": "Sin Recepción",
+      "Moneda": "PES",
+      "MontoTotal": 1800000
+    },
+    {
+      "NroOrden": "OC-8008",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2026-05-05",
+      "Estado": "Pendiente",
+      "Etapa": "Sin Recepción",
+      "Moneda": "PES",
+      "MontoTotal": 1200000
+    },
+    {
+      "NroOrden": "OC-8009",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2026-05-10",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "UF",
+      "MontoTotal": 100
+    },
+    {
+      "NroOrden": "OC-8010",
+      "RutProveedor": "76.123.456-7",
+      "FechaOrden": "2026-05-12",
+      "Estado": "Aprobada",
+      "Etapa": "Recepción Parcial",
+      "Moneda": "PES",
+      "MontoTotal": 2000000
+    },
+    {
+      "NroOrden": "OC-8012",
+      "RutProveedor": "78.345.678-9",
+      "FechaOrden": "2026-05-14",
+      "Estado": "Aprobada",
+      "Etapa": "Recepcionada",
+      "Moneda": "PES",
+      "MontoTotal": 1200000
+    }
+  ],
+  "vt_datos_orden_compra": [
+    {
+      "NroOrden": "OC-8001",
+      "CantidadTotalOC": 10,
+      "CantidadRecibida": 10,
+      "MontoTotalOC": 1250000,
+      "MontoRecibido": 1250000,
+      "Productos": [
+        {
+          "Codigo": "PROD-01",
+          "Nombre": "Escritorio Ejecutivo Moderno",
+          "CantidadPedida": 10,
+          "CantidadRecibida": 10,
+          "PrecioUnitario": 125000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8002",
+      "CantidadTotalOC": 1,
+      "CantidadRecibida": 0,
+      "MontoTotalOC": 500000,
+      "MontoRecibido": 0,
+      "Productos": [
+        {
+          "Codigo": "SERV-01",
+          "Nombre": "Soporte TI Urgente",
+          "CantidadPedida": 1,
+          "CantidadRecibida": 0,
+          "PrecioUnitario": 500000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8003",
+      "CantidadTotalOC": 1,
+      "CantidadRecibida": 1,
+      "MontoTotalOC": 850000,
+      "MontoRecibido": 850000,
+      "Productos": [
+        {
+          "Codigo": "SERV-99",
+          "Nombre": "Servicio General",
+          "CantidadPedida": 1,
+          "CantidadRecibida": 1,
+          "PrecioUnitario": 850000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8005",
+      "CantidadTotalOC": 20,
+      "CantidadRecibida": 20,
+      "MontoTotalOC": 1500000,
+      "MontoRecibido": 1500000,
+      "Productos": [
+        {
+          "Codigo": "PROD-02",
+          "Nombre": "Silla Ergonomica Gamer",
+          "CantidadPedida": 20,
+          "CantidadRecibida": 20,
+          "PrecioUnitario": 75000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8006",
+      "CantidadTotalOC": 24,
+      "CantidadRecibida": 24,
+      "MontoTotalOC": 3000000,
+      "MontoRecibido": 3000000,
+      "Productos": [
+        {
+          "Codigo": "PROD-01",
+          "Nombre": "Escritorio Ejecutivo Moderno",
+          "CantidadPedida": 24,
+          "CantidadRecibida": 24,
+          "PrecioUnitario": 125000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8007",
+      "CantidadTotalOC": 14,
+      "CantidadRecibida": 0,
+      "MontoTotalOC": 1800000,
+      "MontoRecibido": 0,
+      "Productos": [
+        {
+          "Codigo": "PROD-01",
+          "Nombre": "Escritorio Ejecutivo Moderno",
+          "CantidadPedida": 14,
+          "CantidadRecibida": 0,
+          "PrecioUnitario": 128571
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8008",
+      "CantidadTotalOC": 10,
+      "CantidadRecibida": 0,
+      "MontoTotalOC": 1200000,
+      "MontoRecibido": 0,
+      "Productos": [
+        {
+          "Codigo": "PROD-01",
+          "Nombre": "Escritorio Ejecutivo Moderno",
+          "CantidadPedida": 10,
+          "CantidadRecibida": 0,
+          "PrecioUnitario": 120000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8009",
+      "CantidadTotalOC": 100,
+      "CantidadRecibida": 100,
+      "MontoTotalOC": 100,
+      "MontoRecibido": 100,
+      "Productos": [
+        {
+          "Codigo": "PROD-01",
+          "Nombre": "Escritorio Ejecutivo Moderno",
+          "CantidadPedida": 10,
+          "CantidadRecibida": 10,
+          "PrecioUnitario": 10
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8010",
+      "CantidadTotalOC": 10,
+      "CantidadRecibida": 5,
+      "MontoTotalOC": 2000000,
+      "MontoRecibido": 1000000,
+      "Productos": [
+        {
+          "Codigo": "PROD-03",
+          "Nombre": "Monitor Curvo 34'' LG",
+          "CantidadPedida": 10,
+          "CantidadRecibida": 5,
+          "PrecioUnitario": 200000
+        }
+      ]
+    },
+    {
+      "NroOrden": "OC-8012",
+      "CantidadTotalOC": 1,
+      "CantidadRecibida": 1,
+      "MontoTotalOC": 1200000,
+      "MontoRecibido": 1200000,
+      "Productos": [
+        {
+          "Codigo": "SERV-02",
+          "Nombre": "Servicio de Limpieza e Higienización",
+          "CantidadPedida": 1,
+          "CantidadRecibida": 1,
+          "PrecioUnitario": 1200000
+        }
+      ]
+    }
+  ],
+  "cwt_auxi_attr": [
+    {
+      "RutAux": "76.123.456-7",
+      "Atributo18": "Mayorista",
+      "Atributo21": null
+    },
+    {
+      "RutAux": "77.234.567-8",
+      "Atributo18": "Minorista",
+      "Atributo21": null
+    },
+    {
+      "RutAux": "78.345.678-9",
+      "Atributo18": "Servicio",
+      "Atributo21": "Soporte Técnico"
+    },
+    {
+      "RutAux": "99.888.777-6",
+      "Atributo18": "Mayorista",
+      "Atributo21": null
+    }
+  ],
+  "cwteqmo": [
+    {
+      "Fecha": "2026-05-18",
+      "Moneda": "UF",
+      "Valor": 38240.5
+    },
+    {
+      "Fecha": "2026-05-18",
+      "Moneda": "DOL",
+      "Valor": 924.8
+    },
+    {
+      "Fecha": "2026-05-17",
+      "Moneda": "UF",
+      "Valor": 38238.1
+    },
+    {
+      "Fecha": "2026-05-17",
+      "Moneda": "DOL",
+      "Valor": 924.8
+    },
+    {
+      "Fecha": "2026-05-16",
+      "Moneda": "UF",
+      "Valor": 38235.8
+    },
+    {
+      "Fecha": "2026-05-16",
+      "Moneda": "DOL",
+      "Valor": 924.8
+    },
+    {
+      "Fecha": "2026-05-15",
+      "Moneda": "UF",
+      "Valor": 38233.4
+    },
+    {
+      "Fecha": "2026-05-15",
+      "Moneda": "DOL",
+      "Valor": 924.8
+    }
+  ],
+  "feriados": [
+    "2026-01-01",
+    "2026-04-03",
+    "2026-04-04",
+    "2026-05-01",
+    "2026-05-21",
+    "2026-06-29",
+    "2026-07-16",
+    "2026-08-15",
+    "2026-09-18",
+    "2026-09-19",
+    "2026-10-12",
+    "2026-10-31",
+    "2026-11-01",
+    "2026-12-08",
+    "2026-12-25"
+  ],
+  "bitacora": [
+    {
+      "folio_documento": 101,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8001",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 23,
+      "estado": "Aprobado",
+      "id_regla": 44,
+      "motivo": "Regla 44: Documento cumple satisfactoriamente con la totalidad de las reglas de negocio de RPA. Aprobación y registro en SII automático realizado.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.417Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.417Z"
+    },
+    {
+      "folio_documento": 201,
+      "tipo_documento": 61,
+      "orden_compra": null,
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 25,
+      "estado": "Aprobado",
+      "id_regla": 1,
+      "motivo": "Factura referenciada #101 está Aprobada",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.418Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.418Z"
+    },
+    {
+      "folio_documento": 102,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8002",
+      "razon_social": "Servicios Industriales Ltda.",
+      "rut_proveedor": "77.234.567-8",
+      "dias_por_vencer": 1,
+      "estado": "Pendiente",
+      "id_regla": 2,
+      "motivo": "Regla 2: Documento con plazo crítico (<= 2 días) con OC. En espera de resolución express (24 horas).",
+      "horas_por_revisar": 24,
+      "fecha_proceso": "2026-05-18T19:01:37.420Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.420Z"
+    },
+    {
+      "folio_documento": 103,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8003",
+      "razon_social": "Servicios Fantasma SpA",
+      "rut_proveedor": "79.999.999-9",
+      "dias_por_vencer": 27,
+      "estado": "Pendiente",
+      "id_regla": 4,
+      "motivo": "Regla 4: Proveedor RUT 79.999.999-9 no tiene asignado tipo de proveedor (Atributo 18 en Softland).",
+      "horas_por_revisar": 48,
+      "fecha_proceso": "2026-05-18T19:01:37.422Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.422Z"
+    },
+    {
+      "folio_documento": 104,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8004",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 25,
+      "estado": "Rechazado",
+      "id_regla": 12,
+      "motivo": "Regla 12: La Orden de Compra referenciada OC-8004 NO existe en la base de datos de Softland.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.423Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.423Z"
+    },
+    {
+      "folio_documento": 105,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8005",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 24,
+      "estado": "Rechazado",
+      "id_regla": 14,
+      "motivo": "Regla 14: La Orden de Compra OC-8005 tiene una fecha de emisión de más de 4 meses (5.6 meses). Rechazo por antigüedad.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.424Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.424Z"
+    },
+    {
+      "folio_documento": 106,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8006",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 23,
+      "estado": "Rechazado",
+      "id_regla": 18,
+      "motivo": "Regla 18: El RUT del emisor del DTE (76.123.456-7) no coincide con el RUT del proveedor registrado en la Orden de Compra (99.888.777-6).",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.426Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.426Z"
+    },
+    {
+      "folio_documento": 107,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8007",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 25,
+      "estado": "Rechazado",
+      "id_regla": 20,
+      "motivo": "Regla 20: La Orden de Compra OC-8007 está en estado \"NULA\" en Softland.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.428Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.428Z"
+    },
+    {
+      "folio_documento": 108,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8008",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 26,
+      "estado": "Rechazado",
+      "id_regla": 22,
+      "motivo": "Regla 22: La Orden de Compra OC-8008 se encuentra en estado \"PENDIENTE DE APROBACIÓN\". Rechazo para evitar facturar OCs no autorizadas.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.428Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.428Z"
+    },
+    {
+      "folio_documento": 109,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8009",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 26,
+      "estado": "Rechazado",
+      "id_regla": 31,
+      "motivo": "Regla 31: Desviación excesiva de moneda extranjera. Monto factura $4.500.000 vs OC en UF ($100 * $38240.5 = $3.824.050). Desvío de 17.7%.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.430Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.430Z"
+    },
+    {
+      "folio_documento": 110,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8010",
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 27,
+      "estado": "Rechazado",
+      "id_regla": 27,
+      "motivo": "Regla 27: Recepción Parcial Excedida. Producto PROD-03 facturó cantidad 10 superando lo recibido físicamente (5).",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.434Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.434Z"
+    },
+    {
+      "folio_documento": 111,
+      "tipo_documento": 33,
+      "orden_compra": null,
+      "razon_social": "Distribuidora Mayorista S.A.",
+      "rut_proveedor": "76.123.456-7",
+      "dias_por_vencer": 27,
+      "estado": "Pendiente",
+      "id_regla": 9,
+      "motivo": "Regla 9: Falta ingresar referencia a Orden de Compra (campo 801 del DTE). En espera por 96 horas.",
+      "horas_por_revisar": 96,
+      "fecha_proceso": "2026-05-18T19:01:37.435Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.435Z"
+    },
+    {
+      "folio_documento": 112,
+      "tipo_documento": 33,
+      "orden_compra": "OC-8012",
+      "razon_social": "Servicios Generales A&B SpA",
+      "rut_proveedor": "78.345.678-9",
+      "dias_por_vencer": 28,
+      "estado": "Manual",
+      "id_regla": 7,
+      "motivo": "Regla 7: El monto facturado ($1.200.000) se desvía más del 10% del promedio de los últimos 6 meses ($960.000) para el proveedor de servicios.",
+      "horas_por_revisar": null,
+      "fecha_proceso": "2026-05-18T19:01:37.436Z",
+      "fecha_modificacion": "2026-05-18T19:01:37.436Z"
+    }
+  ]
+}

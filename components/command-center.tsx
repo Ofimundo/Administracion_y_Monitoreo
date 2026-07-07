@@ -757,13 +757,14 @@ export function CommandCenter() {
                     </Badge>
                   )}
                   <Badge
-                    variant={
+                    variant="outline"
+                    className={cn(
                       selectedService.status === "success"
-                        ? "success"
+                        ? "bg-emerald-100 text-emerald-700 border-emerald-200"
                         : selectedService.status === "warning"
-                        ? "warning"
-                        : "destructive"
-                    }
+                        ? "bg-amber-100 text-amber-700 border-amber-200"
+                        : "bg-red-100 text-red-700 border-red-200"
+                    )}
                   >
                     {selectedService.status === "success"
                       ? "Operativo"
@@ -793,7 +794,10 @@ export function CommandCenter() {
                       if (action.label === "Ver Logs" || action.label === "Notificar Cliente" || action.label === "Escalar a Soporte") {
                         action.actionFn();
                       } else {
-                        executeWithProgress(action.label, action.description, action.actionFn);
+                        const asyncActionFn = async () => {
+                          await action.actionFn();
+                        };
+                        executeWithProgress(action.label, action.description, asyncActionFn);
                       }
                     }}
                     disabled={isExecuting}

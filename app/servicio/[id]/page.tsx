@@ -36,33 +36,20 @@ import {
   AlertTriangle,
   XCircle,
   Info,
-  RefreshCw,
-  Send,
-  Bell,
-  Settings,
-  Eye,
   Filter,
   Search,
   X,
   Calendar as CalendarIcon,
-  Play,
   Loader2,
   LayoutDashboard,
+  Activity,
+  Eye,
 } from "lucide-react";
-import { format, isWithinInterval, subDays } from "date-fns";
+import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-
-interface LogFilters {
-  search: string;
-  types: string[];
-  dateRange: {
-    from: Date | undefined;
-    to: Date | undefined;
-  };
-}
 
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
@@ -72,47 +59,19 @@ const isServiceComingSoon = (serviceId: string): boolean => {
   return COMING_SOON_SERVICES.includes(serviceId);
 };
 
-// Función para determinar el tipo de log según el estado y motivo - SOLO INFRAESTRUCTURA es ERROR
-const getLogTypeFromEntry = (entry: any): LogEntry["type"] => {
-  const estado = entry.estado;
-  const motivo = entry.motivo || "";
-  
-  const erroresInfraestructura = [
-    "error de conexión a la base de datos", "timeout al conectar", "servidor no responde",
-    "softland no disponible", "sii no responde", "connection failed", "failed to connect",
-    "could not connect", "connection refused", "network error", "500", "503",
-    "no se pudo conectar", "softland error", "sii error", "error de red"
-  ];
-  
-  const esErrorInfraestructura = erroresInfraestructura.some(term => 
-    motivo.toLowerCase().includes(term.toLowerCase())
-  );
-  
-  if (esErrorInfraestructura) return "error";
-  
-  switch (estado) {
-    case "Aprobado": return "success";
-    case "Rechazado": return "info";
-    case "Manual": return "info";
-    case "Pendiente":
-    case "Pendiente Espera": return "info";
-    default: return "info";
-  }
-};
-
 export default function ServiceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
+
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientDashboard, setShowClientDashboard] = useState(false);
-  const [showLogFilters, setShowLogFilters] = useState(false);
   const [serviceName, setServiceName] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
   const [serviceStatus, setServiceStatus] = useState<"success" | "warning" | "error">("success");
-  const [serviceErrorPercentage, setServiceErrorPercentage] = useState(0);
   const [serviceClients, setServiceClients] = useState<Client[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   
   // Estadísticas basadas en datos reales
   const [statsData, setStatsData] = useState({
@@ -125,105 +84,267 @@ export default function ServiceDetailPage() {
     rejectedCount: 0,
     manualCount: 0,
     pendingCount: 0,
+    // Campos adicionales para OFITEC
+    enProceso: 0,
+    finalizado: 0,
+    anulado: 0,
+    incompleto: 0,
+    reAbierto: 0,
+    servTecnico: 0,
+    cancelado: 0,
+    // Campos adicionales para SGC
+    sgcFacturas: 0,
+    sgcGuias: 0,
+    sgcNotasCredito: 0,
+    sgcNotasDebito: 0,
+    sgcOrigenSgc: 0,
+    sgcOrigenSoftland: 0,
   });
   
-  const [statsDateRange, setStatsDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
-    from: undefined,
-    to: undefined,
+  const [statsDateRange, setStatsDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>(() => {
+    const currentYear = new Date().getFullYear();
+    return {
+      from: new Date(currentYear, 0, 1),
+      to: new Date(currentYear, 11, 31),
+    };
   });
   const [showStatsDateFilter, setShowStatsDateFilter] = useState(false);
   const [hasStatsFilter, setHasStatsFilter] = useState(false);
   
-  const [tempFilters, setTempFilters] = useState<LogFilters>({
-    search: "",
-    types: ["success", "error", "warning", "info"],
-    dateRange: { from: undefined, to: undefined },
-  });
-  
-  const [appliedFilters, setAppliedFilters] = useState<LogFilters>({
-    search: "",
-    types: ["success", "error", "warning", "info"],
-    dateRange: { from: undefined, to: undefined },
-  });
+  const [loading, setLoading] = useState(false);
+  const [rawData, setRawData] = useState<any[]>([]);
+  const [liveClients, setLiveClients] = useState<Client[]>([]);
+  const [dbMode, setDbMode] = useState<"simulation" | "real">("simulation");
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const serviceStatic = services.find((s) => s.id === params.id);
   const comingSoon = serviceStatic ? isServiceComingSoon(serviceStatic.id) : false;
-  
-  const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
-  const [liveClients, setLiveClients] = useState<Client[]>([]);
-  const [liveStats, setLiveStats] = useState({
-    uptime: "100%",
-    lastActivity: "En línea",
-    transactionsToday: 0,
-    errorsToday: 0,
-  });
-  const [loading, setLoading] = useState(false);
-  const [rawData, setRawData] = useState<any[]>([]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const fetchLiveData = async () => {
-    if (params.id !== "facturas") return;
+  // Función para generar datos de muestra REALISTAS para SGC
+  const generateSgcSampleData = () => {
+    const data = [];
+    const startDate = new Date(2026, 4, 1);
+    const tiposDocumento = ["Factura", "Guía", "Nota de Crédito", "Boleta"];
+    const sistemasOrigen = ["SAP", "Oracle", "Softland", "STUEDEMANNSA"];
+    const tiposVenta = ["picking", "od", "venta directa", "distribución"];
+    const tiposDocOrigen = ["FACT", "GUID", "NC", "BOL"];
+    
+    for (let i = 0; i < 500; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() - Math.floor(Math.random() * 30));
+      
+      data.push({
+        tipo_de_documento: tiposDocumento[Math.floor(Math.random() * tiposDocumento.length)],
+        SISTEMA_ORIGEN: sistemasOrigen[Math.floor(Math.random() * sistemasOrigen.length)],
+        tipo_de_venta: tiposVenta[Math.floor(Math.random() * tiposVenta.length)],
+        TIPO_DOCUMENTO_ORIGEN: tiposDocOrigen[Math.floor(Math.random() * tiposDocOrigen.length)],
+        fecha_documento: date.toISOString(),
+        cantidad: Math.floor(Math.random() * 100) + 1,
+      });
+    }
+    return data;
+  };
+
+  const fetchLiveData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
+    const serviceId = params.id as string;
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc"];
+    if (!activeServices.includes(serviceId)) return;
+    
     try {
       setLoading(true);
-      const res = await fetch("/api/facturas/bitacora?estado=todos");
-      const data = await res.json();
-      if (data.success && data.data && Array.isArray(data.data)) {
-        setRawData(data.data);
-        
-        const mappedLogs: LogEntry[] = data.data.map((entry: any, index: number) => {
-          const uniqueId = entry.id_proceso 
-            ? `bitacora_${entry.id_proceso}` 
-            : `bitacora_${entry.tipo_documento}_${entry.folio_documento}_${index}`;
-          
-          return {
-            id: uniqueId,
-            message: `[Folio #${entry.folio_documento}] Factura ${entry.razon_social} (RUT: ${entry.rut_proveedor}) -> Estado: ${entry.estado}. Motivo: ${entry.motivo || "Evaluación exitosa en Softland."}`,
-            timestamp: entry.fecha_proceso,
-            type: getLogTypeFromEntry(entry)
-          };
-        });
-        
-        const uniqueLogs = mappedLogs.filter((log, index, self) => 
-          index === self.findIndex((l) => l.id === log.id)
-        );
-        
-        setLiveLogs(uniqueLogs);
-        calculateRealStats(data.data);
-        
-        const totalDocs = data.data.length;
-        
-        const singleClient: Client = {
-          id: "cl_ofimundo",
-          name: "Ofimundo S.A. (Softland ERP)",
-          rut: "76.452.910-K",
-          email: "rpa-invoice@ofimundo.cl",
-          phone: "+56 2 2840 9300",
-          errorPercentage: 0,
-          status: "success",
-        };
-        setLiveClients([singleClient]);
-        
-        setLiveStats({
-          uptime: "100%",
-          lastActivity: "Reciente",
-          transactionsToday: totalDocs,
-          errorsToday: 0
-        });
-        
-        setServiceErrorPercentage(0);
-        setServiceStatus("success");
-      } else {
-        setLiveLogs([]);
-        setLiveClients([]);
+      setPermissionError(null);
+      setApiError(null);
+
+      let queryParams = "";
+      const targetRange = dateRange || statsDateRange;
+      if (targetRange?.from) {
+        const fromStr = format(targetRange.from, "yyyyMMdd");
+        queryParams += `?fechaDesde=${fromStr}`;
+        if (targetRange.to) {
+          const toStr = format(targetRange.to, "yyyyMMdd");
+          queryParams += `&fechaHasta=${toStr}`;
+        }
       }
-    } catch (e) {
-      console.error("Error fetching live invoice data:", e);
+
+      // ============================================================
+      // FACTURAS
+      // ============================================================
+      if (serviceId === "facturas") {
+        const res = await fetch("/api/facturas/bitacora?estado=todos");
+        const data = await res.json();
+        if (data.success && data.data && Array.isArray(data.data)) {
+          setRawData(data.data);
+          setDbMode("real");
+          calculateRealStats(data.data, targetRange);
+          
+          const singleClient: Client = {
+            id: "cl_ofimundo",
+            name: "Ofimundo S.A. (Softland ERP)",
+            rut: "76.452.910-K",
+            email: "rpa-invoice@ofimundo.cl",
+            phone: "+56 2 2840 9300",
+            errorPercentage: 0,
+            status: "success",
+          };
+          setLiveClients([singleClient]);
+          setServiceStatus("success");
+        } else {
+          setRawData([]);
+          setLiveClients([]);
+          setApiError("No se encontraron datos de facturas");
+        }
+      } 
+      // ============================================================
+      // OFICORE
+      // ============================================================
+      else if (serviceId === "oficore") {
+        const res = await fetch(`/api/oficore/stats${queryParams}`);
+        const data = await res.json();
+        if (data.success) {
+          const docs = data.detalles || [];
+          setRawData(docs);
+          setDbMode(data.mode || "real");
+          calculateRealStats(docs, targetRange);
+
+          const singleClient: Client = {
+            id: "cl_oficore",
+            name: "Ofimundo S.A. (OFICORE)",
+            rut: "76.452.910-K",
+            email: "oficore-support@ofimundo.cl",
+            phone: "+56 2 2840 9300",
+            errorPercentage: 0,
+            status: "success",
+          };
+          setLiveClients([singleClient]);
+          setServiceStatus("success");
+        } else {
+          setApiError(data.message || "Error al obtener datos de OFICORE");
+        }
+      }
+      // ============================================================
+      // OFITEC - SOLO DATOS REALES
+      // ============================================================
+      else if (serviceId === "ofitec") {
+        try {
+          const res = await fetch(`/api/ofitec/stats${queryParams}`);
+          const data = await res.json();
+          
+          if (data.success && data.detalles && Array.isArray(data.detalles) && data.detalles.length > 0) {
+            const docs = data.detalles || [];
+            setRawData(docs);
+            setDbMode(data.mode || "real");
+            calculateRealStats(docs, targetRange);
+
+            const singleClient: Client = {
+              id: "cl_ofitec",
+              name: "Ofimundo S.A. (OFITEC)",
+              rut: "76.452.910-K",
+              email: "ofitec-support@ofimundo.cl",
+              phone: "+56 2 2840 9300",
+              errorPercentage: 0,
+              status: "success",
+            };
+            setLiveClients([singleClient]);
+            setServiceStatus("success");
+            setApiError(null);
+          } else {
+            // Si no hay datos reales, mostrar error
+            setRawData([]);
+            setDbMode("real");
+            setLiveClients([]);
+            setServiceStatus("error");
+            setApiError(data.message || "⚠️ No se encontraron registros en la base de datos OFITEC. Verifica la conexión a OFITEC.dbo.SAST_LLAMADA");
+          }
+        } catch (e) {
+          console.error("Error fetching OFITEC data:", e);
+          setRawData([]);
+          setDbMode("real");
+          setLiveClients([]);
+          setServiceStatus("error");
+          setApiError("❌ Error al conectar con la base de datos OFITEC. Verifica las credenciales y la conexión a SQL Server.");
+        }
+      }
+      // ============================================================
+      // SGC
+      // ============================================================
+      else if (serviceId === "sgc") {
+        try {
+          const res = await fetch(`/api/sgc/stats${queryParams}`);
+          const data = await res.json();
+          
+          if (res.status === 403 || !data.success) {
+            if (data.isPermissionError) {
+              setPermissionError(data.message);
+              setRawData([]);
+              setStatsData({
+                uptime: "100%",
+                lastActivity: "Acceso denegado",
+                totalTransactions: 0,
+                infrastructureErrors: 1,
+                infrastructureErrorPercentage: 100,
+                approvedCount: 0,
+                rejectedCount: 0,
+                manualCount: 0,
+                pendingCount: 0,
+                enProceso: 0,
+                finalizado: 0,
+                anulado: 0,
+                incompleto: 0,
+                reAbierto: 0,
+                servTecnico: 0,
+                cancelado: 0,
+              });
+              setServiceStatus("error");
+              setApiError(null);
+            } else {
+              // Si hay error pero no es de permisos, mostrar error
+              setRawData([]);
+              setLiveClients([]);
+              setServiceStatus("error");
+              setApiError(data.message || "⚠️ Error al obtener datos de SGC");
+            }
+          } else {
+            const docs = data.data || [];
+            if (docs.length > 0) {
+              setRawData(docs);
+              setDbMode(data.mode || "real");
+              calculateRealStats(docs, targetRange);
+              setApiError(null);
+            } else {
+              setRawData([]);
+              setDbMode("real");
+              setApiError("⚠️ No se encontraron registros en la base de datos SGC");
+            }
+
+            const singleClient: Client = {
+              id: "cl_sgc",
+              name: "Ofimundo S.A. (SGC)",
+              rut: "76.452.910-K",
+              email: "sgc-support@ofimundo.cl",
+              phone: "+56 2 2840 9300",
+              errorPercentage: 0,
+              status: "success",
+            };
+            setLiveClients([singleClient]);
+            setServiceStatus("success");
+          }
+        } catch (e) {
+          console.error("Error fetching SGC data:", e);
+          setRawData([]);
+          setLiveClients([]);
+          setServiceStatus("error");
+          setApiError("❌ Error al conectar con la base de datos SGC");
+        }
+      }
+    } catch (e: any) {
+      console.error("Error fetching live service data:", e);
       toast({
         title: "Error",
-        description: "No se pudieron cargar los datos del servicio",
+        description: e.message || "No se pudieron cargar los datos del servicio",
         variant: "destructive",
       });
     } finally {
@@ -232,11 +353,30 @@ export default function ServiceDetailPage() {
   };
   
   const calculateRealStats = (data: any[], dateRange?: { from: Date | undefined; to: Date | undefined }) => {
+    const serviceId = params.id as string;
     let filteredData = [...data];
     
+    const getSafeMaxDate = (dates: any[]): Date | null => {
+      if (!dates || dates.length === 0) return null;
+      let maxTime = 0;
+      for (let i = 0; i < dates.length; i++) {
+        if (!dates[i]) continue;
+        const t = new Date(dates[i]).getTime();
+        if (t > maxTime) maxTime = t;
+      }
+      return maxTime > 0 ? new Date(maxTime) : null;
+    };
+    
+    // Aplicar filtro de fechas si existe
     if (dateRange?.from || dateRange?.to) {
       filteredData = filteredData.filter((item: any) => {
-        const itemDate = new Date(item.fecha_proceso);
+        let dateVal = item.fecha_proceso;
+        if (serviceId === "oficore") dateVal = item.fecha_detalle;
+        else if (serviceId === "ofitec") dateVal = item.LLA_FEC_LLAMADA;
+        else if (serviceId === "sgc") dateVal = item.fecha_documento;
+        
+        if (!dateVal) return true;
+        const itemDate = new Date(dateVal);
         let valid = true;
         if (dateRange.from) {
           const fromDate = new Date(dateRange.from);
@@ -253,118 +393,247 @@ export default function ServiceDetailPage() {
     }
     
     const totalDocs = filteredData.length;
-    const approvedDocs = filteredData.filter((e: any) => e.estado === "Aprobado").length;
-    const rejectedDocs = filteredData.filter((e: any) => e.estado === "Rechazado").length;
-    const manualDocs = filteredData.filter((e: any) => e.estado === "Manual").length;
-    const pendingDocs = filteredData.filter((e: any) => 
-      e.estado === "Pendiente" || e.estado === "Pendiente Espera"
-    ).length;
-    
-    const erroresTecnicos = [
-      "error de conexión", "timeout", "servidor no responde", "softland no disponible",
-      "sii no responde", "connection failed", "failed to connect", "could not connect",
-      "connection refused", "network error", "500", "503", "no se pudo conectar",
-      "softland error", "sii error", "error de red"
-    ];
-    
-    const infrastructureErrors = filteredData.filter((e: any) => {
-      const motivo = e.motivo || "";
-      return erroresTecnicos.some(term => motivo.toLowerCase().includes(term.toLowerCase()));
-    }).length;
-    
-    const infrastructureErrorPercentage = totalDocs > 0 ? Math.round((infrastructureErrors / totalDocs) * 100) : 0;
-    
+    let approvedDocs = 0;
+    let rejectedDocs = 0;
+    let manualDocs = 0;
+    let pendingDocs = 0;
+    let infrastructureErrors = 0;
+    let infrastructureErrorPercentage = 0;
     let lastActivity = "No hay datos";
-    if (filteredData.length > 0) {
-      const latestDate = new Date(Math.max(...filteredData.map((e: any) => new Date(e.fecha_proceso).getTime())));
-      lastActivity = format(latestDate, "dd/MM/yyyy HH:mm");
-    }
     
+    // Variables adicionales para OFITEC
+    let enProceso = 0;
+    let finalizado = 0;
+    let anulado = 0;
+    let incompleto = 0;
+    let reAbierto = 0;
+    let servTecnico = 0;
+    let cancelado = 0;
+
+    // Variables adicionales para SGC
+    let sgcFacturas = 0;
+    let sgcGuias = 0;
+    let sgcNotasCredito = 0;
+    let sgcNotasDebito = 0;
+    let sgcOrigenSgc = 0;
+    let sgcOrigenSoftland = 0;
+
+    // ============================================================
+    // CALCULAR ESTADÍSTICAS SEGÚN EL SERVICIO
+    // ============================================================
+    
+    if (serviceId === "facturas") {
+      // FACTURAS: Usar estados reales
+      approvedDocs = filteredData.filter((e: any) => e.estado === "Aprobado").length;
+      rejectedDocs = filteredData.filter((e: any) => e.estado === "Rechazado").length;
+      manualDocs = filteredData.filter((e: any) => e.estado === "Manual").length;
+      pendingDocs = filteredData.filter((e: any) => 
+        e.estado === "Pendiente" || e.estado === "Pendiente Espera"
+      ).length;
+      
+      const erroresTecnicos = [
+        "error de conexión", "timeout", "servidor no responde", "softland no disponible",
+        "sii no responde", "connection failed", "failed to connect", "could not connect",
+        "connection refused", "network error", "no se pudo conectar",
+        "softland error", "sii error", "error de red"
+      ];
+      
+      infrastructureErrors = filteredData.filter((e: any) => {
+        const motivo = e.motivo || "";
+        const motivoLower = motivo.toLowerCase();
+        const hasTextError = erroresTecnicos.some(term => motivoLower.includes(term.toLowerCase()));
+        if (hasTextError) return true;
+        return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
+      }).length;
+      
+      infrastructureErrorPercentage = totalDocs > 0 ? Math.round((infrastructureErrors / totalDocs) * 100) : 0;
+      
+      if (filteredData.length > 0) {
+        const latestDate = getSafeMaxDate(filteredData.map((e: any) => e.fecha_proceso));
+        if (latestDate) lastActivity = format(latestDate, "dd/MM/yyyy HH:mm");
+      }
+    }
+    else if (serviceId === "oficore") {
+      // OFICORE: Usar los estados de MDA.accion
+      approvedDocs = filteredData.filter((e: any) => e.id_accion === 5).length;
+      rejectedDocs = filteredData.filter((e: any) => e.id_accion !== 5).length;
+      manualDocs = 0;
+      pendingDocs = 0;
+      infrastructureErrors = 0;
+      infrastructureErrorPercentage = 0;
+      
+      if (filteredData.length > 0) {
+        const dates = filteredData.map((e: any) => e.fecha_detalle).filter(Boolean);
+        const latestDate = getSafeMaxDate(dates);
+        if (latestDate) lastActivity = format(latestDate, "dd/MM/yyyy HH:mm");
+      }
+    }
+    else if (serviceId === "ofitec") {
+      // ============================================================
+      // OFITEC: Estadísticas basadas en LLA_CORRELATIVO y LLA_ESTADO
+      // DATOS REALES DE LA BASE DE DATOS
+      // ============================================================
+      
+      // ESTADOS RESUELTOS DE OFITEC
+      const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
+      
+      // Tickets Ingresados = LLA_CORRELATIVO = '1'
+      const ingresadas = filteredData.filter((c: any) => c.LLA_CORRELATIVO === "1" || c.LLA_CORRELATIVO === 1).length;
+      
+      // Tickets Resueltos = LLA_ESTADO en estados resueltos
+      const resueltas = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return resolvedStatuses.includes(est);
+      }).length;
+      
+      // Tickets Pendientes = Ingresados - Resueltos
+      const pendientes = Math.max(0, ingresadas - resueltas);
+      
+      approvedDocs = resueltas;
+      rejectedDocs = pendientes;
+      manualDocs = 0;
+      pendingDocs = 0;
+      infrastructureErrors = 0;
+      infrastructureErrorPercentage = 0;
+      
+      // Contar por estado específico para estadísticas detalladas
+      enProceso = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return ['1', '2', '17', '20', '5', '30'].includes(est);
+      }).length;
+
+      finalizado = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return ['4', '24'].includes(est);
+      }).length;
+
+      anulado = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return ['8', '9'].includes(est);
+      }).length;
+
+      incompleto = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return ['3', '10', '22', '33'].includes(est);
+      }).length;
+
+      cancelado = filteredData.filter((c: any) => {
+        const est = c.LLA_ESTADO?.toString().trim();
+        return ['11', '12'].includes(est);
+      }).length;
+      
+      if (filteredData.length > 0) {
+        const dates = filteredData.map((e: any) => e.LLA_FEC_LLAMADA).filter(Boolean);
+        const latestDate = getSafeMaxDate(dates);
+        if (latestDate) lastActivity = format(latestDate, "dd/MM/yyyy HH:mm");
+      }
+    }
+    else if (serviceId === "sgc") {
+      // SGC: Mostrar todos los documentos procesados
+      approvedDocs = 0;
+      rejectedDocs = 0;
+      manualDocs = 0;
+      pendingDocs = 0;
+      infrastructureErrors = 0;
+      infrastructureErrorPercentage = 0;
+      
+      sgcFacturas = filteredData.filter((e: any) => e.tipo_de_documento?.toString().trim().toUpperCase() === "FACTURA").length;
+      sgcGuias = filteredData.filter((e: any) => e.tipo_de_documento?.toString().trim().toUpperCase() === "GUIA").length;
+      sgcNotasCredito = filteredData.filter((e: any) => e.tipo_de_documento?.toString().trim().toUpperCase() === "NOTA DE CREDITO").length;
+      sgcNotasDebito = filteredData.filter((e: any) => e.tipo_de_documento?.toString().trim().toUpperCase() === "NOTA DE DEBITO").length;
+      sgcOrigenSgc = filteredData.filter((e: any) => e.SISTEMA_ORIGEN?.toString().trim().toUpperCase() === "SGC").length;
+      sgcOrigenSoftland = filteredData.filter((e: any) => e.SISTEMA_ORIGEN?.toString().trim().toUpperCase() === "SOFTLAND").length;
+      
+      if (filteredData.length > 0) {
+        const dates = filteredData.map((e: any) => e.fecha_documento).filter(Boolean);
+        const latestDate = getSafeMaxDate(dates);
+        if (latestDate) lastActivity = format(latestDate, "dd/MM/yyyy HH:mm");
+      }
+    }
+
     setStatsData({
       uptime: "100%",
       lastActivity,
-      totalTransactions: totalDocs,
+      totalTransactions: serviceId === "ofitec" ? (filteredData.filter((c: any) => c.LLA_CORRELATIVO === "1" || c.LLA_CORRELATIVO === 1).length) : totalDocs,
       infrastructureErrors,
       infrastructureErrorPercentage,
       approvedCount: approvedDocs,
       rejectedCount: rejectedDocs,
       manualCount: manualDocs,
       pendingCount: pendingDocs,
+      enProceso,
+      finalizado,
+      anulado,
+      incompleto,
+      reAbierto,
+      servTecnico,
+      cancelado,
+      sgcFacturas,
+      sgcGuias,
+      sgcNotasCredito,
+      sgcNotasDebito,
+      sgcOrigenSgc,
+      sgcOrigenSoftland,
     });
     
     setHasStatsFilter(dateRange?.from !== undefined || dateRange?.to !== undefined);
   };
   
   const applyStatsDateFilter = () => {
-    if (rawData.length > 0) {
-      calculateRealStats(rawData, statsDateRange);
-      setShowStatsDateFilter(false);
-      toast({
-        title: "Filtro aplicado",
-        description: `Estadísticas actualizadas${statsDateRange.from ? ` desde ${format(statsDateRange.from, "dd/MM/yyyy")}` : ""}${statsDateRange.to ? ` hasta ${format(statsDateRange.to, "dd/MM/yyyy")}` : ""}`,
-      });
-    }
+    fetchLiveData(statsDateRange);
+    setShowStatsDateFilter(false);
+    toast({
+      title: "Filtrando datos...",
+      description: `Consultando${statsDateRange.from ? ` desde ${format(statsDateRange.from, "dd/MM/yyyy")}` : ""}${statsDateRange.to ? ` hasta ${format(statsDateRange.to, "dd/MM/yyyy")}` : ""}`,
+    });
   };
-  
+
   const resetStatsDateFilter = () => {
-    setStatsDateRange({ from: undefined, to: undefined });
-    if (rawData.length > 0) {
-      calculateRealStats(rawData, { from: undefined, to: undefined });
-    }
+    const isOfitec = params.id === "ofitec";
+    const isOficore = params.id === "oficore";
+    const defaultRange = isOfitec 
+      ? { from: new Date(2025, 3, 1), to: new Date(2025, 3, 30) }
+      : isOficore
+        ? { from: new Date(2026, 4, 1), to: new Date(2026, 4, 30) }
+        : { from: new Date(new Date().getFullYear(), 0, 1), to: new Date(new Date().getFullYear(), 11, 31) };
+    setStatsDateRange(defaultRange);
+    fetchLiveData(defaultRange);
     setHasStatsFilter(false);
     toast({
       title: "Filtro limpiado",
-      description: "Estadísticas restauradas a todos los datos",
+      description: "Consulta restaurada al rango por defecto",
     });
   };
 
   useEffect(() => {
-    if (params.id === "facturas") {
-      fetchLiveData();
-      if (serviceStatic) {
-        setServiceName(serviceStatic.name);
-        setServiceDescription(serviceStatic.description);
-        setServiceClients(serviceStatic.clients);
-      }
-    } else if (serviceStatic && !comingSoon) {
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc"];
+    if (serviceStatic && !comingSoon) {
       setServiceName(serviceStatic.name);
       setServiceDescription(serviceStatic.description);
-      setServiceErrorPercentage(0);
-      setServiceStatus("success");
       setServiceClients(serviceStatic.clients);
+      setServiceStatus("success");
+      
+      if (activeServices.includes(serviceStatic.id)) {
+        if (serviceStatic.id === "ofitec") {
+          const defaultRange = {
+            from: new Date(2025, 3, 1),
+            to: new Date(2025, 3, 30),
+          };
+          setStatsDateRange(defaultRange);
+          fetchLiveData(defaultRange);
+        } else if (serviceStatic.id === "oficore") {
+          const defaultRange = {
+            from: new Date(2026, 4, 1),
+            to: new Date(2026, 4, 30),
+          };
+          setStatsDateRange(defaultRange);
+          fetchLiveData(defaultRange);
+        } else {
+          fetchLiveData();
+        }
+      }
     }
   }, [params.id, serviceStatic, comingSoon]);
-
-  const applyFilters = () => {
-    setAppliedFilters({ ...tempFilters });
-    setShowLogFilters(false);
-    toast({
-      title: "Filtros aplicados",
-      description: "Los filtros se han aplicado correctamente.",
-    });
-  };
-
-  const resetFilters = () => {
-    const resetState = {
-      search: "",
-      types: ["success", "error", "warning", "info"],
-      dateRange: { from: undefined, to: undefined },
-    };
-    setTempFilters(resetState);
-    setAppliedFilters(resetState);
-    toast({
-      title: "Filtros limpiados",
-      description: "Todos los filtros han sido eliminados.",
-    });
-  };
-
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (appliedFilters.search && appliedFilters.search.trim() !== "") count++;
-    if (appliedFilters.types.length < 4) count++;
-    if (appliedFilters.dateRange.from || appliedFilters.dateRange.to) count++;
-    return count;
-  }, [appliedFilters]);
 
   const handleOpenClientDashboard = (client: Client) => {
     setSelectedClient(client);
@@ -372,80 +641,6 @@ export default function ServiceDetailPage() {
   };
 
   const displayClients = params.id === "facturas" ? liveClients : serviceClients;
-
-  const filteredLogs = useMemo(() => {
-    const rawLogs = params.id === "facturas" ? liveLogs : (serviceStatic?.logs || []);
-    let result = [...rawLogs];
-
-    if (appliedFilters.search) {
-      result = result.filter(log =>
-        log.message.toLowerCase().includes(appliedFilters.search.toLowerCase())
-      );
-    }
-
-    if (appliedFilters.types.length > 0 && appliedFilters.types.length < 4) {
-      result = result.filter(log => appliedFilters.types.includes(log.type));
-    }
-
-    if (appliedFilters.dateRange.from && appliedFilters.dateRange.to) {
-      result = result.filter(log => {
-        const logDate = new Date(log.timestamp);
-        const fromDate = new Date(appliedFilters.dateRange.from!);
-        const toDate = new Date(appliedFilters.dateRange.to!);
-        fromDate.setHours(0, 0, 0, 0);
-        toDate.setHours(23, 59, 59, 999);
-        return logDate >= fromDate && logDate <= toDate;
-      });
-    } else if (appliedFilters.dateRange.from && !appliedFilters.dateRange.to) {
-      result = result.filter(log => {
-        const logDate = new Date(log.timestamp);
-        const fromDate = new Date(appliedFilters.dateRange.from!);
-        fromDate.setHours(0, 0, 0, 0);
-        return logDate >= fromDate;
-      });
-    } else if (!appliedFilters.dateRange.from && appliedFilters.dateRange.to) {
-      result = result.filter(log => {
-        const logDate = new Date(log.timestamp);
-        const toDate = new Date(appliedFilters.dateRange.to!);
-        toDate.setHours(23, 59, 59, 999);
-        return logDate <= toDate;
-      });
-    }
-
-    return result;
-  }, [serviceStatic?.logs, liveLogs, appliedFilters]);
-
-  const getLogIcon = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success": return <CheckCircle className="h-4 w-4 text-emerald-500" />;
-      case "error": return <XCircle className="h-4 w-4 text-red-500" />;
-      case "warning": return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-      default: return <Info className="h-4 w-4 text-blue-500" />;
-    }
-  };
-
-  const getLogBgColor = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success": return "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800";
-      case "error": return "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800";
-      case "warning": return "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800";
-      default: return "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800";
-    }
-  };
-
-  const getLogBadge = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success": return <Badge variant="success" className="text-[10px] px-1.5">✅ Éxito</Badge>;
-      case "error": return <Badge variant="destructive" className="text-[10px] px-1.5">❌ Error Infraestructura</Badge>;
-      case "warning": return <Badge variant="warning" className="text-[10px] px-1.5">⚠️ Advertencia</Badge>;
-      default: return <Badge variant="secondary" className="text-[10px] px-1.5">ℹ️ Regla de Negocio</Badge>;
-    }
-  };
-
-  const formatDate = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1).toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-  };
 
   // Mostrar pantalla de "Próximamente" para servicios en desarrollo
   if (comingSoon && params.id !== "facturas") {
@@ -512,8 +707,6 @@ export default function ServiceDetailPage() {
   const displayDescription = params.id === "facturas" 
     ? "El proyecto tiene como objetivo automatizar el flujo de aceptación y rechazo de facturas electrónicas registradas en el sistema, permitiendo una gestión eficiente y reduciendo la intervención manual."
     : serviceDescription;
-  const displayStatus: "success" | "warning" | "error" = "success";
-  const displayErrorPercentage = 0;
 
   // Evitar la hidratación mostrando un placeholder hasta que el cliente esté listo
   if (!mounted) {
@@ -528,26 +721,29 @@ export default function ServiceDetailPage() {
             </Button>
             <div className="flex items-center gap-4">
               <h1 className="text-3xl font-bold text-foreground">{displayName}</h1>
-              <StatusIndicator status="success" errorPercentage={0} size="lg" />
+              <StatusIndicator status="success" percentage={0} size="lg" />
             </div>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <div className="h-[500px] flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-              </div>
-            </div>
-            <div>
-              <div className="h-[300px] flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-              </div>
-            </div>
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
           </div>
         </main>
       </div>
     );
   }
 
+  // Determinar si es OFITEC
+  const isOfitec = params.id === "ofitec";
+  // Determinar si es OFICORE
+  const isOficore = params.id === "oficore";
+  // Determinar si es SGC
+  const isSgcService = params.id === "sgc";
+  // Determinar si es un servicio de tickets (OFICORE o OFITEC)
+  const isTicketService = isOficore || isOfitec;
+
+  // ============================================================
+  // RENDERIZADO PRINCIPAL - Dashboard como primera pestaña
+  // ============================================================
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -559,186 +755,50 @@ export default function ServiceDetailPage() {
           </Button>
           <div className="flex items-center gap-4">
             <h1 className="text-3xl font-bold text-foreground">{displayName}</h1>
-            <StatusIndicator status="success" errorPercentage={0} size="lg" />
+            <StatusIndicator status="success" percentage={0} size="lg" />
           </div>
+          {apiError && (
+            <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2 px-4">
+              ⚠️ {apiError}
+            </div>
+          )}
+          {permissionError && (
+            <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2 px-4">
+              ⚠️ {permissionError}
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <Tabs defaultValue="logs" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-4">
-                <TabsTrigger value="logs" className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Reglas de Negocio
-                </TabsTrigger>
-                <TabsTrigger value="description" className="flex items-center gap-2">
-                  <Info className="h-4 w-4" />
-                  Descripción
-                </TabsTrigger>
-                <TabsTrigger value="clients" className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Clientes ({displayClients.length})
-                </TabsTrigger>
-              </TabsList>
+        {/* Tabs con Dashboard, Estadísticas, Descripción y Clientes */}
+        <Tabs defaultValue="dashboard" className="w-full">
+          <TabsList className="grid w-full grid-cols-4 mb-4">
+            <TabsTrigger value="dashboard" className="flex items-center gap-2">
+              <LayoutDashboard className="h-4 w-4" />
+              Dashboard
+            </TabsTrigger>
+            <TabsTrigger value="stats" className="flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Estadísticas
+            </TabsTrigger>
+            <TabsTrigger value="description" className="flex items-center gap-2">
+              <Info className="h-4 w-4" />
+              Descripción
+            </TabsTrigger>
+            <TabsTrigger value="clients" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Clientes ({displayClients.length})
+            </TabsTrigger>
+          </TabsList>
 
-              <TabsContent value="logs">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg font-medium flex items-center gap-2">
-                        <CheckCircle className="h-5 w-5 text-emerald-500" />
-                        Sin errores - Funcionando correctamente
-                      </CardTitle>
-                      <Button variant={showLogFilters ? "default" : "outline"} size="sm" onClick={() => setShowLogFilters(!showLogFilters)}>
-                        <Filter className="mr-2 h-3 w-3" />
-                        Filtros
-                        {activeFiltersCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px]">{activeFiltersCount}</Badge>}
-                      </Button>
-                    </div>
-
-                    {showLogFilters && (
-                      <div className="mt-3 pt-3 border-t space-y-3">
-                        <div>
-                          <Label className="text-xs font-medium mb-1 block">Buscar</Label>
-                          <div className="relative">
-                            <Search className="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" />
-                            <Input placeholder="Buscar en mensajes..." value={tempFilters.search} onChange={(e) => setTempFilters({ ...tempFilters, search: e.target.value })} className="pl-7 h-8 text-xs" />
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="text-xs font-medium mb-1 block">Tipo de evento</Label>
-                          <div className="flex flex-wrap gap-2">
-                            {[
-                              { value: "success", label: "Éxito", color: "bg-emerald-500" },
-                              { value: "error", label: "Error Infraestructura", color: "bg-red-500" },
-                              { value: "warning", label: "Advertencia", color: "bg-amber-500" },
-                              { value: "info", label: "Regla de Negocio", color: "bg-blue-500" },
-                            ].map(type => (
-                              <Button key={type.value} variant={tempFilters.types.includes(type.value) ? "default" : "outline"} size="sm" onClick={() => {
-                                setTempFilters(prev => ({
-                                  ...prev,
-                                  types: prev.types.includes(type.value) ? prev.types.filter(t => t !== type.value) : [...prev.types, type.value]
-                                }));
-                              }} className="h-6 text-xs gap-1">
-                                <div className={cn("w-2 h-2 rounded-full", type.color)} />
-                                {type.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="text-xs font-medium mb-1 block">Rango de fechas</Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button variant="outline" className="w-full justify-start text-left font-normal h-8 text-xs">
-                                <CalendarIcon className="mr-2 h-3 w-3" />
-                                {tempFilters.dateRange.from ? (
-                                  tempFilters.dateRange.to ? (
-                                    <>{format(tempFilters.dateRange.from, "dd/MM/yy")} - {format(tempFilters.dateRange.to, "dd/MM/yy")}</>
-                                  ) : (format(tempFilters.dateRange.from, "dd/MM/yy"))
-                                ) : (<span>Todas las fechas</span>)}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                              <Calendar mode="range" selected={tempFilters.dateRange} onSelect={(range) => setTempFilters({ ...tempFilters, dateRange: range || { from: undefined, to: undefined } })} numberOfMonths={2} locale={es} />
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-
-                        <div className="flex justify-end gap-2 pt-2 border-t">
-                          <Button variant="outline" size="sm" onClick={resetFilters} className="h-7 text-xs"><X className="mr-1 h-3 w-3" /> Limpiar todo</Button>
-                          <Button size="sm" onClick={applyFilters} className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"><Search className="mr-1 h-3 w-3" /> Aplicar filtros</Button>
-                        </div>
-                      </div>
-                    )}
-
-                    {activeFiltersCount > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
-                        {appliedFilters.search && <Badge variant="secondary" className="text-[10px] gap-1"><Search className="h-2 w-2" /> {appliedFilters.search}<X className="h-2 w-2 cursor-pointer hover:text-red-500" onClick={() => { setTempFilters(prev => ({ ...prev, search: "" })); setAppliedFilters(prev => ({ ...prev, search: "" })); }} /></Badge>}
-                        {appliedFilters.types.length < 4 && <Badge variant="secondary" className="text-[10px] gap-1">Tipo: {appliedFilters.types.map(t => t === "success" ? "Éxito" : t === "error" ? "Error Infraestructura" : t === "warning" ? "Advertencia" : "Regla de Negocio").join(", ")}<X className="h-2 w-2 cursor-pointer hover:text-red-500" onClick={() => { const resetTypes = ["success", "error", "warning", "info"]; setTempFilters(prev => ({ ...prev, types: resetTypes })); setAppliedFilters(prev => ({ ...prev, types: resetTypes })); }} /></Badge>}
-                        {appliedFilters.dateRange.from && <Badge variant="secondary" className="text-[10px] gap-1">Fechas: {format(appliedFilters.dateRange.from, "dd/MM/yy")}{appliedFilters.dateRange.to && ` → ${format(appliedFilters.dateRange.to, "dd/MM/yy")}`}{!appliedFilters.dateRange.to && " → Actual"}<X className="h-2 w-2 cursor-pointer hover:text-red-500" onClick={() => { setTempFilters(prev => ({ ...prev, dateRange: { from: undefined, to: undefined } })); setAppliedFilters(prev => ({ ...prev, dateRange: { from: undefined, to: undefined } })); }} /></Badge>}
-                      </div>
-                    )}
-                  </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-[500px] pr-4">
-                      <div className="space-y-3">
-                        {filteredLogs.length > 0 ? (
-                          filteredLogs.map((log) => (
-                            <div key={log.id} className={cn("p-4 rounded-lg border transition-colors", getLogBgColor(log.type as LogEntry["type"]))}>
-                              <div className="flex items-start gap-3">
-                                {getLogIcon(log.type as LogEntry["type"])}
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    {getLogBadge(log.type as LogEntry["type"])}
-                                    <span className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</span>
-                                  </div>
-                                  <p className="font-medium text-foreground">{log.message}</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-8 text-muted-foreground">
-                            <p>No hay reglas de negocio que coincidan con los filtros</p>
-                            <Button variant="link" size="sm" onClick={resetFilters} className="mt-2">Limpiar filtros</Button>
-                          </div>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="description">
-                <Card>
-                  <CardHeader><CardTitle className="text-lg font-medium flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Información del Servicio</CardTitle></CardHeader>
-                  <CardContent className="space-y-6">
-                    <div><h3 className="font-semibold text-foreground mb-2">Descripción</h3><p className="text-muted-foreground leading-relaxed">{displayDescription}</p></div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <Card className="bg-muted/30"><CardContent className="p-4"><div className="text-sm text-muted-foreground">Estado actual</div><div className="flex items-center gap-2 mt-1"><StatusIndicator status="success" errorPercentage={0} /></div></CardContent></Card>
-                      <Card className="bg-muted/30"><CardContent className="p-4"><div className="text-sm text-muted-foreground">Total de clientes</div><div className="text-2xl font-bold text-foreground mt-1">{displayClients.length}</div></CardContent></Card>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="clients">
-                <Card>
-                  <CardHeader className="pb-3"><CardTitle className="text-lg font-medium flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Clientes con este servicio</CardTitle></CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-[500px] pr-4">
-                      <div className="space-y-3">
-                        {displayClients.map((client) => (
-                          <div key={client.id} className={cn("p-4 rounded-lg border transition-all cursor-pointer hover:shadow-md", selectedClient?.id === client.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/50")} onClick={() => handleOpenClientDashboard(client)}>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-bold text-white", "bg-emerald-500")}>{client.name.charAt(0)}</div>
-                                <div><p className="font-semibold text-foreground">{client.name}</p><p className="text-sm text-muted-foreground">0% errores infraestructura</p></div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <StatusIndicator status="success" errorPercentage={0} />
-                                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenClientDashboard(client); }}><Eye className="h-4 w-4" /></Button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {/* Right side - SOLO Estadísticas */}
-          <div className="space-y-6">
+          {/* TAB - DASHBOARD (NUEVO - PRIMERO) */}
+          <TabsContent value="dashboard">
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-medium">Estadísticas</CardTitle>
+                  <CardTitle className="text-lg font-medium flex items-center gap-2">
+                    <LayoutDashboard className="h-5 w-5 text-emerald-500" />
+                    Dashboard del Servicio
+                  </CardTitle>
                   <div className="flex items-center gap-2">
                     {hasStatsFilter && (
                       <Button 
@@ -763,9 +823,49 @@ export default function ServiceDetailPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 {showStatsDateFilter && (
-                  <div className="p-3 bg-muted/30 rounded-lg space-y-3 mb-2">
+                  <div className="p-3 bg-muted/30 rounded-lg space-y-3 mb-4">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase">Periodos Rápidos</Label>
+                      <Select
+                        onValueChange={(val) => {
+                          const now = new Date();
+                          if (val === "2025") {
+                            setStatsDateRange({ from: new Date(2025, 0, 1), to: new Date(2025, 11, 31) });
+                          } else if (val === "2026") {
+                            setStatsDateRange({ from: new Date(2026, 0, 1), to: new Date(2026, 11, 31) });
+                          } else if (val === "all") {
+                            setStatsDateRange({ from: new Date(2025, 0, 1), to: new Date(2026, 11, 31) });
+                          } else if (val === "last30") {
+                            const from = new Date();
+                            from.setDate(now.getDate() - 30);
+                            setStatsDateRange({ from, to: now });
+                          } else if (val === "last90") {
+                            const from = new Date();
+                            from.setDate(now.getDate() - 90);
+                            setStatsDateRange({ from, to: now });
+                          } else if (val === "ofitec-demo") {
+                            setStatsDateRange({ from: new Date(2025, 3, 1), to: new Date(2025, 3, 30) });
+                          } else if (val === "oficore-demo") {
+                            setStatsDateRange({ from: new Date(2026, 4, 1), to: new Date(2026, 4, 30) });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs bg-background">
+                          <SelectValue placeholder="Seleccionar periodo..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="2025">Todo el Año 2025</SelectItem>
+                          <SelectItem value="2026">Todo el Año 2026</SelectItem>
+                          <SelectItem value="all">Rango Amplio (2025 - 2026)</SelectItem>
+                          <SelectItem value="last30">Últimos 30 días</SelectItem>
+                          <SelectItem value="last90">Últimos 90 días</SelectItem>
+                          {params.id === "ofitec" && <SelectItem value="ofitec-demo">Abril 2025 (Demo OFITEC)</SelectItem>}
+                          {params.id === "oficore" && <SelectItem value="oficore-demo">Mayo 2026 (Demo OFICORE)</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="flex gap-2">
                       <Popover>
                         <PopoverTrigger asChild>
@@ -821,50 +921,327 @@ export default function ServiceDetailPage() {
                   </div>
                 )}
                 
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Total Documentos</span>
-                  <span className="font-semibold">{statsData.totalTransactions.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">✅ Aprobados</span>
-                  <span className="font-semibold text-emerald-600">{statsData.approvedCount.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">❌ Rechazados</span>
-                  <span className="font-semibold text-red-500">{statsData.rejectedCount.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">⚠️ Manuales</span>
-                  <span className="font-semibold text-amber-500">{statsData.manualCount.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">⏳ Pendientes</span>
-                  <span className="font-semibold text-blue-500">{statsData.pendingCount.toLocaleString()}</span>
-                </div>
-                <div className="border-t pt-2 mt-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">🔧 Errores Infraestructura</span>
-                    <span className="font-semibold text-red-500">{statsData.infrastructureErrors.toLocaleString()}</span>
+                {/* ============================================================
+                    DASHBOARD - VISTA RESUMEN DEL SERVICIO
+                    ============================================================ */}
+                <div className="space-y-4">
+                  {/* Resumen de métricas principales */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isTicketService ? "🎫 Tickets" : "📄 Documentos"}
+                      </p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600">
+                        {isTicketService ? "✅ Resueltos" : "✅ Aprobados"}
+                      </p>
+                    </div>
+                    <div className={cn(
+                      "rounded-lg p-4 text-center",
+                      statsData.rejectedCount > 0 ? "bg-red-50" : "bg-muted/30"
+                    )}>
+                      <p className={cn(
+                        "text-2xl font-bold",
+                        statsData.rejectedCount > 0 ? "text-red-500" : "text-foreground"
+                      )}>
+                        {statsData.rejectedCount.toLocaleString()}
+                      </p>
+                      <p className={cn(
+                        "text-xs",
+                        statsData.rejectedCount > 0 ? "text-red-500" : "text-muted-foreground"
+                      )}>
+                        {isTicketService ? "⏳ Pendientes" : "❌ Rechazados"}
+                      </p>
+                    </div>
+                    <div className={cn(
+                      "rounded-lg p-4 text-center border-2",
+                      statsData.infrastructureErrorPercentage > 0 ? "border-red-300 bg-red-50" : "border-emerald-200 bg-emerald-50"
+                    )}>
+                      <p className={cn(
+                        "text-2xl font-bold",
+                        statsData.infrastructureErrorPercentage > 0 ? "text-red-600" : "text-emerald-600"
+                      )}>
+                        {statsData.infrastructureErrorPercentage}%
+                      </p>
+                      <p className={cn(
+                        "text-xs",
+                        statsData.infrastructureErrorPercentage > 0 ? "text-red-600" : "text-emerald-600"
+                      )}>
+                        🔧 Error Infraestructura
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-muted-foreground text-xs">Tasa error infraestructura</span>
-                    <span className="font-semibold text-red-500 text-sm">{statsData.infrastructureErrorPercentage}%</span>
+
+                  {/* Información adicional del servicio */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                      <span className="text-sm text-muted-foreground">📊 Uptime</span>
+                      <span className="font-bold text-emerald-600">{statsData.uptime}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                      <span className="text-sm text-muted-foreground">🕐 Última actividad</span>
+                      <span className="font-semibold text-sm">{statsData.lastActivity}</span>
+                    </div>
                   </div>
-                </div>
-                <div className="border-t pt-2 mt-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">📊 Uptime</span>
-                    <span className="font-semibold text-emerald-600">{statsData.uptime}</span>
+
+                  {/* Estado del servicio */}
+                  <div className="flex justify-between items-center p-4 bg-muted/20 rounded-lg border">
+                    <span className="text-sm font-medium text-foreground">Estado del Servicio</span>
+                    <div className="flex items-center gap-2">
+                      <StatusIndicator status={serviceStatus} percentage={0} />
+                      <span className="text-sm font-semibold">
+                        {serviceStatus === "success" ? "✅ Operativo" : 
+                         serviceStatus === "warning" ? "⚠️ Atención" : "❌ Crítico"}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-muted-foreground">🕐 Última actividad</span>
-                    <span className="font-semibold text-xs">{statsData.lastActivity}</span>
+
+                  {/* Clientes asociados resumen */}
+                  <div className="bg-muted/20 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Clientes Asociados
+                      </h4>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-xs"
+                        onClick={() => document.querySelector('[value="clients"]')?.click()}
+                      >
+                        Ver todos <ArrowLeft className="h-3 w-3 rotate-180 ml-1" />
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {displayClients.slice(0, 5).map((client) => (
+                        <Badge key={client.id} variant="outline" className="text-xs px-3 py-1">
+                          {client.name.length > 25 ? client.name.substring(0, 25) + "..." : client.name}
+                        </Badge>
+                      ))}
+                      {displayClients.length > 5 && (
+                        <Badge variant="outline" className="text-xs px-3 py-1 bg-muted/50">
+                          +{displayClients.length - 5} más
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Descripción resumida */}
+                  <div className="bg-muted/20 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-foreground flex items-center gap-2 mb-2">
+                      <Info className="h-4 w-4" />
+                      Descripción
+                    </h4>
+                    <p className="text-sm text-muted-foreground line-clamp-3">{displayDescription}</p>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-xs mt-2"
+                      onClick={() => document.querySelector('[value="description"]')?.click()}
+                    >
+                      Ver más <ArrowLeft className="h-3 w-3 rotate-180 ml-1" />
+                    </Button>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </div>
+          </TabsContent>
+
+          {/* TAB - ESTADÍSTICAS (CONTENIDO COMPLETO) */}
+          <TabsContent value="stats">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-medium flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-emerald-500" />
+                    {isTicketService ? "Estadísticas de Tickets" : isSgcService ? "Estadísticas de Documentos SGC" : "Estadísticas de Documentos"}
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {/* ============================================================
+                    ESTADÍSTICAS EN TARJETAS - ADAPTADAS SEGÚN EL SERVICIO
+                    ============================================================ */}
+                {isOfitec ? (
+                  // ============================================================
+                  // ESTADÍSTICAS PARA OFITEC - DATOS REALES (SIMPLIFICADO Y CORRECTO)
+                  // ============================================================
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">🎫 Tickets Ingresados</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600">✅ Tickets Resueltos</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-red-500">{statsData.rejectedCount.toLocaleString()}</p>
+                      <p className="text-xs text-red-500">⏳ Tickets Pendientes</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-500">{statsData.enProceso.toLocaleString()}</p>
+                      <p className="text-xs text-blue-500">🔄 En Proceso</p>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-purple-600">{statsData.finalizado.toLocaleString()}</p>
+                      <p className="text-xs text-purple-600">✅ Finalizado</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-gray-600">{statsData.anulado.toLocaleString()}</p>
+                      <p className="text-xs text-gray-600">🚫 Anulado</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-orange-600">{statsData.incompleto.toLocaleString()}</p>
+                      <p className="text-xs text-orange-600">⚠️ Incompleto</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center border border-red-200">
+                      <p className="text-2xl font-bold text-red-600">{statsData.cancelado.toLocaleString()}</p>
+                      <p className="text-xs text-red-600">❌ Cancelado</p>
+                    </div>
+                  </div>
+                ) : isOficore ? (
+                  // ============================================================
+                  // ESTADÍSTICAS PARA OFICORE - SIMPLIFICADO
+                  // ============================================================
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">🎫 Incidencias Ingresadas</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600">✅ Incidencias Resueltas</p>
+                    </div>
+                    <div className="bg-amber-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-amber-500">{statsData.rejectedCount.toLocaleString()}</p>
+                      <p className="text-xs text-amber-500">⏳ Incidencias Pendientes</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center border border-red-200">
+                      <p className="text-2xl font-bold text-red-600">{statsData.infrastructureErrors.toLocaleString()}</p>
+                      <p className="text-xs text-red-600">❌ Errores</p>
+                    </div>
+                  </div>
+                ) : isSgcService ? (
+                  // ============================================================
+                  // ESTADÍSTICAS PARA SGC
+                  // ============================================================
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-600">{statsData.sgcFacturas.toLocaleString()}</p>
+                      <p className="text-xs text-blue-600">🧾 Facturas</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-orange-600">{statsData.sgcGuias.toLocaleString()}</p>
+                      <p className="text-xs text-orange-600">🚚 Guías</p>
+                    </div>
+                    <div className="bg-indigo-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-indigo-600">{statsData.sgcNotasCredito.toLocaleString()}</p>
+                      <p className="text-xs text-indigo-600">💳 Notas de Crédito</p>
+                    </div>
+                    <div className="bg-rose-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-rose-600">{statsData.sgcNotasDebito.toLocaleString()}</p>
+                      <p className="text-xs text-rose-600">📉 Notas de Débito</p>
+                    </div>
+                  </div>
+                ) : (
+                  // ============================================================
+                  // ESTADÍSTICAS PARA FACTURAS
+                  // ============================================================
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600">✅ Aprobados</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-red-500">{statsData.rejectedCount.toLocaleString()}</p>
+                      <p className="text-xs text-red-500">❌ Rechazados</p>
+                    </div>
+                    <div className="bg-amber-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-amber-500">{statsData.manualCount.toLocaleString()}</p>
+                      <p className="text-xs text-amber-500">⚠️ Manuales</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-500">{statsData.pendingCount.toLocaleString()}</p>
+                      <p className="text-xs text-blue-500">⏳ Pendientes</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center border-2 border-red-200">
+                      <p className="text-2xl font-bold text-red-600">{statsData.infrastructureErrors.toLocaleString()}</p>
+                      <p className="text-xs text-red-600">🔧 Errores Infraestructura</p>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                    <span className="text-sm text-muted-foreground">Tasa error infraestructura</span>
+                    <span className="font-bold text-red-500">{statsData.infrastructureErrorPercentage}%</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                    <span className="text-sm text-muted-foreground">📊 Uptime</span>
+                    <span className="font-bold text-emerald-600">{statsData.uptime}</span>
+                  </div>
+                </div>
+                <div className="mt-2 flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                  <span className="text-sm text-muted-foreground">🕐 Última actividad</span>
+                  <span className="font-semibold text-sm">{statsData.lastActivity}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* TAB - DESCRIPCIÓN */}
+          <TabsContent value="description">
+            <Card>
+              <CardHeader><CardTitle className="text-lg font-medium flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Información del Servicio</CardTitle></CardHeader>
+              <CardContent className="space-y-6">
+                <div><h3 className="font-semibold text-foreground mb-2">Descripción</h3><p className="text-muted-foreground leading-relaxed">{displayDescription}</p></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Card className="bg-muted/30"><CardContent className="p-4"><div className="text-sm text-muted-foreground">Estado actual</div><div className="flex items-center gap-2 mt-1"><StatusIndicator status="success" percentage={0} /></div></CardContent></Card>
+                  <Card className="bg-muted/30"><CardContent className="p-4"><div className="text-sm text-muted-foreground">Total de clientes</div><div className="text-2xl font-bold text-foreground mt-1">{displayClients.length}</div></CardContent></Card>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* TAB - CLIENTES */}
+          <TabsContent value="clients">
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-lg font-medium flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Clientes con este servicio</CardTitle></CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[400px] pr-4">
+                  <div className="space-y-3">
+                    {displayClients.map((client) => (
+                      <div key={client.id} className={cn("p-4 rounded-lg border transition-all cursor-pointer hover:shadow-md", selectedClient?.id === client.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/50")} onClick={() => handleOpenClientDashboard(client)}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-bold text-white", "bg-emerald-500")}>{client.name.charAt(0)}</div>
+                            <div><p className="font-semibold text-foreground">{client.name}</p><p className="text-sm text-muted-foreground">0% errores infraestructura</p></div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <StatusIndicator status="success" percentage={0} />
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenClientDashboard(client); }}><Eye className="h-4 w-4" /></Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Modal del Dashboard del Cliente */}

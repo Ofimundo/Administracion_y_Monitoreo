@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev:front": "next dev",
+    "dev:back": "npm run --prefix backend dev",
+    "dev": "concurrently \"npm run dev:front\" \"npm run dev:back\"",
+    "build:front": "next build",
+    "build:back": "npm run --prefix backend build",
+    "build": "npm run build:back && npm run build:front",
     "start": "next start",
     "lint": "eslint ."
   },
@@ -67,6 +71,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.3",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",
