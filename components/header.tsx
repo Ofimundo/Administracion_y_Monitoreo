@@ -1,6 +1,7 @@
 "use client"
 
 import { Activity } from "lucide-react"
+import Image from "next/image"
 
 export function Header() {
   return (
@@ -13,19 +14,30 @@ export function Header() {
         }}
       />
       
-      <div className="relative px-6 py-8 md:px-8 md:py-10">
+      <div className="relative px-2 py-1.5 md:px-3 md:py-1.5">
         <div className="mx-auto max-w-7xl">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
-              <Activity className="h-7 w-7 text-white" />
-            </div>
-            <div>
+          <div className="flex items-center justify-between">
+            {/* Título y subtítulo a la izquierda */}
+            <div className="flex-1 min-w-0 pr-4">
               <h1 className="text-2xl font-bold tracking-tight text-white md:text-3xl text-balance">
                 Administración y Monitoreo de Servicios
               </h1>
-              <p className="mt-1 text-sm text-white/80">
+              <p className="mt-0.5 text-xs text-white/80 md:text-sm">
                 Panel de control para monitorear el estado de los servicios automatizados
               </p>
+            </div>
+            
+            {/* Logo a la derecha - MÁS AL BORDE */}
+            <div className="flex-shrink-0">
+              <Image
+                src="/ofilab_blanco.png"
+                alt="Ofilab"
+                width={260}
+                height={75}
+                className="w-[260px] h-auto object-contain"
+                priority
+                unoptimized
+              />
             </div>
           </div>
         </div>

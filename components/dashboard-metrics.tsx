@@ -107,20 +107,60 @@ import { useRouter } from "next/navigation";
 
 const COLORS = ["#10b981", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-// Lista de errores TÉCNICOS de infraestructura
+// ✅ SOLO ERRORES DE INFRAESTRUCTURA REALES
 const ERRORES_INFRAESTRUCTURA = [
-  "error de conexión", "timeout", "servidor no responde", "softland no disponible",
-  "sii no responde", "connection failed", "failed to connect", "could not connect",
-  "connection refused", "network error", "500", "503", "502", "504",
-  "no se pudo conectar", "softland error", "sii error", "error de red",
-  "socket hang up", "ECONNREFUSED", "ENOTFOUND", "error interno del servidor",
-  "base de datos caída", "sql server no disponible", "el servicio rpa no responde"
+  "softland no disponible",
+  "softland error",
+  "servidor no responde",
+  "servidor no disponible",
+  "server unavailable",
+  "internal server error",
+  "error interno del servidor",
+  "servicio rpa no responde",
+  "rpa no disponible",
+  "api no responde",
+  "servicio no disponible",
+  "sistema no disponible",
+  "base de datos caída",
+  "sql server no disponible",
+  "database error",
+  "error de base de datos",
+  "timeout",
+  "request timeout",
+  "gateway timeout",
+  "network error",
+  "socket hang up",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "502", "503", "504", "500"
+];
+
+const NO_INFRAESTRUCTURA = [
+  "sii", "dte", "reclamar", "aceptado", "registrado previamente",
+  "evento registrado", "acuso recibo", "desviación", "límite permitido",
+  "reglas de negocio", "cumple con todas", "documento aprobado",
+  "documento rechazado", "documento cumple", "aprobado exitosamente",
+  "rechazado debido", "folio", "recibido", "asignado", "gestionando",
+  "resuelto", "incompleto", "serv. técnico", "anulado", "re-abierto",
+  "pendiente", "despachado", "finalizado", "soporte telefonico",
+  "por coordinar", "presupuesto pendiente", "chequeo pendiente",
+  "reporte completado", "llamadas sin solucion", "habilitacion por coordinar",
+  "incompleto tecnico", "terminado", "despachada historico",
+  "incompleto por repuesto", "confirmacion de equipo", "manual",
+  "estado", "incidencia", "llamada", "sast"
 ];
 
 const isInfraestructuraError = (motivo: string): boolean => {
   if (!motivo) return false;
   const motivoLower = motivo.toLowerCase();
-  return ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term.toLowerCase()));
+  
+  for (const term of NO_INFRAESTRUCTURA) {
+    if (motivoLower.includes(term)) {
+      return false;
+    }
+  }
+  
+  return ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term));
 };
 
 interface InvoiceData {
@@ -133,7 +173,6 @@ interface InvoiceData {
   motivo: string;
 }
 
-// Definición de campos disponibles para exportación
 const EXPORT_FIELDS = [
   { id: "fecha", label: "Fecha", default: true },
   { id: "servicio", label: "Servicio", default: true },
@@ -159,13 +198,11 @@ export function DashboardMetrics({
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Datos reales de TODOS los servicios
   const [oficoreData, setOficoreData] = useState<any[]>([]);
   const [ofitecData, setOfitecData] = useState<any[]>([]);
   const [sgcData, setSgcData] = useState<any[]>([]);
   const [serviciosData, setServiciosData] = useState<any[]>([]);
   
-  // Estados para proyectos (Panel 3 - Próximamente)
   const [proyectosActivos, setProyectosActivos] = useState<Array<{
     id: number;
     nombre: string;
@@ -197,34 +234,29 @@ export function DashboardMetrics({
     avancePromedio: 0,
   });
 
-  // Datos detallados para modales del Panel 1
   const [detalleDisponibilidad, setDetalleDisponibilidad] = useState<any[]>([]);
   const [detalleIncidentes, setDetalleIncidentes] = useState<any[]>([]);
   const [detalleAlertas, setDetalleAlertas] = useState<any[]>([]);
   const [detalleCambios, setDetalleCambios] = useState<any[]>([]);
   const [detalleTickets, setDetalleTickets] = useState<any[]>([]);
   
-  // Estados para modales del Panel 1
   const [showDisponibilidadModal, setShowDisponibilidadModal] = useState(false);
   const [showIncidentesModal, setShowIncidentesModal] = useState(false);
   const [showAlertasModal, setShowAlertasModal] = useState(false);
   const [showCambiosModal, setShowCambiosModal] = useState(false);
   const [showTicketsModal, setShowTicketsModal] = useState(false);
   
-  // Estados para modales del Panel 3 (Próximamente)
   const [showProyectosModal, setShowProyectosModal] = useState(false);
   const [showEntregasModal, setShowEntregasModal] = useState(false);
   const [showTareasModal, setShowTareasModal] = useState(false);
   const [showBugsModal, setShowBugsModal] = useState(false);
   
-  // Modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
   const [selectedFields, setSelectedFields] = useState<string[]>(
     EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
   );
   const [selectAll, setSelectAll] = useState(true);
   
-  // FILTRO UNIFICADO
   const [filters, setFilters] = useState({
     service: "todos",
     dateRange: { from: undefined as Date | undefined, to: undefined as Date | undefined },
@@ -232,7 +264,6 @@ export function DashboardMetrics({
     metric: "all" as "all" | "success" | "errors" | "rules",
   });
 
-  // Estado para controlar el filtro de fechas
   const [tempDateRange, setTempDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
     from: undefined,
     to: undefined,
@@ -252,7 +283,6 @@ export function DashboardMetrics({
     error: null as string | null
   });
 
-  // Polling de infraestructura
   useEffect(() => {
     let isMounted = true;
     
@@ -325,7 +355,6 @@ export function DashboardMetrics({
     document.body.removeChild(form);
   };
 
-  // Función para cargar datos de todos los servicios activos con filtro de fechas
   const fetchAllServicesData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
     try {
       const serviceIds = ["facturas", "oficore", "ofitec", "sgc"];
@@ -362,7 +391,6 @@ export function DashboardMetrics({
             url = `/api/sgc/stats${queryParams}`;
           }
 
-          console.log(`📊 [fetchAllServicesData] Llamando a: ${url}`);
           const res = await fetch(url);
           const data = await res.json();
           
@@ -382,11 +410,7 @@ export function DashboardMetrics({
     }
   };
 
-  // Función para calcular métricas de todos los servicios
   const calculateAllMetrics = (servicesData: any, facturasData: any[]) => {
-    // PANEL 1 - MÉTRICAS DE OPERACIONES (TODOS LOS SERVICIOS)
-    
-    // 1. FACTURAS
     const facturasTotal = facturasData.length;
     const facturasAprobadas = facturasData.filter(f => f.estado === "Aprobado").length;
     const facturasRechazadas = facturasData.filter(f => f.estado === "Rechazado").length;
@@ -394,36 +418,30 @@ export function DashboardMetrics({
     const facturasPendientes = facturasData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
     const facturasErrorInfra = facturasData.filter(f => isInfraestructuraError(f.motivo)).length;
     
-    // 2. OFICORE
     const oficoreTotal = servicesData.oficore?.detalles?.length || 0;
     const oficoreResueltas = servicesData.oficore?.detalles?.filter((d: any) => d.id_accion === 5).length || 0;
     const oficoreNoResueltas = oficoreTotal - oficoreResueltas;
     
-    // 3. OFITEC
     const ofitecTotal = servicesData.ofitec?.detalles?.length || 0;
     const resolvedStatuses = ['4','24','6','8','9','15','16','7'];
     const ofitecResueltas = servicesData.ofitec?.detalles?.filter((d: any) => resolvedStatuses.includes(d.LLA_ESTADO)).length || 0;
     const ofitecIngresadas = servicesData.ofitec?.detalles?.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
     const ofitecPendientes = ofitecIngresadas - ofitecResueltas;
     
-    // 4. SGC
     const sgcTotal = servicesData.sgc?.data?.length || 0;
     const sgcPicking = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "picking").length || 0;
     const sgcOd = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "od").length || 0;
     const sgcOtros = sgcTotal - sgcPicking - sgcOd;
 
-    // TOTALES GENERALES
     const totalDocumentos = facturasTotal + oficoreTotal + ofitecTotal + sgcTotal;
     const totalResueltos = facturasAprobadas + facturasRechazadas + facturasManuales + oficoreResueltas + ofitecResueltas + sgcPicking + sgcOd;
     const totalPendientes = facturasPendientes + oficoreNoResueltas + ofitecPendientes + sgcOtros;
     const totalErroresInfra = facturasErrorInfra;
 
-    // Calcular tasas globales
     const tasaExitoGlobal = totalDocumentos > 0 ? Math.round((totalResueltos / totalDocumentos) * 100) : 0;
     const disponibilidadGlobal = totalDocumentos > 0 ? (100 - Math.round((totalErroresInfra / totalDocumentos) * 100)) : 100;
     const infraestructuraGlobal = totalDocumentos > 0 ? Math.round((totalErroresInfra / totalDocumentos) * 100) : 0;
 
-    // Detalle para Disponibilidad - TODOS LOS SERVICIOS
     setDetalleDisponibilidad([
       { 
         id: "facturas", 
@@ -459,7 +477,6 @@ export function DashboardMetrics({
       },
     ]);
 
-    // Detalle para Incidentes Abiertos - TODOS LOS SERVICIOS
     const incidentesDetalle = [
       { id: "facturas-manuales", nombre: "Facturas Manuales", valor: facturasManuales, servicio: "Facturas", estado: "Manual" },
       { id: "facturas-rechazadas", nombre: "Facturas Rechazadas", valor: facturasRechazadas, servicio: "Facturas", estado: "Rechazado" },
@@ -469,7 +486,6 @@ export function DashboardMetrics({
     ].filter(i => i.valor > 0);
     setDetalleIncidentes(incidentesDetalle);
 
-    // ALERTAS CRÍTICAS - SOLO ERRORES DE INFRAESTRUCTURA
     const alertasCriticas = [
       { 
         id: "errorInfra", 
@@ -483,7 +499,6 @@ export function DashboardMetrics({
     
     setDetalleAlertas(alertasCriticas);
 
-    // Detalle para Cambios Exitosos - TODOS LOS SERVICIOS
     setDetalleCambios([
       { id: "facturas", nombre: "Facturas Aprobadas", valor: facturasAprobadas, total: facturasTotal, porcentaje: facturasTotal > 0 ? Math.round((facturasAprobadas / facturasTotal) * 100) : 0, estado: "Exitoso" },
       { id: "oficore", nombre: "Incidencias Resueltas", valor: oficoreResueltas, total: oficoreTotal, porcentaje: oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 0, estado: "Exitoso" },
@@ -491,7 +506,6 @@ export function DashboardMetrics({
       { id: "sgc", nombre: "Documentos Procesados", valor: sgcPicking + sgcOd, total: sgcTotal, porcentaje: sgcTotal > 0 ? Math.round(((sgcPicking + sgcOd) / sgcTotal) * 100) : 0, estado: "Exitoso" },
     ]);
 
-    // Detalle de Tickets por día (de todos los servicios)
     const ticketsPorDia: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
     
     facturasData.forEach((f: any) => {
@@ -580,7 +594,6 @@ export function DashboardMetrics({
 
     setDetalleTickets(ticketsData);
 
-    // PANEL 3 - MÉTRICAS DE PROYECTOS (PRÓXIMAMENTE - DATOS DE DEMO)
     const proyectos: any[] = [];
     const detalleEntregas: any[] = [];
     const detalleTareas: any[] = [];
@@ -718,7 +731,6 @@ export function DashboardMetrics({
       estado: "Bug"
     });
 
-    // SALUD DE PROYECTOS
     const totalProblemas = facturasRechazadas + oficoreNoResueltas + ofitecPendientes + sgcOtros;
     const problemasPorcentaje = totalDocumentos > 0 
       ? Math.round((totalProblemas / totalDocumentos) * 100) 
@@ -790,7 +802,6 @@ export function DashboardMetrics({
     };
   };
 
-  // Ordenar dinámicamente los servicios
   const sortedServices = useMemo(() => {
     const active = services.filter(s => !s.isComingSoon);
     const soon = services.filter(s => s.isComingSoon);
@@ -810,7 +821,6 @@ export function DashboardMetrics({
     router.push(`/servicio/${serviceId}`);
   };
 
-  // Filtrar registros de facturas reales según los filtros seleccionados
   const filteredInvoices = useMemo(() => {
     return realInvoiceData.filter(item => {
       const itemDate = new Date(item.fecha_proceso);
@@ -829,7 +839,6 @@ export function DashboardMetrics({
     });
   }, [realInvoiceData, filters.dateRange]);
 
-  // Cálculos dinámicos para la FILA 1
   const operacionStats = useMemo(() => {
     const totalDocs = filteredInvoices.length;
     const errorDocs = filteredInvoices.filter(f => isInfraestructuraError(f.motivo)).length;
@@ -862,7 +871,29 @@ export function DashboardMetrics({
     return (serviceAvailabilities as Record<string, number>)[serviceId] || 100;
   };
 
-  // CARGA DE DATOS PRINCIPAL
+  // ✅ Función para obtener el estado REAL del servicio
+  const getRealServiceStatus = (service: any): "success" | "warning" | "error" => {
+    if (service.isComingSoon) return "success";
+    
+    if (service.id === "facturas") {
+      const facturasService = services.find(s => s.id === "facturas");
+      if (facturasService) {
+        const hasRealInfraError = facturasService.logs?.some((log: any) => 
+          isInfraestructuraError(log.message) || 
+          isInfraestructuraError(log.details) ||
+          isInfraestructuraError(log.estado || "")
+        );
+        
+        if (!hasRealInfraError) {
+          return "success";
+        }
+        return facturasService.status || "success";
+      }
+    }
+    
+    return service.status || "success";
+  };
+
   const loadAllData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
     setLoading(true);
     try {
@@ -1210,19 +1241,36 @@ export function DashboardMetrics({
     }, 500);
   };
 
-  // ✅ Obtener métricas para los indicadores
-  const totalClientesActivos = services.filter(s => !s.isComingSoon).reduce((acc, s) => acc + s.clients.length, 0);
+  const clientesUnicos = useMemo(() => {
+    const clientesMap = new Map<string, { id: string; name: string; rut: string; email: string; phone: string }>();
+    
+    services.filter(s => !s.isComingSoon).forEach(service => {
+      service.clients.forEach(client => {
+        if (!clientesMap.has(client.id)) {
+          clientesMap.set(client.id, {
+            id: client.id,
+            name: client.name,
+            rut: client.rut || "N/A",
+            email: client.email || "N/A",
+            phone: client.phone || "N/A",
+          });
+        }
+      });
+    });
+    
+    return Array.from(clientesMap.values());
+  }, []);
+
+  const totalClientesActivos = clientesUnicos.length;
   const totalServiciosActivos = services.filter(s => !s.isComingSoon).length;
   
-  // Calcular disponibilidad con regla de 3 (desde facturas)
   const totalDocs = realInvoiceData.length;
   const errorInfraDocs = realInvoiceData.filter(f => isInfraestructuraError(f.motivo)).length;
   const disponibilidad = totalDocs > 0 ? ((totalDocs - errorInfraDocs) / totalDocs) * 100 : 100;
 
-  // ✅ INFRAESTRUCTURA: Usar el porcentaje de Zabbix (equipos principales)
-  const infraestructuraZabbix = infraStats.equiposPrincipales;
+  // ✅ INFRAESTRUCTURA: Calcular promedio de Servidores Core y Bases de Datos (sin Enlaces de Red)
+  const infraestructuraZabbix = (infraStats.servidoresCore + infraStats.database) / 2;
 
-  // Calcular tickets por día para el gráfico
   const ticketsPorDia = useMemo(() => {
     const tickets: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
     
@@ -1368,7 +1416,7 @@ export function DashboardMetrics({
       </div>
 
       {/* ============================================================
-          PANEL 1: OPERACIONES Y DISPONIBILIDAD - Servicios e Infraestructura (ACTIVO)
+          PANEL 1: OPERACIONES Y DISPONIBILIDAD
           ============================================================ */}
       <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#1e40af] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
@@ -1382,7 +1430,6 @@ export function DashboardMetrics({
         </div>
 
         <div className="flex-1 p-4 space-y-4 bg-slate-50/20">
-          {/* ✅ INDICADORES: Clientes, Servicios, Disponibilidad, Infraestructura (Zabbix), Ticket */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
@@ -1402,7 +1449,6 @@ export function DashboardMetrics({
               <span className="text-[8px] text-slate-400 block mt-1">Activos</span>
             </div>
 
-            {/* ✅ DISPONIBILIDAD - Sin "Ver detalle", solo el valor */}
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Disponibilidad</span>
@@ -1412,7 +1458,7 @@ export function DashboardMetrics({
               <span className="text-[8px] text-slate-400 block mt-1">SLA General</span>
             </div>
 
-            {/* ✅ INFRAESTRUCTURA - Usando datos de Zabbix */}
+            {/* ✅ INFRAESTRUCTURA - PROMEDIO DE SERVIDORES CORE Y BASES DE DATOS */}
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Infraestructura</span>
@@ -1425,10 +1471,9 @@ export function DashboardMetrics({
               )}>
                 {infraestructuraZabbix.toFixed(2)}%
               </p>
-              <span className="text-[8px] text-slate-400 block mt-1">Equipos Principales</span>
+              <span className="text-[8px] text-slate-400 block mt-1">Servidores Core y BD</span>
             </div>
 
-            {/* ✅ TICKET - Con "Ver detalle" */}
             <div 
               className="bg-white border rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
               onClick={() => setShowTicketsModal(true)}
@@ -1448,7 +1493,6 @@ export function DashboardMetrics({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {/* ✅ DISPONIBILIDAD POR SERVICIO - Con "Ver detalle" que navega a Servicios */}
             <Card 
               className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
               onClick={onNavigateToServices}
@@ -1502,17 +1546,19 @@ export function DashboardMetrics({
                     );
                   }
                   
-                  const activeService = services.find(srv => srv.id === s.id);
+                  const realStatus = getRealServiceStatus(s);
                   let statusText = "Operativo";
                   let statusColor = "bg-emerald-500";
-                  if (activeService) {
-                    if (activeService.status === "error") {
-                      statusText = "Crítico";
-                      statusColor = "bg-red-500";
-                    } else if (activeService.status === "warning") {
-                      statusText = "Intermitente";
-                      statusColor = "bg-amber-500";
-                    }
+                  
+                  if (realStatus === "error") {
+                    statusText = "Crítico";
+                    statusColor = "bg-red-500";
+                  } else if (realStatus === "warning") {
+                    statusText = "Intermitente";
+                    statusColor = "bg-amber-500";
+                  } else {
+                    statusText = "Operativo";
+                    statusColor = "bg-emerald-500";
                   }
                   
                   return (
@@ -1528,7 +1574,7 @@ export function DashboardMetrics({
               </div>
             </Card>
 
-            {/* ✅ CUADRO DE INFRAESTRUCTURA - ZABBIX */}
+            {/* ✅ CUADRO DE INFRAESTRUCTURA - ZABBIX (SIN ENLACES DE RED) */}
             <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col justify-between">
               <div className="flex justify-between items-center border-b pb-1 mb-2">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Infraestructura</span>
@@ -1541,26 +1587,30 @@ export function DashboardMetrics({
               
               <div className="text-[9px] space-y-1.5 font-semibold text-slate-700">
                 <div className="flex justify-between items-center">
-                  <span>Equipos Principales</span>
-                  <span className={cn("text-[9.5px] font-bold", infraStats.equiposPrincipales >= 99 ? "text-emerald-600" : "text-amber-600")}>
-                    {infraStats.equiposPrincipales}%
+                  <span>Servidores Core</span>
+                  <span className={cn("text-[9.5px] font-bold", infraStats.servidoresCore >= 99 ? "text-emerald-600" : "text-amber-600")}>
+                    {infraStats.servidoresCore}%
                   </span>
                 </div>
                 <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", infraStats.equiposPrincipales >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.equiposPrincipales}%` }} />
+                  <div className={cn("h-full rounded-full", infraStats.servidoresCore >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.servidoresCore}%` }} />
                 </div>
 
                 <div className="flex justify-between items-center pt-0.5">
-                  <span>Servidores Core</span>
-                  <span className="text-slate-500">{infraStats.servidoresCore}%</span>
-                </div>
-                <div className="flex justify-between items-center">
                   <span>Bases de Datos</span>
-                  <span className="text-slate-500">{infraStats.database}%</span>
+                  <span className={cn("text-[9.5px] font-bold", infraStats.database >= 99 ? "text-emerald-600" : "text-amber-600")}>
+                    {infraStats.database}%
+                  </span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>Enlaces de Red</span>
-                  <span className="text-slate-500">{infraStats.enlacesRed}%</span>
+                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                  <div className={cn("h-full rounded-full", infraStats.database >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.database}%` }} />
+                </div>
+
+                <div className="flex justify-between items-center pt-0.5 text-xs text-muted-foreground">
+                  <span>Promedio General</span>
+                  <span className={cn("text-[9.5px] font-bold", infraestructuraZabbix >= 99 ? "text-emerald-600" : "text-amber-600")}>
+                    {infraestructuraZabbix.toFixed(2)}%
+                  </span>
                 </div>
               </div>
 
@@ -1614,7 +1664,6 @@ export function DashboardMetrics({
               </Button>
             </Card>
 
-            {/* ✅ GRÁFICO DE TICKETS POR DÍA */}
             <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Tickets por Día</span>
               <div className="w-full h-[90px]">
@@ -1652,7 +1701,7 @@ export function DashboardMetrics({
       </div>
 
       {/* ============================================================
-          PANEL 2: NEGOCIOS - Lit / Propuestas / Cierres (PRÓXIMAMENTE)
+          PANEL 2: NEGOCIOS (PRÓXIMAMENTE)
           ============================================================ */}
       <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
         <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#10b981] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">

@@ -67,6 +67,62 @@ interface Filters {
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
 
+// ✅ SOLO ERRORES DE INFRAESTRUCTURA REALES
+const ERRORES_INFRAESTRUCTURA = [
+  "softland no disponible",
+  "softland error",
+  "servidor no responde",
+  "servidor no disponible",
+  "server unavailable",
+  "internal server error",
+  "error interno del servidor",
+  "servicio rpa no responde",
+  "rpa no disponible",
+  "api no responde",
+  "servicio no disponible",
+  "sistema no disponible",
+  "base de datos caída",
+  "sql server no disponible",
+  "database error",
+  "error de base de datos",
+  "timeout",
+  "request timeout",
+  "gateway timeout",
+  "network error",
+  "socket hang up",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "502", "503", "504", "500"
+];
+
+const NO_INFRAESTRUCTURA = [
+  "sii", "dte", "reclamar", "aceptado", "registrado previamente",
+  "evento registrado", "acuso recibo", "desviación", "límite permitido",
+  "reglas de negocio", "cumple con todas", "documento aprobado",
+  "documento rechazado", "documento cumple", "aprobado exitosamente",
+  "rechazado debido", "folio", "recibido", "asignado", "gestionando",
+  "resuelto", "incompleto", "serv. técnico", "anulado", "re-abierto",
+  "pendiente", "despachado", "finalizado", "soporte telefonico",
+  "por coordinar", "presupuesto pendiente", "chequeo pendiente",
+  "reporte completado", "llamadas sin solucion", "habilitacion por coordinar",
+  "incompleto tecnico", "terminado", "despachada historico",
+  "incompleto por repuesto", "confirmacion de equipo", "manual",
+  "estado", "incidencia", "llamada", "sast"
+];
+
+const isInfraestructuraError = (motivo: string): boolean => {
+  if (!motivo) return false;
+  const motivoLower = motivo.toLowerCase();
+  
+  for (const term of NO_INFRAESTRUCTURA) {
+    if (motivoLower.includes(term)) {
+      return false;
+    }
+  }
+  
+  return ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term));
+};
+
 // Definición de campos disponibles para exportación
 const EXPORT_FIELDS = [
   { id: "id", label: "ID Servicio", default: false },
@@ -106,6 +162,56 @@ export function ServicesList() {
     return COMING_SOON_SERVICES.includes(serviceId);
   };
 
+  // ✅ Función para obtener el estado real de un servicio
+  const getRealServiceStatus = (service: Service): "success" | "warning" | "error" => {
+    // Si es un servicio "Próximamente", retornar success (pero se maneja con el flag)
+    if (isComingSoon(service.id)) {
+      return "success";
+    }
+    
+    // Para facturas, recalcular basado en errores reales de infraestructura
+    if (service.id === "facturas") {
+      // Verificar si hay errores reales de infraestructura en los logs
+      const hasRealInfraError = service.logs?.some((log: any) => 
+        isInfraestructuraError(log.message) || 
+        isInfraestructuraError(log.details) ||
+        isInfraestructuraError(log.estado || "")
+      );
+      
+      // Si no hay errores reales de infraestructura, es success
+      if (!hasRealInfraError) {
+        return "success";
+      }
+      
+      // Si hay errores reales, usar el status actual
+      return service.status || "success";
+    }
+    
+    return service.status || "success";
+  };
+
+  // ✅ Función para obtener el porcentaje de error real
+  const getRealErrorPercentage = (service: Service): number => {
+    if (isComingSoon(service.id)) {
+      return 0;
+    }
+    
+    // Para facturas, el porcentaje de error real es 0 si no hay errores de infraestructura
+    if (service.id === "facturas") {
+      const hasRealInfraError = service.logs?.some((log: any) => 
+        isInfraestructuraError(log.message) || 
+        isInfraestructuraError(log.details) ||
+        isInfraestructuraError(log.estado || "")
+      );
+      
+      if (!hasRealInfraError) {
+        return 0;
+      }
+    }
+    
+    return service.errorPercentage || 0;
+  };
+
   const availableStatuses = [
     { value: "success", label: "Excelente (0% error)", color: "bg-green-500" },
     { value: "warning", label: "Atención (1-10% error)", color: "bg-yellow-500" },
@@ -116,11 +222,11 @@ export function ServicesList() {
     return services.map(service => ({
       value: service.name,
       label: service.name,
-      errorPercentage: service.errorPercentage,
-      status: service.status,
+      errorPercentage: getRealErrorPercentage(service),
+      status: getRealServiceStatus(service),
       isComingSoon: isComingSoon(service.id),
     }));
-  }, []);
+  }, [services]);
 
   const filteredServices = useMemo(() => {
     let result = [...services];
@@ -132,15 +238,24 @@ export function ServicesList() {
     }
 
     if (filters.status.length > 0 && filters.status.length < 3) {
-      result = result.filter(service => filters.status.includes(service.status));
+      result = result.filter(service => {
+        const realStatus = getRealServiceStatus(service);
+        return filters.status.includes(realStatus);
+      });
     }
 
     if (filters.minError > 0) {
-      result = result.filter(service => service.errorPercentage >= filters.minError);
+      result = result.filter(service => {
+        const realError = getRealErrorPercentage(service);
+        return realError >= filters.minError;
+      });
     }
 
     if (filters.maxError < 100) {
-      result = result.filter(service => service.errorPercentage <= filters.maxError);
+      result = result.filter(service => {
+        const realError = getRealErrorPercentage(service);
+        return realError <= filters.maxError;
+      });
     }
 
     return result;
@@ -212,12 +327,24 @@ export function ServicesList() {
       id: (s) => s.id,
       nombre: (s) => s.name,
       descripcion: (s) => s.isComingSoon ? "Próximamente - En desarrollo" : s.description,
-      estado: (s) => s.isComingSoon ? "Próximamente" : (s.status === "success" ? "Excelente" : s.status === "warning" ? "Atención" : "Crítico"),
-      errorPorcentaje: (s) => s.isComingSoon ? "N/A" : `${s.errorPercentage}%`,
-      errorNivel: (s) => s.isComingSoon ? "N/A" : (s.errorPercentage === 0 ? "Sin errores" : 
-                        s.errorPercentage <= 5 ? "Bajo" :
-                        s.errorPercentage <= 10 ? "Medio" :
-                        s.errorPercentage <= 20 ? "Alto" : "Crítico"),
+      estado: (s) => {
+        if (s.isComingSoon) return "Próximamente";
+        const realStatus = getRealServiceStatus(s);
+        return realStatus === "success" ? "Excelente" : realStatus === "warning" ? "Atención" : "Crítico";
+      },
+      errorPorcentaje: (s) => {
+        if (s.isComingSoon) return "N/A";
+        const realError = getRealErrorPercentage(s);
+        return `${realError}%`;
+      },
+      errorNivel: (s) => {
+        if (s.isComingSoon) return "N/A";
+        const realError = getRealErrorPercentage(s);
+        return realError === 0 ? "Sin errores" : 
+               realError <= 5 ? "Bajo" :
+               realError <= 10 ? "Medio" :
+               realError <= 20 ? "Alto" : "Crítico";
+      },
       clientesTotal: (s) => s.isComingSoon ? 0 : s.clients.length,
       clientesLista: (s) => s.isComingSoon ? "" : s.clients.map((c: any) => c.name).join(", "),
       fechaExportacion: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
@@ -248,9 +375,9 @@ export function ServicesList() {
     const summaryData = [
       { "Métrica": "Total Servicios", "Valor": filteredServices.length },
       { "Métrica": "Total Clientes", "Valor": filteredServices.reduce((acc, s) => acc + s.clients.length, 0) },
-      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => s.status === "success" && !isComingSoon(s.id)).length },
-      { "Métrica": "Servicios en Atención", "Valor": filteredServices.filter(s => s.status === "warning").length },
-      { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => s.status === "error").length },
+      { "Métrica": "Servicios Excelentes", "Valor": filteredServices.filter(s => getRealServiceStatus(s) === "success" && !isComingSoon(s.id)).length },
+      { "Métrica": "Servicios en Atención", "Valor": filteredServices.filter(s => getRealServiceStatus(s) === "warning").length },
+      { "Métrica": "Servicios Críticos", "Valor": filteredServices.filter(s => getRealServiceStatus(s) === "error").length },
       { "Métrica": "Servicios Próximamente", "Valor": filteredServices.filter(s => isComingSoon(s.id)).length },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
     ];
@@ -262,17 +389,21 @@ export function ServicesList() {
     setShowExportModal(false);
   };
 
-  const getStatusColor = (status: string, isComingSoonValue: boolean) => {
-    if (isComingSoonValue) return "border-gray-200 bg-gray-50/50 hover:bg-gray-50";
-    if (status === "success") return "border-green-200 bg-green-50/50 hover:bg-green-50";
-    if (status === "warning") return "border-yellow-200 bg-yellow-50/50 hover:bg-yellow-50";
+  const getStatusColor = (service: Service) => {
+    const comingSoon = isComingSoon(service.id);
+    if (comingSoon) return "border-gray-200 bg-gray-50/50 hover:bg-gray-50";
+    const realStatus = getRealServiceStatus(service);
+    if (realStatus === "success") return "border-green-200 bg-green-50/50 hover:bg-green-50";
+    if (realStatus === "warning") return "border-yellow-200 bg-yellow-50/50 hover:bg-yellow-50";
     return "border-red-200 bg-red-50/50 hover:bg-red-50";
   };
 
-  const getErrorBadgeColor = (errorPercentage: number, isComingSoonValue: boolean) => {
-    if (isComingSoonValue) return "bg-gray-100 text-gray-600 border-gray-200";
-    if (errorPercentage === 0) return "bg-green-100 text-green-700 border-green-200";
-    if (errorPercentage <= 10) return "bg-yellow-100 text-yellow-700 border-yellow-200";
+  const getErrorBadgeColor = (service: Service) => {
+    const comingSoon = isComingSoon(service.id);
+    if (comingSoon) return "bg-gray-100 text-gray-600 border-gray-200";
+    const realError = getRealErrorPercentage(service);
+    if (realError === 0) return "bg-green-100 text-green-700 border-green-200";
+    if (realError <= 10) return "bg-yellow-100 text-yellow-700 border-yellow-200";
     return "bg-red-100 text-red-700 border-red-200";
   };
 
@@ -519,12 +650,15 @@ export function ServicesList() {
       <div className="grid grid-cols-1 gap-4">
         {filteredServices.map((service) => {
           const comingSoon = isComingSoon(service.id);
+          const realStatus = getRealServiceStatus(service);
+          const realError = getRealErrorPercentage(service);
+          
           return (
             <Card
               key={service.id}
               className={cn(
                 "cursor-pointer transition-all hover:shadow-lg",
-                getStatusColor(service.status, comingSoon)
+                getStatusColor(service)
               )}
               onDoubleClick={() => !comingSoon && setSelectedService(service)}
             >
@@ -532,9 +666,9 @@ export function ServicesList() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <CardTitle className="text-lg flex items-center gap-2 flex-wrap">
-                      {!comingSoon && service.status === "success" && <CheckCircle className="h-5 w-5 text-green-600" />}
-                      {!comingSoon && service.status === "warning" && <AlertCircle className="h-5 w-5 text-yellow-600" />}
-                      {!comingSoon && service.status === "error" && <AlertCircle className="h-5 w-5 text-red-600" />}
+                      {!comingSoon && realStatus === "success" && <CheckCircle className="h-5 w-5 text-green-600" />}
+                      {!comingSoon && realStatus === "warning" && <AlertCircle className="h-5 w-5 text-yellow-600" />}
+                      {!comingSoon && realStatus === "error" && <AlertCircle className="h-5 w-5 text-red-600" />}
                       {comingSoon && <Clock className="h-5 w-5 text-gray-500" />}
                       {service.name}
                       {comingSoon && (
@@ -548,13 +682,13 @@ export function ServicesList() {
                     </CardDescription>
                   </div>
                   <div className="flex flex-col items-end gap-2">
-                    <Badge className={cn("text-sm font-bold", getErrorBadgeColor(service.errorPercentage, comingSoon))}>
-                      {comingSoon ? "Próximamente" : `${service.errorPercentage}% de errores técnicos`}
+                    <Badge className={cn("text-sm font-bold", getErrorBadgeColor(service))}>
+                      {comingSoon ? "Próximamente" : `${realError}% de errores técnicos`}
                     </Badge>
                     {!comingSoon && (
                       <StatusIndicator 
-                        status={service.status} 
-                        percentage={service.errorPercentage} 
+                        status={realStatus} 
+                        percentage={realError} 
                         size="lg"
                       />
                     )}

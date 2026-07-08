@@ -1,4 +1,3 @@
-// app/components/client-dashboard.tsx
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
@@ -7,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import Image from "next/image";
 import {
   Select,
   SelectContent,
@@ -730,12 +730,18 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     } else if (selectedServiceId === "sgc") {
       names = { approved: "Facturas", rejected: "Guías", manual: "Notas de Crédito", pending: "Notas de Débito" };
     }
-    return [
+    const data = [
       { name: names.approved, value: stats.approved, color: "#10b981" },
       { name: names.rejected, value: stats.rejected, color: "#ef4444" },
       { name: names.manual, value: stats.manual, color: "#f59e0b" },
       { name: names.pending, value: stats.pending, color: "#3b82f6" },
     ].filter(item => item.value > 0);
+    
+    // Si solo hay un segmento, añadir un segmento dummy para que la etiqueta no se superponga
+    if (data.length === 1) {
+      data.push({ name: " ", value: 1, color: "transparent" });
+    }
+    return data;
   }, [stats.approved, stats.rejected, stats.manual, stats.pending, selectedServiceId]);
 
   const chartData = useMemo(() => {
@@ -800,33 +806,40 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     );
   }
 
-  // ============================================================
-  // ELIMINADO: El bloque que mostraba "Dashboard en desarrollo"
-  // AHORA TODOS los clientes ven el dashboard completo
-  // ============================================================
-
   return (
-    <div className="space-y-5">
-      {/* Botón de cierre y exportación */}
-      <div className="flex justify-end gap-3 pt-2 pb-1">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={handleOpenExportModal}
-          className="gap-2 px-4"
-          disabled={filteredData.length === 0}
-        >
-          <FileSpreadsheet className="h-4 w-4" />
-          Exportar
-        </Button>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={handleClose}
-          className="gap-2 text-sm text-muted-foreground hover:text-red-500 transition-colors px-4"
-        >
-          Cerrar
-        </Button>
+    <div className="space-y-4">
+      {/* Logo arriba de los botones - Esquina superior derecha - SIN ESPACIO EXTRA */}
+      <div className="flex justify-end items-center -mt-1">
+        <div className="flex flex-col items-end gap-1">
+          <Image
+            src="/logo.png"
+            alt="Ofilab"
+            width={220}
+            height={65}
+            className="h-14 w-auto object-contain"
+            priority
+          />
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleOpenExportModal}
+              className="gap-1.5 px-3 h-7 text-xs"
+              disabled={filteredData.length === 0}
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              Exportar
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleClose}
+              className="gap-1.5 text-xs text-muted-foreground hover:text-red-500 transition-colors px-3 h-7"
+            >
+              Cerrar
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Info Cliente */}
@@ -1064,7 +1077,6 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         </div>
       )}
 
-      {/* KPIs - EXACTAMENTE COMO EN LA IMAGEN */}
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {kpiCards.map((card, idx) => {
@@ -1150,15 +1162,30 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
                           cx="50%"
                           cy="50%"
                           labelLine={true}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
+                          label={({ name, percent }) => {
+                            if (name === " ") return "";
+                            return `${name}: ${(percent * 100).toFixed(0)}%`;
+                          }}
+                          outerRadius={90}
                           dataKey="value"
                         >
                           {pieData.map((entry: any, index: number) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
-                        <Tooltip contentStyle={{ fontSize: '11px' }} />
+                        <Tooltip 
+                          contentStyle={{ fontSize: '11px' }}
+                          formatter={(value: any, name: any) => {
+                            if (name === " ") return null;
+                            return [value, name];
+                          }}
+                        />
+                        <Legend 
+                          wrapperStyle={{ fontSize: '10px' }}
+                          layout="horizontal"
+                          verticalAlign="bottom"
+                          align="center"
+                        />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
@@ -1174,7 +1201,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
             </Card>
           </div>
 
-          {/* Último error de infraestructura - COMO EN LA IMAGEN */}
+          {/* Último error de infraestructura */}
           {(() => {
             const ultimoError = filteredData.find((e: any) => isInfraestructuraError(e.motivo || ""));
             if (ultimoError) {

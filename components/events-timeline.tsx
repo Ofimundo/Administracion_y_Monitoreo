@@ -38,6 +38,10 @@ import {
   TrendingUp,
   TrendingDown,
   Activity,
+  Server,
+  Wifi,
+  Database,
+  Link,
 } from "lucide-react";
 import { format, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
@@ -105,10 +109,124 @@ const OFICORE_STATUS_EXPLANATIONS: Record<number | string, { name: string; reaso
   9: { name: "Re-Abierto", reason: "Caso reabierto para revisión." }
 };
 
-const isServiceComingSoon = (serviceId: string): boolean => COMING_SOON_SERVICES.includes(serviceId);
-const ACTIVE_SERVICE_ID = "facturas";
+// ✅ SOLO ERRORES DE INFRAESTRUCTURA REALES
+// Son errores que impiden que el sistema funcione: servidor caído, BD caída, problemas de red, timeout, etc.
+const ERRORES_INFRAESTRUCTURA = [
+  // Errores de servidor/API
+  "softland no disponible",
+  "softland error",
+  "servidor no responde",
+  "servidor no disponible",
+  "server unavailable",
+  "internal server error",
+  "error interno del servidor",
+  "servicio rpa no responde",
+  "rpa no disponible",
+  "api no responde",
+  "servicio no disponible",
+  "sistema no disponible",
+  
+  // Errores de base de datos
+  "base de datos caída",
+  "sql server no disponible",
+  "database error",
+  "error de base de datos",
+  
+  // Errores de timeout del sistema
+  "timeout",
+  "request timeout",
+  "gateway timeout",
+  
+  // Errores de red
+  "network error",
+  "socket hang up",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  
+  // Errores HTTP de servidor
+  "502", "503", "504", "500"
+];
 
-// Colores por tipo de evento
+// ✅ PALABRAS QUE INDICAN QUE NO ES UN ERROR DE INFRAESTRUCTURA
+// Si un mensaje contiene estas palabras, NO es infraestructura
+const NO_INFRAESTRUCTURA = [
+  // Palabras relacionadas con SII (son errores de negocio/validación)
+  "sii",
+  "dte",
+  "reclamar",
+  "aceptado",
+  "registrado previamente",
+  "evento registrado",
+  "acuso recibo",
+  
+  // Palabras relacionadas con reglas de negocio
+  "desviación",
+  "límite permitido",
+  "reglas de negocio",
+  "cumple con todas",
+  
+  // Palabras relacionadas con documentos
+  "documento aprobado",
+  "documento rechazado",
+  "documento cumple",
+  "aprobado exitosamente",
+  "rechazado debido",
+  "folio",
+  
+  // ✅ Palabras relacionadas con OFICORE (son estados normales)
+  "recibido",
+  "asignado",
+  "gestionando",
+  "resuelto",
+  "incompleto",
+  "serv. técnico",
+  "anulado",
+  "re-abierto",
+  
+  // ✅ Palabras relacionadas con OFITEC (son estados normales)
+  "pendiente",
+  "despachado",
+  "finalizado",
+  "soporte telefonico",
+  "por coordinar",
+  "presupuesto pendiente",
+  "chequeo pendiente",
+  "reporte completado",
+  "llamadas sin solucion",
+  "habilitacion por coordinar",
+  "incompleto tecnico",
+  "terminado",
+  "despachada historico",
+  "incompleto por repuesto",
+  "confirmacion de equipo",
+  
+  // Palabras generales que indican que es un estado normal
+  "manual",
+  "pendiente",
+  "estado",
+  "incidencia",
+  "llamada",
+  "sast"
+];
+
+const isInfraestructuraError = (text: string): boolean => {
+  if (!text) return false;
+  const textLower = text.toLowerCase();
+  
+  // ✅ PRIMERO: Verificar si es algo que NO es infraestructura
+  for (const term of NO_INFRAESTRUCTURA) {
+    if (textLower.includes(term)) {
+      return false;
+    }
+  }
+  
+  // ✅ SEGUNDO: Verificar contra la lista de errores de infraestructura reales
+  return ERRORES_INFRAESTRUCTURA.some(term => textLower.includes(term));
+};
+
+const isServiceComingSoon = (serviceId: string): boolean => COMING_SOON_SERVICES.includes(serviceId);
+
+// ✅ Colores por tipo de evento
 const EVENT_STYLES = {
   success: {
     bg: "bg-gradient-to-r from-emerald-50 to-transparent",
@@ -116,6 +234,7 @@ const EVENT_STYLES = {
     badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
     icon: CheckCircle,
     iconColor: "text-emerald-500",
+    bgIcon: "bg-emerald-100",
   },
   error: {
     bg: "bg-gradient-to-r from-red-50 to-transparent",
@@ -123,6 +242,15 @@ const EVENT_STYLES = {
     badge: "bg-red-100 text-red-700 border-red-200",
     icon: XCircle,
     iconColor: "text-red-500",
+    bgIcon: "bg-red-100",
+  },
+  infraestructura: {
+    bg: "bg-gradient-to-r from-red-100 to-red-50/30 border-2 border-red-400",
+    border: "border-l-red-600 border-l-4",
+    badge: "bg-red-600 text-white border-red-700 font-bold",
+    icon: Server,
+    iconColor: "text-red-600",
+    bgIcon: "bg-red-200",
   },
   warning: {
     bg: "bg-gradient-to-r from-amber-50 to-transparent",
@@ -130,6 +258,7 @@ const EVENT_STYLES = {
     badge: "bg-amber-100 text-amber-700 border-amber-200",
     icon: AlertTriangle,
     iconColor: "text-amber-500",
+    bgIcon: "bg-amber-100",
   },
   info: {
     bg: "bg-gradient-to-r from-blue-50 to-transparent",
@@ -137,6 +266,7 @@ const EVENT_STYLES = {
     badge: "bg-blue-100 text-blue-700 border-blue-200",
     icon: Info,
     iconColor: "text-blue-500",
+    bgIcon: "bg-blue-100",
   },
   comingSoon: {
     bg: "bg-gradient-to-r from-gray-50 to-transparent",
@@ -144,6 +274,7 @@ const EVENT_STYLES = {
     badge: "bg-gray-100 text-gray-600 border-gray-200",
     icon: Rocket,
     iconColor: "text-gray-500",
+    bgIcon: "bg-gray-100",
   },
 };
 
@@ -169,7 +300,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   // Generadores locales de simulación
   const generateMockFacturasLogs = (): LogEntry[] => [
     { id: "mock_f1", message: "Documento aprobado exitosamente en Softland y SII", details: "Folio #4492 · JOSE LUIS GONZALEZ DIAZ · RUT: 7179224-2", timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), type: "success", estado: "Aprobado" },
-    { id: "mock_f2", message: "Error al conectar con el SII: No ha sido posible aprobar o rechazar en el SII", details: "Folio #4491 · MARIA ELENA PEREZ SOTO · RUT: 8543210-5", timestamp: new Date(Date.now() - 3600000 * 5).toISOString(), type: "error", estado: "Manual" },
+    { id: "mock_f2", message: "Documento rechazado por desviación excede el límite permitido", details: "Folio #4491 · MARIA ELENA PEREZ SOTO · RUT: 8543210-5", timestamp: new Date(Date.now() - 3600000 * 5).toISOString(), type: "warning", estado: "Rechazado" },
     { id: "mock_f3", message: "Documento aprobado exitosamente en Softland y SII", details: "Folio #4490 · CARLOS MARTINEZ RUIZ · RUT: 9345678-1", timestamp: new Date(Date.now() - 3600000 * 8).toISOString(), type: "success", estado: "Aprobado" }
   ];
 
@@ -188,22 +319,50 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     { id: "mock_sg2", message: "Integración de GUIA SGC", details: "Sistema Origen: SOFTLAND ERP · Canal: OD · Cantidad: 45", timestamp: new Date(Date.now() - 3600000 * 7).toISOString(), type: "warning", estado: "Pendiente" }
   ];
 
-  const getLogType = (estado: string, motivo: string): LogEntry["type"] => {
+  // Función para obtener el tipo de log
+  const getLogType = (estado: string, motivo: string, servicioId?: string): LogEntry["type"] => {
     const motivoLower = (motivo || "").toLowerCase();
-    const erroresInfraestructura = [
-      "error de conexión", "timeout", "servidor no responde", "softland no disponible",
-      "sii no responde", "connection failed", "failed to connect", "could not connect",
-      "connection refused", "network error", "500", "503",
-      "no se pudo conectar", "softland error", "sii error", "error de red"
-    ];
     
-    if (erroresInfraestructura.some(term => motivoLower.includes(term))) {
+    // ✅ Para OFICORE, los estados normales no son errores
+    if (servicioId === "oficore") {
+      const estadosNormales = ["recibido", "asignado", "gestionando", "resuelto", "incompleto", "serv. técnico", "anulado", "re-abierto"];
+      if (estadosNormales.some(term => estado.toLowerCase().includes(term))) {
+        if (estado === "Resuelto" || estado === "Aprobado") return "success";
+        if (estado === "Incompleto" || estado === "Anulado") return "warning";
+        return "info";
+      }
+    }
+    
+    // ✅ Para OFITEC, los estados INCOMPLETO no son errores de infraestructura
+    if (servicioId === "ofitec") {
+      if (motivoLower.includes("incompleto") || motivoLower.includes("pendiente")) {
+        return "warning";
+      }
+      if (motivoLower.includes("finalizado") || motivoLower.includes("terminado")) {
+        return "success";
+      }
+      return "info";
+    }
+    
+    // ✅ SOLO SI ES REALMENTE ERROR DE INFRAESTRUCTURA (técnico)
+    if (isInfraestructuraError(motivo)) {
       return "error";
     }
     
     if (estado === "Aprobado") return "success";
     if (estado === "Rechazado" || estado === "Manual") return "warning";
     return "info";
+  };
+
+  // Función para detectar si un log es de infraestructura
+  const isInfraestructuraLog = (log: LogEntry): boolean => {
+    const message = log.message || "";
+    const details = log.details || "";
+    const estado = log.estado || "";
+    
+    return isInfraestructuraError(message) || 
+           isInfraestructuraError(details) || 
+           isInfraestructuraError(estado);
   };
 
   useEffect(() => {
@@ -236,20 +395,31 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           const res = await fetch(url);
           const data = await res.json();
           if (data.success && data.data) {
-            newLogs.facturas = data.data.slice(0, 200).map((entry: any, index: number) => ({
-              id: `factura_${entry.id_proceso || index}_${index}`,
-              message: entry.motivo || `Documento ${entry.estado} correctamente`,
-              details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
-              timestamp: entry.fecha_proceso,
-              type: getLogType(entry.estado, entry.motivo),
-              estado: entry.estado,
-            }));
+            newLogs.facturas = data.data.slice(0, 200).map((entry: any, index: number) => {
+              const type = getLogType(entry.estado, entry.motivo, "facturas");
+              const isInfra = isInfraestructuraError(entry.motivo);
+              
+              let message = entry.motivo || `Documento ${entry.estado} correctamente`;
+              if (isInfra) {
+                message = `🔴 ERROR DE INFRAESTRUCTURA: ${message}`;
+              }
+              
+              return {
+                id: `factura_${entry.id_proceso || index}_${index}`,
+                message: message,
+                details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
+                timestamp: entry.fecha_proceso,
+                type: isInfra ? "error" : type,
+                estado: entry.estado,
+                isInfraestructura: isInfra,
+              };
+            });
           }
         } catch (e) {
           console.error("Error fetching facturas logs:", e);
         }
 
-        // 2. Fetch OFICORE
+        // 2. Fetch OFICORE - CORREGIDO
         try {
           const res = await fetch(`/api/oficore/stats${queryParams}`);
           const data = await res.json();
@@ -261,19 +431,29 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                 reason: "Estado de la incidencia actualizado." 
               };
               
+              // ✅ Para OFICORE, los estados normales NO son errores de infraestructura
               let type: "success" | "error" | "warning" | "info" = "info";
-              if (actionId === 5) type = "success";
-              else if (actionId === 8) type = "info";
-              else if (actionId === 6) type = "error";
-              else type = "warning";
-
+              if (actionId === 5) {
+                type = "success";
+              } else if (actionId === 8) {
+                type = "info";
+              } else if (actionId === 6) {
+                type = "warning";
+              } else {
+                type = "info";
+              }
+              
+              // ✅ Verificar si es error de infraestructura REAL (solo si el motivo es técnico)
+              const isInfra = isInfraestructuraError(entry.detalle_motivo || entry.motivo || entry.observacion || "");
+              
               return {
                 id: `oficore_${entry.id_incidencia || index}_${index}`,
-                message: `Estado: ${explanation.name} - ${explanation.reason}`,
+                message: isInfra ? `🔴 ERROR DE INFRAESTRUCTURA: ${explanation.name}` : `Estado: ${explanation.name} - ${explanation.reason}`,
                 details: `Incidencia #${entry.id_incidencia} · Cliente: ${entry.contacto_nombre || 'N/A'} (${entry.codigo_cliente || 'N/A'}) · Técnico: ${entry.tecnico || 'N/A'}`,
                 timestamp: entry.fecha_detalle,
-                type,
+                type: isInfra ? "error" : type,
                 estado: explanation.name,
+                isInfraestructura: isInfra,
               };
             });
           }
@@ -281,7 +461,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           console.error("Error fetching OFICORE logs:", e);
         }
 
-        // 3. Fetch OFITEC
+        // 3. Fetch OFITEC - CORREGIDO
         try {
           const res = await fetch(`/api/ofitec/stats${queryParams}`);
           const data = await res.json();
@@ -290,14 +470,28 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               const estStr = entry.LLA_ESTADO?.toString().trim();
               const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
               const incompletoStatuses = ['3', '10', '22', '33', '11', '12'];
-              const type = resolvedStatuses.includes(estStr) ? "success" : (incompletoStatuses.includes(estStr) ? "error" : "warning");
+              
+              // ✅ Para OFITEC, los estados incompletos son warning, no error
+              let type: "success" | "error" | "warning" | "info" = "info";
+              if (resolvedStatuses.includes(estStr)) {
+                type = "success";
+              } else if (incompletoStatuses.includes(estStr)) {
+                type = "warning";
+              } else {
+                type = "info";
+              }
+              
+              // ✅ Verificar si es error de infraestructura REAL
+              const isInfra = isInfraestructuraError(entry.LLA_OBSERVACION || entry.motivo || "");
+              
               return {
                 id: `ofitec_${entry.LLA_CORRELATIVO || index}_${index}`,
-                message: entry.motivo || `Llamada SAST Estado: ${entry.LLA_ESTADO_DESC || OFITEC_STATUS_MAP[estStr] || entry.LLA_ESTADO}`,
+                message: isInfra ? `🔴 ERROR DE INFRAESTRUCTURA: ${entry.motivo || entry.LLA_ESTADO_DESC || OFITEC_STATUS_MAP[estStr] || entry.LLA_ESTADO}` : (entry.motivo || `Llamada SAST Estado: ${entry.LLA_ESTADO_DESC || OFITEC_STATUS_MAP[estStr] || entry.LLA_ESTADO}`),
                 details: `Llamada #${entry.LLA_CORRELATIVO} · Contacto: ${entry.contacto_nombre || 'N/A'} · Cliente: ${entry.codigo_cliente || 'N/A'}`,
                 timestamp: entry.LLA_FEC_LLAMADA,
-                type,
+                type: isInfra ? "error" : type,
                 estado: resolvedStatuses.includes(estStr) ? "Aprobado" : (incompletoStatuses.includes(estStr) ? "Rechazado" : "Manual"),
+                isInfraestructura: isInfra,
               };
             });
           }
@@ -310,20 +504,24 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           const res = await fetch(`/api/sgc/stats${queryParams}`);
           const data = await res.json();
           if (data.success && data.data) {
-            newLogs.sgc = data.data.slice(0, 200).map((entry: any, index: number) => ({
-              id: `sgc_${index}_${index}`,
-              message: `Integración de ${entry.tipo_de_documento || 'documento'} SGC`,
-              details: `Sistema Origen: ${entry.SISTEMA_ORIGEN} · Canal: ${entry.tipo_de_venta || 'N/A'} · Cantidad: ${entry.cantidad || 0}`,
-              timestamp: entry.fecha_documento,
-              type: entry.tipo_de_documento === "FACTURA" ? "success" : (entry.tipo_de_documento === "GUIA" ? "warning" : "info"),
-              estado: entry.tipo_de_documento === "FACTURA" ? "Aprobado" : "Pendiente",
-            }));
+            newLogs.sgc = data.data.slice(0, 200).map((entry: any, index: number) => {
+              const isInfra = isInfraestructuraError(entry.observacion || entry.motivo || "");
+              return {
+                id: `sgc_${index}_${index}`,
+                message: isInfra ? `🔴 ERROR DE INFRAESTRUCTURA: Integración de ${entry.tipo_de_documento || 'documento'} SGC` : `Integración de ${entry.tipo_de_documento || 'documento'} SGC`,
+                details: `Sistema Origen: ${entry.SISTEMA_ORIGEN} · Canal: ${entry.tipo_de_venta || 'N/A'} · Cantidad: ${entry.cantidad || 0}`,
+                timestamp: entry.fecha_documento,
+                type: isInfra ? "error" : (entry.tipo_de_documento === "FACTURA" ? "success" : (entry.tipo_de_documento === "GUIA" ? "warning" : "info")),
+                estado: entry.tipo_de_documento === "FACTURA" ? "Aprobado" : "Pendiente",
+                isInfraestructura: isInfra,
+              };
+            });
           }
         } catch (e) {
           console.error("Error fetching SGC logs:", e);
         }
 
-        // Si todos los logs reales están vacíos (por ej: error base datos), cargamos simulación
+        // Si todos los logs reales están vacíos, cargamos simulación
         const totalLogsCount = Object.values(newLogs).reduce((acc, arr) => acc + arr.length, 0);
         if (totalLogsCount === 0) {
           newLogs.facturas = generateMockFacturasLogs();
@@ -396,7 +594,12 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     }
 
     if (filters.types.length > 0 && filters.types.length < 5) {
-      result = result.filter(event => filters.types.includes(event.log.type));
+      result = result.filter(event => {
+        if (isInfraestructuraLog(event.log)) {
+          return filters.types.includes("error");
+        }
+        return filters.types.includes(event.log.type);
+      });
     }
 
     if (filters.serviceId !== "all") {
@@ -451,7 +654,31 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
 
   const getEventStyle = (event: TimelineEvent) => {
     if (event.isComingSoon) return EVENT_STYLES.comingSoon;
+    
+    if (isInfraestructuraLog(event.log)) {
+      return EVENT_STYLES.infraestructura;
+    }
+    
     return EVENT_STYLES[event.log.type as keyof typeof EVENT_STYLES] || EVENT_STYLES.info;
+  };
+
+  const getInfraIcon = (log: LogEntry) => {
+    const message = (log.message || "").toLowerCase();
+    const details = (log.details || "").toLowerCase();
+    
+    if (message.includes("conexión") || message.includes("connection") || message.includes("sii")) {
+      return Wifi;
+    }
+    if (message.includes("servidor") || message.includes("server") || message.includes("softland")) {
+      return Server;
+    }
+    if (message.includes("base de datos") || message.includes("database") || message.includes("sql")) {
+      return Database;
+    }
+    if (message.includes("red") || message.includes("network")) {
+      return Link;
+    }
+    return Server;
   };
 
   if (loading) {
@@ -603,6 +830,8 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               const style = getEventStyle(event);
               const Icon = style.icon;
               const isLast = index === filteredEvents.length - 1;
+              const isInfra = isInfraestructuraLog(event.log);
+              const InfraIcon = isInfra ? getInfraIcon(event.log) : null;
               
               return (
                 <div
@@ -610,7 +839,8 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                   className={cn(
                     "group relative transition-all duration-200 hover:bg-muted/20",
                     !event.isComingSoon && "cursor-pointer",
-                    !isLast && "border-b border-gray-100"
+                    !isLast && "border-b border-gray-100",
+                    isInfra && "hover:bg-red-50/50"
                   )}
                   onClick={() => {
                     if (!event.isComingSoon) {
@@ -621,28 +851,35 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                     }
                   }}
                 >
-                  {/* Indicador de tiempo */}
-                  <div className="absolute left-6 top-4 bottom-0 w-px bg-gradient-to-b from-gray-200 to-transparent" />
-                  
                   <div className="relative flex gap-3 p-4 pl-6">
-                    {/* Icono con círculo de fondo */}
                     <div className={cn(
                       "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all group-hover:scale-105",
-                      event.isComingSoon ? "bg-gray-100" : "bg-white shadow-sm border"
+                      isInfra ? "bg-red-100 border-2 border-red-400 animate-pulse" : 
+                      event.isComingSoon ? "bg-gray-100" : "bg-white shadow-sm border",
+                      isInfra && "shadow-lg shadow-red-200"
                     )}>
-                      <Icon className={cn("h-4 w-4", style.iconColor)} />
+                      {isInfra ? (
+                        <InfraIcon className="h-4 w-4 text-red-600" />
+                      ) : (
+                        <Icon className={cn("h-4 w-4", style.iconColor)} />
+                      )}
                     </div>
 
-                    {/* Contenido */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-foreground">
                             {event.serviceName}
                           </span>
-                          <Badge className={cn("text-[10px] px-2 py-0 font-normal border", style.badge)}>
-                            {event.isComingSoon ? "En desarrollo" : event.log.type === "success" ? "Aprobado" : event.log.type === "error" ? "Error" : event.log.type === "warning" ? "Alerta" : "Información"}
-                          </Badge>
+                          {isInfra ? (
+                            <Badge className="bg-red-600 text-white border-red-700 font-bold text-[10px] px-2 py-0">
+                              🚨 ERROR INFRAESTRUCTURA
+                            </Badge>
+                          ) : (
+                            <Badge className={cn("text-[10px] px-2 py-0 font-normal border", style.badge)}>
+                              {event.isComingSoon ? "En desarrollo" : event.log.type === "success" ? "Aprobado" : event.log.type === "error" ? "Error" : event.log.type === "warning" ? "Alerta" : "Información"}
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
                           <Clock className="h-3 w-3" />
@@ -650,17 +887,34 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                         </div>
                       </div>
 
-                      <p className="text-sm text-foreground/90 leading-relaxed">
+                      <p className={cn(
+                        "text-sm leading-relaxed",
+                        isInfra ? "text-red-700 font-bold" : "text-foreground/90"
+                      )}>
                         {event.log.message}
                       </p>
                       
                       {(event.log as any).details && (
-                        <p className="text-xs text-muted-foreground mt-1.5 font-mono">
+                        <p className={cn(
+                          "text-xs mt-1.5 font-mono",
+                          isInfra ? "text-red-600" : "text-muted-foreground"
+                        )}>
                           {(event.log as any).details}
                         </p>
                       )}
 
-                      {!event.isComingSoon && (
+                      {isInfra && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 text-[10px] animate-pulse">
+                            ⚠️ Requiere atención inmediata
+                          </Badge>
+                          <span className="text-[10px] text-red-500 font-medium">
+                            Error de infraestructura detectado
+                          </span>
+                        </div>
+                      )}
+
+                      {!event.isComingSoon && !isInfra && (
                         <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <span className="text-[10px] text-emerald-600 flex items-center gap-1">
                             <Zap className="h-2.5 w-2.5" />

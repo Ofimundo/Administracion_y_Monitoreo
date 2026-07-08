@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clients, services, type Service, type Client } from "@/lib/services-data";
+import Image from "next/image";
 import {
   LayoutDashboard,
   Flame,
@@ -375,10 +376,22 @@ export default function HomePage() {
       </main>
 
       <footer className="border-t border-border mt-8 py-4">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          Sistema de Administración y Monitoreo de Servicios &copy; 2026
-        </div>
-      </footer>
+  <div className="container mx-auto px-4">
+    <div className="flex items-center justify-center gap-4">
+      <Image
+        src="/logo.png"
+        alt="Ofilab"
+        width={160}
+        height={50}
+        className="h-12 w-auto object-contain"
+        priority={false}
+      />
+      <span className="text-sm text-muted-foreground">
+        Sistema de Administración y Monitoreo de Servicios &copy; 2026
+      </span>
+    </div>
+  </div>
+</footer>
     </div>
   );
 }
