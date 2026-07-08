@@ -469,24 +469,14 @@ export default function ServiceDetailPage() {
       }
     }
     else if (serviceId === "ofitec") {
-      // ============================================================
       // OFITEC: Estadísticas basadas en LLA_CORRELATIVO y LLA_ESTADO
-      // DATOS REALES DE LA BASE DE DATOS
-      // ============================================================
-      
-      // ESTADOS RESUELTOS DE OFITEC
       const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
       
-      // Tickets Ingresados = LLA_CORRELATIVO = '1'
       const ingresadas = filteredData.filter((c: any) => c.LLA_CORRELATIVO === "1" || c.LLA_CORRELATIVO === 1).length;
-      
-      // Tickets Resueltos = LLA_ESTADO en estados resueltos
       const resueltas = filteredData.filter((c: any) => {
         const est = c.LLA_ESTADO?.toString().trim();
         return resolvedStatuses.includes(est);
       }).length;
-      
-      // Tickets Pendientes = Ingresados - Resueltos
       const pendientes = Math.max(0, ingresadas - resueltas);
       
       approvedDocs = resueltas;
@@ -496,7 +486,6 @@ export default function ServiceDetailPage() {
       infrastructureErrors = 0;
       infrastructureErrorPercentage = 0;
       
-      // Contar por estado específico para estadísticas detalladas
       enProceso = filteredData.filter((c: any) => {
         const est = c.LLA_ESTADO?.toString().trim();
         return ['1', '2', '17', '20', '5', '30'].includes(est);
@@ -742,7 +731,7 @@ export default function ServiceDetailPage() {
   const isTicketService = isOficore || isOfitec;
 
   // ============================================================
-  // RENDERIZADO PRINCIPAL - Dashboard como primera pestaña
+  // RENDERIZADO PRINCIPAL - SOLO 3 TABS (Estadísticas, Descripción, Clientes)
   // ============================================================
   return (
     <div className="min-h-screen bg-background">
@@ -769,13 +758,9 @@ export default function ServiceDetailPage() {
           )}
         </div>
 
-        {/* Tabs con Dashboard, Estadísticas, Descripción y Clientes */}
-        <Tabs defaultValue="dashboard" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-4">
-            <TabsTrigger value="dashboard" className="flex items-center gap-2">
-              <LayoutDashboard className="h-4 w-4" />
-              Dashboard
-            </TabsTrigger>
+        {/* ✅ SOLO 3 TABS: Estadísticas, Descripción y Clientes */}
+        <Tabs defaultValue="stats" className="w-full">
+          <TabsList className="grid w-full grid-cols-3 mb-4">
             <TabsTrigger value="stats" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
               Estadísticas
@@ -790,14 +775,14 @@ export default function ServiceDetailPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* TAB - DASHBOARD (NUEVO - PRIMERO) */}
-          <TabsContent value="dashboard">
+          {/* TAB - ESTADÍSTICAS */}
+          <TabsContent value="stats">
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg font-medium flex items-center gap-2">
-                    <LayoutDashboard className="h-5 w-5 text-emerald-500" />
-                    Dashboard del Servicio
+                    <Activity className="h-5 w-5 text-emerald-500" />
+                    {isTicketService ? "Estadísticas de Tickets" : isSgcService ? "Estadísticas de Documentos SGC" : "Estadísticas de Documentos"}
                   </CardTitle>
                   <div className="flex items-center gap-2">
                     {hasStatsFilter && (
@@ -922,153 +907,10 @@ export default function ServiceDetailPage() {
                 )}
                 
                 {/* ============================================================
-                    DASHBOARD - VISTA RESUMEN DEL SERVICIO
-                    ============================================================ */}
-                <div className="space-y-4">
-                  {/* Resumen de métricas principales */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-muted/30 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {isTicketService ? "🎫 Tickets" : "📄 Documentos"}
-                      </p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
-                      <p className="text-xs text-emerald-600">
-                        {isTicketService ? "✅ Resueltos" : "✅ Aprobados"}
-                      </p>
-                    </div>
-                    <div className={cn(
-                      "rounded-lg p-4 text-center",
-                      statsData.rejectedCount > 0 ? "bg-red-50" : "bg-muted/30"
-                    )}>
-                      <p className={cn(
-                        "text-2xl font-bold",
-                        statsData.rejectedCount > 0 ? "text-red-500" : "text-foreground"
-                      )}>
-                        {statsData.rejectedCount.toLocaleString()}
-                      </p>
-                      <p className={cn(
-                        "text-xs",
-                        statsData.rejectedCount > 0 ? "text-red-500" : "text-muted-foreground"
-                      )}>
-                        {isTicketService ? "⏳ Pendientes" : "❌ Rechazados"}
-                      </p>
-                    </div>
-                    <div className={cn(
-                      "rounded-lg p-4 text-center border-2",
-                      statsData.infrastructureErrorPercentage > 0 ? "border-red-300 bg-red-50" : "border-emerald-200 bg-emerald-50"
-                    )}>
-                      <p className={cn(
-                        "text-2xl font-bold",
-                        statsData.infrastructureErrorPercentage > 0 ? "text-red-600" : "text-emerald-600"
-                      )}>
-                        {statsData.infrastructureErrorPercentage}%
-                      </p>
-                      <p className={cn(
-                        "text-xs",
-                        statsData.infrastructureErrorPercentage > 0 ? "text-red-600" : "text-emerald-600"
-                      )}>
-                        🔧 Error Infraestructura
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Información adicional del servicio */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
-                      <span className="text-sm text-muted-foreground">📊 Uptime</span>
-                      <span className="font-bold text-emerald-600">{statsData.uptime}</span>
-                    </div>
-                    <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
-                      <span className="text-sm text-muted-foreground">🕐 Última actividad</span>
-                      <span className="font-semibold text-sm">{statsData.lastActivity}</span>
-                    </div>
-                  </div>
-
-                  {/* Estado del servicio */}
-                  <div className="flex justify-between items-center p-4 bg-muted/20 rounded-lg border">
-                    <span className="text-sm font-medium text-foreground">Estado del Servicio</span>
-                    <div className="flex items-center gap-2">
-                      <StatusIndicator status={serviceStatus} percentage={0} />
-                      <span className="text-sm font-semibold">
-                        {serviceStatus === "success" ? "✅ Operativo" : 
-                         serviceStatus === "warning" ? "⚠️ Atención" : "❌ Crítico"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Clientes asociados resumen */}
-                  <div className="bg-muted/20 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Clientes Asociados
-                      </h4>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-xs"
-                        onClick={() => document.querySelector('[value="clients"]')?.click()}
-                      >
-                        Ver todos <ArrowLeft className="h-3 w-3 rotate-180 ml-1" />
-                      </Button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {displayClients.slice(0, 5).map((client) => (
-                        <Badge key={client.id} variant="outline" className="text-xs px-3 py-1">
-                          {client.name.length > 25 ? client.name.substring(0, 25) + "..." : client.name}
-                        </Badge>
-                      ))}
-                      {displayClients.length > 5 && (
-                        <Badge variant="outline" className="text-xs px-3 py-1 bg-muted/50">
-                          +{displayClients.length - 5} más
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Descripción resumida */}
-                  <div className="bg-muted/20 rounded-lg p-4">
-                    <h4 className="text-sm font-medium text-foreground flex items-center gap-2 mb-2">
-                      <Info className="h-4 w-4" />
-                      Descripción
-                    </h4>
-                    <p className="text-sm text-muted-foreground line-clamp-3">{displayDescription}</p>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-xs mt-2"
-                      onClick={() => document.querySelector('[value="description"]')?.click()}
-                    >
-                      Ver más <ArrowLeft className="h-3 w-3 rotate-180 ml-1" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* TAB - ESTADÍSTICAS (CONTENIDO COMPLETO) */}
-          <TabsContent value="stats">
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-medium flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-emerald-500" />
-                    {isTicketService ? "Estadísticas de Tickets" : isSgcService ? "Estadísticas de Documentos SGC" : "Estadísticas de Documentos"}
-                  </CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {/* ============================================================
                     ESTADÍSTICAS EN TARJETAS - ADAPTADAS SEGÚN EL SERVICIO
                     ============================================================ */}
                 {isOfitec ? (
-                  // ============================================================
-                  // ESTADÍSTICAS PARA OFITEC - DATOS REALES (SIMPLIFICADO Y CORRECTO)
-                  // ============================================================
+                  // ESTADÍSTICAS PARA OFITEC
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-muted/30 rounded-lg p-4 text-center">
                       <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
@@ -1104,9 +946,7 @@ export default function ServiceDetailPage() {
                     </div>
                   </div>
                 ) : isOficore ? (
-                  // ============================================================
-                  // ESTADÍSTICAS PARA OFICORE - SIMPLIFICADO
-                  // ============================================================
+                  // ESTADÍSTICAS PARA OFICORE
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-muted/30 rounded-lg p-4 text-center">
                       <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
@@ -1126,9 +966,7 @@ export default function ServiceDetailPage() {
                     </div>
                   </div>
                 ) : isSgcService ? (
-                  // ============================================================
                   // ESTADÍSTICAS PARA SGC
-                  // ============================================================
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div className="bg-muted/30 rounded-lg p-4 text-center">
                       <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
@@ -1152,9 +990,7 @@ export default function ServiceDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  // ============================================================
                   // ESTADÍSTICAS PARA FACTURAS
-                  // ============================================================
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     <div className="bg-muted/30 rounded-lg p-4 text-center">
                       <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
