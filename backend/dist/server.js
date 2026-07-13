@@ -669,10 +669,12 @@ app.get("/api/ofitec/stats", async (req, res) => {
         // ============================================================
         let qData = `
       SELECT 
-        LLA_ESTADO,
-        LLA_CORRELATIVO,
-        LLA_FEC_LLAMADA
-      FROM OFITEC.dbo.SAST_LLAMADA
+        L.LLA_ESTADO,
+        E.PAR_DESCRIPCION AS LLA_ESTADO_DESC,
+        L.LLA_CORRELATIVO,
+        L.LLA_FEC_LLAMADA
+      FROM OFITEC.dbo.SAST_LLAMADA L
+      LEFT JOIN OFITEC.dbo.VT_ESTADO_LLAMADAS E ON L.LLA_ESTADO = E.PAR_COD_ALF
       WHERE 1=1
     `;
         if (fDesdeClean && fHastaClean) {
@@ -787,6 +789,15 @@ app.get("/api/sgc/stats", async (req, res) => {
     try {
         let fechaDesde = req.query.fechaDesde || '';
         let fechaHasta = req.query.fechaHasta || '';
+        // Si no se especifican fechas, poner un rango por defecto (los últimos 30 días) para evitar que la query sea lenta y falle por timeout
+        if (!fechaDesde && !fechaHasta) {
+            const hoy = new Date();
+            const hace30dias = new Date();
+            hace30dias.setDate(hoy.getDate() - 30);
+            const formatFecha = (d) => d.toISOString().split('T')[0];
+            fechaDesde = formatFecha(hace30dias);
+            fechaHasta = formatFecha(hoy);
+        }
         const fDesdeClean = fechaDesde.replace(/-/g, "");
         const fHastaClean = fechaHasta.replace(/-/g, "");
         console.log(`🔌 [SGC] Consultando datos REALES desde base de datos. Desde: ${fDesdeClean || 'Todas'}, Hasta: ${fHastaClean || 'Todas'}`);
@@ -808,30 +819,77 @@ app.get("/api/sgc/stats", async (req, res) => {
         tipo_de_venta,
         TIPO_DOCUMENTO_ORIGEN,
         fecha_documento,
-        cantidad
+        cantidad,
+        cast(null as varchar(255)) as observacion
       FROM [CONTROLGESTION].[REPOSITORIO].[VT_DATOS_FACTURAS_GUIAS]
       ${whereClause}
       ORDER BY fecha_documento DESC
     `;
-        console.log(`🔌 [SGC] Query:`, sgcQuery);
-        const result = await (0, db_client_1.executeQuery)(sgcQuery);
-        if (!result.recordset || result.recordset.length === 0) {
+        let pickingWhere = "";
+        if (fDesdeClean && fHastaClean) {
+            pickingWhere = `WHERE c.Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+                      AND c.Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)`;
+        }
+        else if (fDesdeClean) {
+            pickingWhere = `WHERE c.Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date)`;
+        }
+        else if (fHastaClean) {
+            pickingWhere = `WHERE c.Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)`;
+        }
+        const sgcPickingQuery = `
+      SELECT TOP 100
+        'PICKING' as tipo_de_documento,
+        isnull(c.Pickc_Usuario, 'SGC') as SISTEMA_ORIGEN,
+        'picking' as tipo_de_venta,
+        'PICKING' as TIPO_DOCUMENTO_ORIGEN,
+        c.Pickc_Fecha_Picking as fecha_documento,
+        1 as cantidad,
+        'Folio #' + cast(c.Pickc_Folio_Picking as varchar) + ' - Cliente: ' + isnull(clnt.NomAux, 'Sin Cliente') + ' - Estado: ' + 
+          case c.Pickc_Estado 
+            when 0 then 'Pendiente' 
+            when 1 then 'En Proceso' 
+            when 2 then 'Finalizado' 
+            when 4 then 'Anulado' 
+            else 'Desconocido' 
+          end as observacion
+      FROM SGCX.dbo.Inv_Picking_Cabecera c
+      LEFT JOIN STUEDEMANNSA.softland.cwtauxi clnt ON c.Pickc_Rut_Cliente = clnt.CodAux
+      ${pickingWhere}
+      ORDER BY c.Pickc_Fecha_Picking DESC
+    `;
+        console.log(`🔌 [SGC] Queries:`, { sgcQuery, sgcPickingQuery });
+        const [sgcRes, pickingRes] = await Promise.all([
+            (0, db_client_1.executeQuery)(sgcQuery).catch(err => {
+                console.error("Error executing sgcQuery:", err);
+                return { recordset: [] };
+            }),
+            (0, db_client_1.executeQuery)(sgcPickingQuery).catch(err => {
+                console.error("Error executing sgcPickingQuery:", err);
+                return { recordset: [] };
+            })
+        ]);
+        const documents = sgcRes.recordset || [];
+        const pickings = pickingRes.recordset || [];
+        const mergedData = [...documents, ...pickings].sort((a, b) => {
+            return new Date(b.fecha_documento).getTime() - new Date(a.fecha_documento).getTime();
+        });
+        if (mergedData.length === 0) {
             return res.status(404).json({
                 success: false,
                 mode: "real",
-                message: "⚠️ No se encontraron registros en la base de datos SGC. Verifica la conexión a CONTROLGESTION.REPOSITORIO.VT_DATOS_FACTURAS_GUIAS",
+                message: "⚠️ No se encontraron registros en la base de datos SGC.",
                 data: [],
                 count: 0
             });
         }
-        console.log(`✅ [SGC] ${result.recordset?.length || 0} registros encontrados en base de datos REAL`);
-        const totalDocumentos = result.recordset?.length || 0;
-        const picking = result.recordset?.filter((r) => r.tipo_de_venta?.toLowerCase() === "picking").length || 0;
-        const od = result.recordset?.filter((r) => r.tipo_de_venta?.toLowerCase() === "od").length || 0;
+        console.log(`✅ [SGC] ${mergedData.length} registros totales encontrados (Documentos: ${documents.length}, Pickings: ${pickings.length})`);
+        const totalDocumentos = mergedData.length;
+        const picking = mergedData.filter((r) => r.tipo_de_venta?.toLowerCase() === "picking").length || 0;
+        const od = mergedData.filter((r) => r.tipo_de_venta?.toLowerCase() === "od").length || 0;
         return res.json({
             success: true,
             mode: "real",
-            data: result.recordset || [],
+            data: mergedData,
             count: totalDocumentos,
             stats: {
                 total: totalDocumentos,
@@ -839,7 +897,7 @@ app.get("/api/sgc/stats", async (req, res) => {
                 od,
                 otros: totalDocumentos - picking - od
             },
-            source: "SQL Server REAL - CONTROLGESTION.REPOSITORIO.VT_DATOS_FACTURAS_GUIAS"
+            source: "SQL Server REAL - CONTROLGESTION.REPOSITORIO.VT_DATOS_FACTURAS_GUIAS & SGCX.dbo.Inv_Picking_Cabecera"
         });
     }
     catch (error) {
@@ -849,6 +907,291 @@ app.get("/api/sgc/stats", async (req, res) => {
             mode: "real",
             message: "❌ Error al consultar la base de datos SGC: " + error.message,
             data: [],
+            count: 0
+        });
+    }
+});
+// 13.5. GET /api/sgc/picking-stats
+app.get("/api/sgc/picking-stats", async (req, res) => {
+    try {
+        let fechaDesde = req.query.fechaDesde || '';
+        let fechaHasta = req.query.fechaHasta || '';
+        const hours = parseInt(req.query.hours || '24');
+        // Si no se especifican fechas, poner un rango por defecto (los últimos 30 días)
+        if (!fechaDesde && !fechaHasta) {
+            const hoy = new Date();
+            const hace30dias = new Date();
+            hace30dias.setDate(hoy.getDate() - 30);
+            const formatFecha = (d) => d.toISOString().split('T')[0];
+            fechaDesde = formatFecha(hace30dias);
+            fechaHasta = formatFecha(hoy);
+        }
+        const fDesdeClean = fechaDesde.replace(/-/g, "");
+        const fHastaClean = fechaHasta.replace(/-/g, "");
+        console.log(`🔌 [SGC Picking] Consultando base de datos SGCX. Desde: ${fDesdeClean}, Hasta: ${fHastaClean}, Horas Alerta: ${hours}`);
+        // Query 1: KPIs de volumen y totales
+        const kpisQuery = `
+      DECLARE @MaxDate datetime = (SELECT ISNULL(MAX(Pickc_Fecha_Picking), GETDATE()) FROM SGCX.dbo.Inv_Picking_Cabecera);
+      SELECT 
+        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(hour, -24, @MaxDate) THEN Pickc_Folio_Picking END) as vol_24h,
+        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -7, @MaxDate) THEN Pickc_Folio_Picking END) as vol_semana,
+        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -30, @MaxDate) THEN Pickc_Folio_Picking END) as vol_mes,
+        SUM(CASE WHEN Pickc_Estado = 0 AND Pickc_Fecha_Picking <= DATEADD(hour, -${hours}, GETDATE()) THEN 1 ELSE 0 END) as total_alertas,
+        SUM(CASE WHEN Pickc_Ticket_Mesa_Ayuda IS NOT NULL AND Pickc_Ticket_Mesa_Ayuda > 0 AND Pickc_Fecha_Picking >= DATEADD(month, -3, GETDATE()) THEN 1 ELSE 0 END) as total_tickets
+      FROM SGCX.dbo.Inv_Picking_Cabecera
+    `;
+        // Query 2: Productividad por estado
+        const productivityQuery = `
+      SELECT 
+        Pickc_Estado as estado,
+        COUNT(DISTINCT Pickc_Folio_Picking) as count
+      FROM SGCX.dbo.Inv_Picking_Cabecera
+      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+      GROUP BY Pickc_Estado
+      ORDER BY Pickc_Estado
+    `;
+        // Query 3: Top 5 productos con mayor movimiento
+        const topProductsQuery = `
+      SELECT TOP 5
+        d.Pickd_Parte_Despacho as producto,
+        SUM(d.Pickd_Cantidad) as cantidad,
+        COUNT(DISTINCT d.Pickd_Folio_Picking) as transacciones
+      FROM SGCX.dbo.Inv_Picking_Detalle d
+      INNER JOIN SGCX.dbo.Inv_Picking_Cabecera c ON d.Pickd_Folio_Picking = c.Pickc_Folio_Picking
+      WHERE c.Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND c.Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+      GROUP BY d.Pickd_Parte_Despacho
+      ORDER BY cantidad DESC
+    `;
+        // Query 4: Conteo por período (Diario, Semanal, Mensual)
+        const byDayQuery = `
+      SELECT 
+        CAST(Pickc_Fecha_Picking AS DATE) as fecha,
+        COUNT(DISTINCT Pickc_Folio_Picking) as count
+      FROM SGCX.dbo.Inv_Picking_Cabecera
+      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+      GROUP BY CAST(Pickc_Fecha_Picking AS DATE)
+      ORDER BY fecha
+    `;
+        const byWeekQuery = `
+      SELECT 
+        DATEPART(year, Pickc_Fecha_Picking) as anio,
+        DATEPART(week, Pickc_Fecha_Picking) as semana,
+        MIN(Pickc_Fecha_Picking) as fecha_inicio,
+        COUNT(DISTINCT Pickc_Folio_Picking) as count
+      FROM SGCX.dbo.Inv_Picking_Cabecera
+      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+      GROUP BY DATEPART(year, Pickc_Fecha_Picking), DATEPART(week, Pickc_Fecha_Picking)
+      ORDER BY anio, semana
+    `;
+        const byMonthQuery = `
+      SELECT 
+        DATEPART(year, Pickc_Fecha_Picking) as anio,
+        DATEPART(month, Pickc_Fecha_Picking) as mes,
+        COUNT(DISTINCT Pickc_Folio_Picking) as count
+      FROM SGCX.dbo.Inv_Picking_Cabecera
+      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+      GROUP BY DATEPART(year, Pickc_Fecha_Picking), DATEPART(month, Pickc_Fecha_Picking)
+      ORDER BY anio, mes
+    `;
+        // Query 5: Mesa de ayuda (Tickets)
+        const ticketsQuery = `
+      SELECT TOP 20
+        c.Pickc_Folio_Picking as folio,
+        c.Pickc_Fecha_Picking as fecha,
+        c.Pickc_Estado as estado,
+        c.Pickc_Ticket_Mesa_Ayuda as ticket,
+        c.Pickc_Usuario as usuario,
+        clnt.NomAux as cliente
+      FROM SGCX.dbo.Inv_Picking_Cabecera c
+      LEFT JOIN STUEDEMANNSA.softland.cwtauxi clnt ON c.Pickc_Rut_Cliente = clnt.CodAux
+      WHERE c.Pickc_Ticket_Mesa_Ayuda IS NOT NULL 
+        AND c.Pickc_Ticket_Mesa_Ayuda > 0
+        AND c.Pickc_Fecha_Picking >= DATEADD(month, -3, GETDATE())
+      ORDER BY c.Pickc_Fecha_Picking DESC
+    `;
+        // Query 6: Alertas de pickings pendientes
+        const alertsQuery = `
+      SELECT TOP 50
+        c.Pickc_Folio_Picking as folio,
+        c.Pickc_Fecha_Picking as fecha,
+        c.Pickc_Usuario as usuario,
+        c.Pickc_Comuna as comuna,
+        clnt.NomAux as cliente,
+        DATEDIFF(hour, c.Pickc_Fecha_Picking, GETDATE()) as horas_pendiente
+      FROM SGCX.dbo.Inv_Picking_Cabecera c
+      LEFT JOIN STUEDEMANNSA.softland.cwtauxi clnt ON c.Pickc_Rut_Cliente = clnt.CodAux
+      WHERE c.Pickc_Estado = 0 
+        AND c.Pickc_Fecha_Picking <= DATEADD(hour, -${hours}, GETDATE())
+      ORDER BY c.Pickc_Fecha_Picking ASC
+    `;
+        const [kpisRes, productivityRes, topProductsRes, byDayRes, byWeekRes, byMonthRes, ticketsRes, alertsRes] = await Promise.all([
+            (0, db_client_1.executeQuery)(kpisQuery),
+            (0, db_client_1.executeQuery)(productivityQuery),
+            (0, db_client_1.executeQuery)(topProductsQuery),
+            (0, db_client_1.executeQuery)(byDayQuery),
+            (0, db_client_1.executeQuery)(byWeekQuery),
+            (0, db_client_1.executeQuery)(byMonthQuery),
+            (0, db_client_1.executeQuery)(ticketsQuery),
+            (0, db_client_1.executeQuery)(alertsQuery)
+        ]);
+        return res.json({
+            success: true,
+            mode: "real",
+            kpis: kpisRes.recordset[0] || { vol_24h: 0, vol_semana: 0, vol_mes: 0, total_alertas: 0, total_tickets: 0 },
+            productivity: productivityRes.recordset || [],
+            topProducts: topProductsRes.recordset || [],
+            byDay: byDayRes.recordset || [],
+            byWeek: byWeekRes.recordset || [],
+            byMonth: byMonthRes.recordset || [],
+            tickets: ticketsRes.recordset || [],
+            alerts: alertsRes.recordset || []
+        });
+    }
+    catch (error) {
+        console.error("❌ Error en API /api/sgc/picking-stats:", error);
+        return res.status(500).json({
+            success: false,
+            mode: "real",
+            message: "❌ Error al consultar las estadísticas de picking de la base de datos SGCX: " + error.message,
+        });
+    }
+});
+// 14. GET /api/dte/stats
+app.get("/api/dte/stats", async (req, res) => {
+    try {
+        const isSimulated = (0, db_client_1.isSimulationMode)();
+        let fechaDesde = req.query.fechaDesde || '';
+        let fechaHasta = req.query.fechaHasta || '';
+        const fDesdeClean = fechaDesde.replace(/-/g, "");
+        const fHastaClean = fechaHasta.replace(/-/g, "");
+        console.log(`🔌 [DTE] Consultando datos de DTE. Modo Simulación: ${isSimulated}. Desde: ${fDesdeClean || 'Todas'}, Hasta: ${fHastaClean || 'Todas'}`);
+        if (isSimulated) {
+            // Mock DTE logs based on the real ones seen in the DB
+            const mockLogs = [
+                {
+                    "id_log": 6,
+                    "fecha_inicio_ejecucion": "2026-07-09T15:47:14.060Z",
+                    "fecha_fin_ejecucion": "2026-07-09T15:51:28.410Z",
+                    "Estado": "EXITOSO"
+                },
+                {
+                    "id_log": 5,
+                    "fecha_inicio_ejecucion": "2026-07-09T13:34:19.293Z",
+                    "fecha_fin_ejecucion": "2026-07-09T13:38:30.933Z",
+                    "Estado": "EXITOSO"
+                },
+                {
+                    "id_log": 4,
+                    "fecha_inicio_ejecucion": "2026-07-08T23:04:32.580Z",
+                    "fecha_fin_ejecucion": "2026-07-08T23:09:41.040Z",
+                    "Estado": "EXITOSO"
+                },
+                {
+                    "id_log": 3,
+                    "fecha_inicio_ejecucion": "2026-07-08T13:30:35.593Z",
+                    "fecha_fin_ejecucion": "2026-07-08T13:35:51.030Z",
+                    "Estado": "EXITOSO"
+                },
+                {
+                    "id_log": 2,
+                    "fecha_inicio_ejecucion": "2026-07-07T23:33:01.530Z",
+                    "fecha_fin_ejecucion": "2026-07-07T23:36:50.847Z",
+                    "Estado": "EXITOSO"
+                },
+                {
+                    "id_log": 1,
+                    "fecha_inicio_ejecucion": "2026-07-07T17:16:22.373Z",
+                    "fecha_fin_ejecucion": "2026-07-07T17:19:58.370Z",
+                    "Estado": "EXITOSO"
+                }
+            ];
+            // Filter by dates if applicable
+            let filteredLogs = [...mockLogs];
+            if (fDesdeClean) {
+                const fromDate = new Date(fechaDesde);
+                filteredLogs = filteredLogs.filter(log => new Date(log.fecha_inicio_ejecucion) >= fromDate);
+            }
+            if (fHastaClean) {
+                const toDate = new Date(fechaHasta);
+                toDate.setHours(23, 59, 59, 999);
+                filteredLogs = filteredLogs.filter(log => new Date(log.fecha_inicio_ejecucion) <= toDate);
+            }
+            const totalRuns = filteredLogs.length;
+            const exitosos = filteredLogs.filter(l => l.Estado === "EXITOSO").length;
+            const fallidos = totalRuns - exitosos;
+            return res.json({
+                success: true,
+                mode: "simulation",
+                data: filteredLogs,
+                detalles: filteredLogs,
+                count: totalRuns,
+                stats: {
+                    total: totalRuns,
+                    exitosos,
+                    fallidos,
+                    lastRun: filteredLogs[0] ? filteredLogs[0].fecha_inicio_ejecucion : null
+                },
+                source: "SQL Server SIMULADO - THE_COOLER_CENTRAL.BOT.Log_DTE"
+            });
+        }
+        else {
+            let whereClause = "";
+            if (fDesdeClean && fHastaClean) {
+                whereClause = `WHERE CAST(fecha_inicio_ejecucion AS DATE) >= CAST('${fDesdeClean}' AS DATE) 
+                       AND CAST(fecha_inicio_ejecucion AS DATE) <= CAST('${fHastaClean}' AS DATE)`;
+            }
+            else if (fDesdeClean) {
+                whereClause = `WHERE CAST(fecha_inicio_ejecucion AS DATE) >= CAST('${fDesdeClean}' AS DATE)`;
+            }
+            else if (fHastaClean) {
+                whereClause = `WHERE CAST(fecha_inicio_ejecucion AS DATE) <= CAST('${fHastaClean}' AS DATE)`;
+            }
+            const dteQuery = `
+        SELECT 
+          id_log,
+          fecha_inicio_ejecucion,
+          fecha_fin_ejecucion,
+          Estado
+        FROM THE_COOLER_CENTRAL.BOT.Log_DTE
+        ${whereClause}
+        ORDER BY id_log DESC
+      `;
+            console.log(`🔌 [DTE] Query:`, dteQuery);
+            const result = await (0, db_client_1.executeQuery)(dteQuery);
+            const data = result.recordset || [];
+            console.log(`✅ [DTE] ${data.length} registros encontrados en base de datos REAL`);
+            const totalRuns = data.length;
+            const exitosos = data.filter((l) => l.Estado === "EXITOSO").length;
+            const fallidos = totalRuns - exitosos;
+            return res.json({
+                success: true,
+                mode: "real",
+                data: data,
+                detalles: data,
+                count: totalRuns,
+                stats: {
+                    total: totalRuns,
+                    exitosos,
+                    fallidos,
+                    lastRun: data[0] ? data[0].fecha_inicio_ejecucion : null
+                },
+                source: "SQL Server REAL - THE_COOLER_CENTRAL.BOT.Log_DTE"
+            });
+        }
+    }
+    catch (error) {
+        console.error("❌ Error en API /api/dte/stats:", error);
+        return res.status(500).json({
+            success: false,
+            mode: (0, db_client_1.isSimulationMode)() ? "simulation" : "real",
+            message: "❌ Error al consultar la base de datos DTE: " + error.message,
+            data: [],
+            detalles: [],
             count: 0
         });
     }

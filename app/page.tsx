@@ -230,10 +230,54 @@ export default function HomePage() {
           }
         }
 
+        // 5. Monitoreo de DTE desde la Base de Datos
+        let dteErrPercent = 0;
+        let dteStatus = "success";
+        try {
+          const resDte = await fetch("/api/dte/stats");
+          const dataDte = await resDte.json();
+          if (!isSubscribed || !mountedRef.current) return;
+
+          if (dataDte.success && dataDte.data) {
+            const totalRuns = dataDte.data.length;
+            const exitosos = dataDte.data.filter((d: any) => d.Estado === "EXITOSO").length;
+            const fallidos = totalRuns - exitosos;
+            
+            dteErrPercent = totalRuns > 0 ? Math.round((fallidos / totalRuns) * 100) : 0;
+            
+            const latestRun = dataDte.data[0];
+            if (latestRun) {
+              if (latestRun.Estado !== "EXITOSO") {
+                dteStatus = "error";
+              } else if (dteErrPercent > 20) {
+                dteStatus = "warning";
+              } else {
+                dteStatus = "success";
+              }
+            }
+          } else {
+            dteStatus = "error";
+            dteErrPercent = 100;
+          }
+        } catch (errDte) {
+          dteStatus = "error";
+          dteErrPercent = 100;
+        }
+
+        const srvDte = services.find(s => s.id === "dte");
+        if (srvDte && mountedRef.current) {
+          srvDte.status = dteStatus as any;
+          srvDte.errorPercentage = dteErrPercent;
+          if (srvDte.clients && srvDte.clients[0]) {
+            srvDte.clients[0].errorPercentage = dteErrPercent;
+            srvDte.clients[0].status = dteStatus as any;
+          }
+        }
+
         // Sincronizar estado global del cliente Ofimundo
         const globalClient = clients.find(c => c.id === "cl_ofimundo");
         if (globalClient && mountedRef.current) {
-          const clientServices = [srvFacturas, srvOficore, srvOfitec, srvSgc];
+          const clientServices = [srvFacturas, srvOficore, srvOfitec, srvSgc, srvDte];
           const hasError = clientServices.some(s => s && s.status === "error");
           const hasWarning = clientServices.some(s => s && s.status === "warning");
           

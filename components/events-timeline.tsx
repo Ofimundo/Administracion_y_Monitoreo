@@ -70,7 +70,7 @@ interface Filters {
 }
 
 // Lista de servicios que están próximamente
-const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
 
 // Mapeo de códigos de estado de OFITEC a sus descripciones
 const OFITEC_STATUS_MAP: Record<string, string> = {
@@ -294,6 +294,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     oficore: [],
     ofitec: [],
     sgc: [],
+    dte: [],
   });
   const [loading, setLoading] = useState(true);
 
@@ -317,6 +318,11 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   const generateMockSgcLogs = (): LogEntry[] => [
     { id: "mock_sg1", message: "Integración de FACTURA SGC", details: "Sistema Origen: SOFTLAND ERP · Canal: PICKING · Cantidad: 125", timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(), type: "success", estado: "Aprobado" },
     { id: "mock_sg2", message: "Integración de GUIA SGC", details: "Sistema Origen: SOFTLAND ERP · Canal: OD · Cantidad: 45", timestamp: new Date(Date.now() - 3600000 * 7).toISOString(), type: "warning", estado: "Pendiente" }
+  ];
+
+  const generateMockDteLogs = (): LogEntry[] => [
+    { id: "mock_dte1", message: "Ejecución de DTE exitosa", details: "ID Log: #6 · Softland y SII actualizados", timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_dte2", message: "Ejecución de DTE exitosa", details: "ID Log: #5 · Softland y SII actualizados", timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(), type: "success", estado: "Aprobado" }
   ];
 
   // Función para obtener el tipo de log
@@ -379,6 +385,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
         oficore: [],
         ofitec: [],
         sgc: [],
+        dte: [],
       };
 
       try {
@@ -505,6 +512,35 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           const data = await res.json();
           if (data.success && data.data) {
             newLogs.sgc = data.data.slice(0, 200).map((entry: any, index: number) => {
+              if (entry.tipo_de_documento === "PICKING") {
+                const obs = entry.observacion || "";
+                let type: "success" | "warning" | "error" | "info" = "info";
+                let estado = "Pendiente";
+                if (obs.includes("Finalizado")) {
+                  type = "success";
+                  estado = "Finalizado";
+                } else if (obs.includes("Pendiente")) {
+                  type = "warning";
+                  estado = "Pendiente";
+                } else if (obs.includes("En Proceso")) {
+                  type = "info";
+                  estado = "En Proceso";
+                } else if (obs.includes("Anulado")) {
+                  type = "error";
+                  estado = "Anulado";
+                }
+
+                return {
+                  id: `sgc_${index}_${index}`,
+                  message: `📦 Picking SGC`,
+                  details: `${obs} · Usuario: ${entry.SISTEMA_ORIGEN}`,
+                  timestamp: entry.fecha_documento,
+                  type,
+                  estado,
+                  isInfraestructura: false,
+                };
+              }
+
               const isInfra = isInfraestructuraError(entry.observacion || entry.motivo || "");
               return {
                 id: `sgc_${index}_${index}`,
@@ -521,6 +557,28 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           console.error("Error fetching SGC logs:", e);
         }
 
+        // 5. Fetch DTE
+        try {
+          const res = await fetch(`/api/dte/stats${queryParams}`);
+          const data = await res.json();
+          if (data.success && data.data) {
+            newLogs.dte = data.data.slice(0, 200).map((entry: any, index: number) => {
+              const isInfra = entry.Estado !== "EXITOSO";
+              return {
+                id: `dte_${entry.id_log || index}_${index}`,
+                message: isInfra ? `🔴 ERROR DE INFRAESTRUCTURA: Ejecución fallida de DTE` : `Ejecución de DTE exitosa`,
+                details: `ID Log: #${entry.id_log} · Fin: ${format(new Date(entry.fecha_fin_ejecucion), "dd/MM/yyyy HH:mm:ss")}`,
+                timestamp: entry.fecha_inicio_ejecucion,
+                type: isInfra ? "error" : "success",
+                estado: entry.Estado === "EXITOSO" ? "Aprobado" : "Rechazado",
+                isInfraestructura: isInfra,
+              };
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching DTE logs:", e);
+        }
+
         // Si todos los logs reales están vacíos, cargamos simulación
         const totalLogsCount = Object.values(newLogs).reduce((acc, arr) => acc + arr.length, 0);
         if (totalLogsCount === 0) {
@@ -528,6 +586,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           newLogs.oficore = generateMockOficoreLogs();
           newLogs.ofitec = generateMockOfitecLogs();
           newLogs.sgc = generateMockSgcLogs();
+          newLogs.dte = generateMockDteLogs();
         }
 
         setRealLogs(newLogs);

@@ -5,12 +5,18 @@ import { useState, useMemo, useEffect } from "react";
 import { Header } from "@/components/header";
 import { StatusIndicator } from "@/components/status-indicator";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import dynamic from "next/dynamic";
+
+const PickingDashboardCharts = dynamic(
+  () => import("@/components/picking-dashboard-charts").then((mod) => mod.PickingDashboardCharts),
+  { ssr: false }
+);
 import {
   Select,
   SelectContent,
@@ -43,6 +49,7 @@ import {
   LayoutDashboard,
   Activity,
   Eye,
+  AlertCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -51,7 +58,7 @@ import { ClientDashboard } from "@/components/client-dashboard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // Lista de servicios que están próximamente
-const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
 
 // Función para verificar si un servicio está próximo
 const isServiceComingSoon = (serviceId: string): boolean => {
@@ -226,6 +233,14 @@ export default function ServiceDetailPage() {
   const [liveClients, setLiveClients] = useState<Client[]>([]);
   const [dbMode, setDbMode] = useState<"simulation" | "real">("simulation");
   const [apiError, setApiError] = useState<string | null>(null);
+  
+  // Estados para Monitoreo de Picking SGC
+  const [pickingStats, setPickingStats] = useState<any>(null);
+  const [pickingLoading, setPickingLoading] = useState(false);
+  const [alertHours, setAlertHours] = useState(24);
+  const [pickingError, setPickingError] = useState<string | null>(null);
+  const [pickingPeriod, setPickingPeriod] = useState<"day" | "week" | "month">("day");
+  const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking">("docs");
 
   const serviceStatic = services.find((s) => s.id === params.id);
   const comingSoon = serviceStatic ? isServiceComingSoon(serviceStatic.id) : false;
@@ -236,7 +251,7 @@ export default function ServiceDetailPage() {
 
   const fetchLiveData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
     const serviceId = params.id as string;
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc"];
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte"];
     if (!activeServices.includes(serviceId)) return;
     
     try {
@@ -510,8 +525,24 @@ export default function ServiceDetailPage() {
       // ============================================================
       else if (serviceId === "sgc") {
         try {
-          const res = await fetch(`/api/sgc/stats${queryParams}`);
+          setPickingLoading(true);
+          setPickingError(null);
+          
+          const connector = queryParams ? "&" : "?";
+          const [res, pickingRes] = await Promise.all([
+            fetch(`/api/sgc/stats${queryParams}`),
+            fetch(`/api/sgc/picking-stats${queryParams}${connector}hours=${alertHours}`)
+          ]);
+          
           const data = await res.json();
+          const pData = await pickingRes.json();
+          
+          setPickingLoading(false);
+          if (pData.success) {
+            setPickingStats(pData);
+          } else {
+            setPickingError(pData.message || "⚠️ Error al obtener estadísticas de picking");
+          }
           
           if (res.status === 403 || !data.success) {
             if (data.isPermissionError) {
@@ -590,11 +621,109 @@ export default function ServiceDetailPage() {
             setHasStatsFilter(dateRange?.from !== undefined || dateRange?.to !== undefined);
           }
         } catch (e) {
+          setPickingLoading(false);
           console.error("Error fetching SGC data:", e);
           setRawData([]);
           setLiveClients([]);
           setServiceStatus("error");
           setApiError("❌ Error al conectar con la base de datos SGC");
+        }
+      }
+      // ============================================================
+      // DTE
+      // ============================================================
+      else if (serviceId === "dte") {
+        try {
+          const res = await fetch(`/api/dte/stats${queryParams}`);
+          const data = await res.json();
+          
+          if (data.success && data.data && Array.isArray(data.data)) {
+            const docs = data.data || [];
+            setRawData(docs);
+            setDbMode(data.mode || "real");
+            
+            const totalDocs = docs.length;
+            const exitosos = docs.filter((d: any) => d.Estado === "EXITOSO").length;
+            const fallidos = totalDocs - exitosos;
+            const latestDoc = docs[0];
+            
+            const errorPercentage = totalDocs > 0 ? Math.round((fallidos / totalDocs) * 100) : 0;
+            
+            // Status is error if the latest run failed, warning if errorPercentage > 20%, success otherwise
+            let status: "success" | "warning" | "error" = "success";
+            if (latestDoc) {
+              if (latestDoc.Estado !== "EXITOSO") {
+                status = "error";
+              } else if (errorPercentage > 20) {
+                status = "warning";
+              }
+            }
+            
+            setServiceStatus(status);
+            
+            // Calculate average duration in seconds
+            let totalDuration = 0;
+            let validDurationsCount = 0;
+            docs.forEach((d: any) => {
+              if (d.fecha_inicio_ejecucion && d.fecha_fin_ejecucion) {
+                const duration = (new Date(d.fecha_fin_ejecucion).getTime() - new Date(d.fecha_inicio_ejecucion).getTime()) / 1000;
+                if (duration >= 0) {
+                  totalDuration += duration;
+                  validDurationsCount++;
+                }
+              }
+            });
+            const avgDuration = validDurationsCount > 0 ? Math.round(totalDuration / validDurationsCount) : 0;
+            
+            setStatsData({
+              uptime: status === "error" ? "0%" : "100%",
+              lastActivity: latestDoc ? format(new Date(latestDoc.fecha_inicio_ejecucion), "dd/MM/yyyy HH:mm") : "No hay datos",
+              totalTransactions: totalDocs,
+              infrastructureErrors: fallidos,
+              infrastructureErrorPercentage: errorPercentage,
+              approvedCount: exitosos,
+              rejectedCount: fallidos,
+              manualCount: 0,
+              pendingCount: 0,
+              enProceso: avgDuration, // We'll use enProceso to store average duration in seconds
+              finalizado: exitosos,
+              anulado: 0,
+              incompleto: 0,
+              reAbierto: 0,
+              servTecnico: 0,
+              cancelado: 0,
+              sgcFacturas: 0,
+              sgcGuias: 0,
+              sgcNotasCredito: 0,
+              sgcNotasDebito: 0,
+              sgcOrigenSgc: 0,
+              sgcOrigenSoftland: 0,
+            });
+            
+            const singleClient: Client = {
+              id: "cl_ofimundo",
+              name: "Ofimundo S.A. (DTE)",
+              rut: "76.452.910-K",
+              email: "dte-support@ofimundo.cl",
+              phone: "+56 2 2840 9300",
+              errorPercentage: errorPercentage,
+              status: status as any,
+            };
+            setLiveClients([singleClient]);
+            setApiError(null);
+            setHasStatsFilter(dateRange?.from !== undefined || dateRange?.to !== undefined);
+          } else {
+            setRawData([]);
+            setLiveClients([]);
+            setServiceStatus("error");
+            setApiError(data.message || "⚠️ No se encontraron registros en la base de datos DTE");
+          }
+        } catch (e) {
+          console.error("Error fetching DTE data:", e);
+          setRawData([]);
+          setLiveClients([]);
+          setServiceStatus("error");
+          setApiError("❌ Error al conectar con la base de datos DTE");
         }
       }
     } catch (e: any) {
@@ -636,7 +765,7 @@ export default function ServiceDetailPage() {
   };
 
   useEffect(() => {
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc"];
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte"];
     if (serviceStatic && !comingSoon) {
       setServiceName(serviceStatic.name);
       setServiceDescription(serviceStatic.description);
@@ -846,12 +975,44 @@ export default function ServiceDetailPage() {
           {/* TAB - ESTADÍSTICAS */}
           <TabsContent value="stats">
             <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-medium flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-emerald-500" />
-                    {isTicketService ? "Estadísticas de Tickets" : isSgcService ? "Estadísticas de Documentos SGC" : "Estadísticas de Documentos"}
-                  </CardTitle>
+               <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <CardTitle className="text-lg font-medium flex items-center gap-2">
+                      <Activity className="h-5 w-5 text-emerald-500" />
+                      {isTicketService ? "Estadísticas de Tickets" : isSgcService ? (sgcSubTab === "docs" ? "Estadísticas de Documentos SGC" : "Monitoreo de Picking SGC") : "Estadísticas de Documentos"}
+                    </CardTitle>
+                    {isSgcService && (
+                      <div className="flex bg-muted p-0.5 rounded-lg border border-border/50 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSgcSubTab("docs")}
+                          className={cn(
+                            "h-7 text-xs px-3 font-medium transition-all",
+                            sgcSubTab === "docs" 
+                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                          )}
+                        >
+                          Documentos
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSgcSubTab("picking")}
+                          className={cn(
+                            "h-7 text-xs px-3 font-medium transition-all",
+                            sgcSubTab === "picking" 
+                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                          )}
+                        >
+                          Monitoreo de Picking
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     {hasStatsFilter && (
                       <Button 
@@ -1029,26 +1190,87 @@ export default function ServiceDetailPage() {
                     </div>
                   </div>
                 ) : isSgcService ? (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  sgcSubTab === "docs" ? (
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="bg-muted/30 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-blue-600">{statsData.sgcFacturas.toLocaleString()}</p>
+                        <p className="text-xs text-blue-600">🧾 Facturas</p>
+                      </div>
+                      <div className="bg-orange-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-orange-600">{statsData.sgcGuias.toLocaleString()}</p>
+                        <p className="text-xs text-orange-600">🚚 Guías</p>
+                      </div>
+                      <div className="bg-indigo-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-indigo-600">{statsData.sgcNotasCredito.toLocaleString()}</p>
+                        <p className="text-xs text-indigo-600">💳 Notas de Crédito</p>
+                      </div>
+                      <div className="bg-rose-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-rose-600">{statsData.sgcNotasDebito.toLocaleString()}</p>
+                        <p className="text-xs text-rose-600">📉 Notas de Débito</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {pickingLoading ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                          <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mb-2" />
+                          <p className="text-sm text-muted-foreground">Cargando estadísticas de picking en tiempo real...</p>
+                        </div>
+                      ) : pickingError ? (
+                        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-4">
+                          ⚠️ {pickingError}
+                        </div>
+                      ) : pickingStats ? (
+                        <>
+                          {/* 1. KPIs Cards */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="bg-muted/30 rounded-lg p-4 text-center border border-border/50">
+                              <p className="text-2xl font-bold text-foreground">{(pickingStats.kpis?.vol_24h || 0).toLocaleString()}</p>
+                              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-1">📦 Volumen (24h)</p>
+                            </div>
+                            <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-100">
+                              <p className="text-2xl font-bold text-blue-600">{(pickingStats.kpis?.vol_semana || 0).toLocaleString()}</p>
+                              <p className="text-[10px] uppercase font-bold text-blue-600 tracking-wider mt-1">🗓️ Volumen Semanal</p>
+                            </div>
+                            <div className="bg-indigo-50 rounded-lg p-4 text-center border border-indigo-100">
+                              <p className="text-2xl font-bold text-indigo-600">{(pickingStats.kpis?.vol_mes || 0).toLocaleString()}</p>
+                              <p className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider mt-1">📊 Volumen Mensual</p>
+                            </div>
+                          </div>
+
+                          {/* 2. Picking Charts */}
+                          <PickingDashboardCharts pickingStats={pickingStats} />
+                        </>
+                      ) : (
+                        <div className="flex justify-center py-10 text-xs text-muted-foreground">
+                          No hay estadísticas de picking disponibles.
+                        </div>
+                      )}
+                    </div>
+                  )
+                ) : params.id === "dte" ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-muted/30 rounded-lg p-4 text-center">
                       <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
+                      <p className="text-xs text-muted-foreground">🤖 Ejecuciones Totales</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600">✅ Ejecuciones Exitosas</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-red-500">{statsData.rejectedCount.toLocaleString()}</p>
+                      <p className="text-xs text-red-500">❌ Ejecuciones Fallidas</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-blue-600">{statsData.sgcFacturas.toLocaleString()}</p>
-                      <p className="text-xs text-blue-600">🧾 Facturas</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-orange-600">{statsData.sgcGuias.toLocaleString()}</p>
-                      <p className="text-xs text-orange-600">🚚 Guías</p>
-                    </div>
-                    <div className="bg-indigo-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-indigo-600">{statsData.sgcNotasCredito.toLocaleString()}</p>
-                      <p className="text-xs text-indigo-600">💳 Notas de Crédito</p>
-                    </div>
-                    <div className="bg-rose-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-rose-600">{statsData.sgcNotasDebito.toLocaleString()}</p>
-                      <p className="text-xs text-rose-600">📉 Notas de Débito</p>
+                      <p className="text-2xl font-bold text-blue-500">
+                        {statsData.enProceso > 0 ? `${statsData.enProceso}s` : "N/A"}
+                      </p>
+                      <p className="text-xs text-blue-500">⏱️ Duración Promedio</p>
                     </div>
                   </div>
                 ) : (
@@ -1080,20 +1302,24 @@ export default function ServiceDetailPage() {
                   </div>
                 )}
                 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
-                    <span className="text-sm text-muted-foreground">Tasa error infraestructura</span>
-                    <span className="font-bold text-red-500">{getDisplayPercentage()}%</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
-                    <span className="text-sm text-muted-foreground">📊 Uptime</span>
-                    <span className="font-bold text-emerald-600">{statsData.uptime}</span>
-                  </div>
-                </div>
-                <div className="mt-2 flex justify-between items-center p-3 bg-muted/20 rounded-lg">
-                  <span className="text-sm text-muted-foreground">🕐 Última actividad</span>
-                  <span className="font-semibold text-sm">{statsData.lastActivity}</span>
-                </div>
+                {(!isSgcService || sgcSubTab === "docs") && (
+                  <>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                        <span className="text-sm text-muted-foreground">Tasa error infraestructura</span>
+                        <span className="font-bold text-red-500">{getDisplayPercentage()}%</span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                        <span className="text-sm text-muted-foreground">📊 Uptime</span>
+                        <span className="font-bold text-emerald-600">{statsData.uptime}</span>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex justify-between items-center p-3 bg-muted/20 rounded-lg">
+                      <span className="text-sm text-muted-foreground">🕐 Última actividad</span>
+                      <span className="font-semibold text-sm">{statsData.lastActivity}</span>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

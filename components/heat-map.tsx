@@ -83,37 +83,32 @@ const ERRORES_INFRAESTRUCTURA = [
 ];
 
 // Lista de servicios que están próximamente
-const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
 
 // Función para verificar si un servicio está próximo
 const isServiceComingSoon = (serviceId: string): boolean => {
   return COMING_SOON_SERVICES.includes(serviceId);
 };
 
-// Función para obtener datos reales de facturas
-const fetchRealData = async () => {
+// Función para obtener datos reales de todos los servicios activos
+const fetchAllRealData = async () => {
+  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null };
   try {
-    const res = await fetch("/api/facturas/bitacora?estado=todos");
-    const data = await res.json();
-    if (data.success && data.data) {
-      const totalDocs = data.data.length;
-      const errorDocs = data.data.filter((e: any) => {
-        const motivo = e.motivo || "";
-        const motivoLower = motivo.toLowerCase();
-        const hasTextError = ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term.toLowerCase()));
-        if (hasTextError) return true;
-        return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
-      }).length;
-      const errPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
-      // ✅ Si el error es 100%, marcarlo como "error"
-      const status = errPercent === 100 ? "error" : (errPercent > 40 ? "error" : errPercent > 0 ? "warning" : "success");
-      return { errorPercentage: errPercent, status, totalDocs, errorDocs };
-    }
-    return null;
+    const [factRes, oficoreRes, ofitecRes, sgcRes] = await Promise.all([
+      fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
+      fetch("/api/oficore/stats").then(r => r.json()).catch(() => null),
+      fetch("/api/ofitec/stats").then(r => r.json()).catch(() => null),
+      fetch("/api/sgc/stats").then(r => r.json()).catch(() => null),
+    ]);
+
+    if (factRes && factRes.success) results.facturas = factRes;
+    if (oficoreRes && oficoreRes.success) results.oficore = oficoreRes;
+    if (ofitecRes && ofitecRes.success) results.ofitec = ofitecRes;
+    if (sgcRes && sgcRes.success) results.sgc = sgcRes;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    return null;
+    console.error("Error fetching all services data for HeatMap:", error);
   }
+  return results;
 };
 
 // Función para obtener datos completos de un cliente por nombre
@@ -185,7 +180,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     const loadServices = async () => {
       setLoading(true);
       try {
-        const realData = await fetchRealData();
+        const allData = await fetchAllRealData();
         
         const updatedServices = importedServices.map(service => {
           const enrichedClients = service.clients.map(client => {
@@ -198,24 +193,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             };
           });
 
-          if (service.id === "facturas" && realData) {
-            return {
-              ...service,
-              errorPercentage: realData.errorPercentage,
-              status: realData.status as any,
-              clients: enrichedClients.map(client => ({
-                ...client,
-                errorPercentage: realData.errorPercentage,
-                status: realData.status as any,
-              })),
-              metrics: {
-                totalRequests: realData.totalDocs,
-                errorRate: realData.errorPercentage,
-                responseTime: 320,
-                uptime: realData.errorPercentage === 100 ? 0 : 99.99,
-              }
-            };
-          }
           if (isServiceComingSoon(service.id) || service.isComingSoon) {
             return {
               ...service,
@@ -231,14 +208,68 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               }
             };
           }
+
+          let errorPercentage = 0;
+          let status: "success" | "warning" | "error" = "success";
+          let totalRequests = 0;
+          let errorDocs = 0;
+
+          if (service.id === "facturas" && allData.facturas?.data) {
+            const data = allData.facturas.data;
+            totalRequests = data.length;
+            errorDocs = data.filter((e: any) => {
+              const motivo = e.motivo || "";
+              const motivoLower = motivo.toLowerCase();
+              const hasTextError = ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term.toLowerCase()));
+              if (hasTextError) return true;
+              return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
+            }).length;
+            errorPercentage = totalRequests > 0 ? Math.round((errorDocs / totalRequests) * 100) : 0;
+            status = errorPercentage === 100 ? "error" : (errorPercentage > 40 ? "error" : errorPercentage > 0 ? "warning" : "success");
+          } 
+          else if (service.id === "oficore" && allData.oficore?.detalles) {
+            const details = allData.oficore.detalles;
+            totalRequests = details.length;
+            errorDocs = 0;
+            errorPercentage = 0;
+            status = "success";
+          }
+          else if (service.id === "ofitec" && allData.ofitec?.detalles) {
+            const details = allData.ofitec.detalles;
+            const ingresadas = details.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
+            totalRequests = ingresadas;
+            errorDocs = 0;
+            errorPercentage = 0;
+            status = "success";
+          }
+          else if (service.id === "sgc" && allData.sgc?.data) {
+            const docs = allData.sgc.data;
+            totalRequests = docs.length;
+            errorDocs = 0;
+            errorPercentage = 0;
+            status = "success";
+          }
+          else {
+            // Fallback en caso de fallo de API
+            errorPercentage = service.errorPercentage;
+            status = service.status as any;
+            totalRequests = Math.floor(Math.random() * 500) + 100;
+          }
+
           return {
             ...service,
-            clients: enrichedClients,
+            errorPercentage,
+            status,
+            clients: enrichedClients.map(client => ({
+              ...client,
+              errorPercentage,
+              status,
+            })),
             metrics: {
-              totalRequests: Math.floor(Math.random() * 10000) + 1000,
-              errorRate: service.errorPercentage,
+              totalRequests,
+              errorRate: errorPercentage,
               responseTime: Math.floor(Math.random() * 200) + 50,
-              uptime: 99.9,
+              uptime: errorPercentage === 100 ? 0 : 100 - errorPercentage,
             }
           };
         });

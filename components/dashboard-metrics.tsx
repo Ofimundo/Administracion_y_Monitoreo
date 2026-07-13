@@ -239,6 +239,12 @@ export function DashboardMetrics({
   const [detalleAlertas, setDetalleAlertas] = useState<any[]>([]);
   const [detalleCambios, setDetalleCambios] = useState<any[]>([]);
   const [detalleTickets, setDetalleTickets] = useState<any[]>([]);
+  const [incidentesSeveridad, setIncidentesSeveridad] = useState<Array<{ name: string; value: number; color: string }>>([
+    { name: "Crítico", value: 0, color: "#ef4444" },
+    { name: "Alto", value: 0, color: "#f97316" },
+    { name: "Medio", value: 0, color: "#eab308" },
+    { name: "Bajo", value: 0, color: "#3b82f6" }
+  ]);
   
   const [showDisponibilidadModal, setShowDisponibilidadModal] = useState(false);
   const [showIncidentesModal, setShowIncidentesModal] = useState(false);
@@ -411,26 +417,41 @@ export function DashboardMetrics({
   };
 
   const calculateAllMetrics = (servicesData: any, facturasData: any[]) => {
-    const facturasTotal = facturasData.length;
-    const facturasAprobadas = facturasData.filter(f => f.estado === "Aprobado").length;
-    const facturasRechazadas = facturasData.filter(f => f.estado === "Rechazado").length;
-    const facturasManuales = facturasData.filter(f => f.estado === "Manual").length;
-    const facturasPendientes = facturasData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
-    const facturasErrorInfra = facturasData.filter(f => isInfraestructuraError(f.motivo)).length;
+    const isFiltered = filters.dateRange.from !== undefined;
+    const limitDate = new Date("2026-07-09T00:00:00");
+    limitDate.setDate(limitDate.getDate() - 14);
+
+    const filterRecent = (d: any, dateField: string) => {
+      if (isFiltered) return true;
+      if (!d[dateField]) return false;
+      return new Date(d[dateField]) >= limitDate;
+    };
+
+    const facturasDataFiltered = facturasData.filter((f: any) => filterRecent(f, "fecha_proceso"));
+    const oficoreDetallesFiltered = (servicesData.oficore?.detalles || []).filter((d: any) => filterRecent(d, "fecha_detalle"));
+    const ofitecDetallesFiltered = (servicesData.ofitec?.detalles || []).filter((d: any) => filterRecent(d, "LLA_FEC_LLAMADA"));
+    const sgcDataFiltered = (servicesData.sgc?.data || []).filter((d: any) => filterRecent(d, "fecha_documento"));
+
+    const facturasTotal = facturasDataFiltered.length;
+    const facturasAprobadas = facturasDataFiltered.filter(f => f.estado === "Aprobado").length;
+    const facturasRechazadas = facturasDataFiltered.filter(f => f.estado === "Rechazado").length;
+    const facturasManuales = facturasDataFiltered.filter(f => f.estado === "Manual").length;
+    const facturasPendientes = facturasDataFiltered.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
+    const facturasErrorInfra = facturasDataFiltered.filter(f => isInfraestructuraError(f.motivo)).length;
     
-    const oficoreTotal = servicesData.oficore?.detalles?.length || 0;
-    const oficoreResueltas = servicesData.oficore?.detalles?.filter((d: any) => d.id_accion === 5).length || 0;
+    const oficoreTotal = oficoreDetallesFiltered.length;
+    const oficoreResueltas = oficoreDetallesFiltered.filter((d: any) => d.id_accion === 5).length || 0;
     const oficoreNoResueltas = oficoreTotal - oficoreResueltas;
     
-    const ofitecTotal = servicesData.ofitec?.detalles?.length || 0;
+    const ofitecTotal = ofitecDetallesFiltered.length;
     const resolvedStatuses = ['4','24','6','8','9','15','16','7'];
-    const ofitecResueltas = servicesData.ofitec?.detalles?.filter((d: any) => resolvedStatuses.includes(d.LLA_ESTADO)).length || 0;
-    const ofitecIngresadas = servicesData.ofitec?.detalles?.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
+    const ofitecResueltas = ofitecDetallesFiltered.filter((d: any) => resolvedStatuses.includes(d.LLA_ESTADO)).length || 0;
+    const ofitecIngresadas = ofitecDetallesFiltered.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
     const ofitecPendientes = ofitecIngresadas - ofitecResueltas;
     
-    const sgcTotal = servicesData.sgc?.data?.length || 0;
-    const sgcPicking = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "picking").length || 0;
-    const sgcOd = servicesData.sgc?.data?.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "od").length || 0;
+    const sgcTotal = sgcDataFiltered.length;
+    const sgcPicking = sgcDataFiltered.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "picking").length || 0;
+    const sgcOd = sgcDataFiltered.filter((d: any) => d.tipo_de_venta?.toLowerCase() === "od").length || 0;
     const sgcOtros = sgcTotal - sgcPicking - sgcOd;
 
     const totalDocumentos = facturasTotal + oficoreTotal + ofitecTotal + sgcTotal;
@@ -499,6 +520,18 @@ export function DashboardMetrics({
     
     setDetalleAlertas(alertasCriticas);
 
+    const criticos = facturasErrorInfra;
+    const altos = facturasRechazadas + oficoreNoResueltas;
+    const medios = facturasManuales + ofitecPendientes;
+    const bajos = facturasPendientes + sgcOtros;
+
+    setIncidentesSeveridad([
+      { name: "Crítico", value: criticos, color: "#ef4444" },
+      { name: "Alto", value: altos, color: "#f97316" },
+      { name: "Medio", value: medios, color: "#eab308" },
+      { name: "Bajo", value: bajos, color: "#3b82f6" }
+    ]);
+
     setDetalleCambios([
       { id: "facturas", nombre: "Facturas Aprobadas", valor: facturasAprobadas, total: facturasTotal, porcentaje: facturasTotal > 0 ? Math.round((facturasAprobadas / facturasTotal) * 100) : 0, estado: "Exitoso" },
       { id: "oficore", nombre: "Incidencias Resueltas", valor: oficoreResueltas, total: oficoreTotal, porcentaje: oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 0, estado: "Exitoso" },
@@ -508,7 +541,7 @@ export function DashboardMetrics({
 
     const ticketsPorDia: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
     
-    facturasData.forEach((f: any) => {
+    facturasDataFiltered.forEach((f: any) => {
       const fecha = f.fecha_proceso?.split('T')[0];
       if (fecha) {
         if (!ticketsPorDia[fecha]) {
@@ -527,7 +560,7 @@ export function DashboardMetrics({
       }
     });
 
-    (servicesData.oficore?.detalles || []).forEach((d: any) => {
+    oficoreDetallesFiltered.forEach((d: any) => {
       const fecha = d.fecha_detalle?.split('T')[0];
       if (fecha) {
         if (!ticketsPorDia[fecha]) {
@@ -546,7 +579,7 @@ export function DashboardMetrics({
       }
     });
 
-    (servicesData.ofitec?.detalles || []).forEach((d: any) => {
+    ofitecDetallesFiltered.forEach((d: any) => {
       const fecha = d.LLA_FEC_LLAMADA?.split('T')[0];
       if (fecha) {
         if (!ticketsPorDia[fecha]) {
@@ -568,7 +601,7 @@ export function DashboardMetrics({
       }
     });
 
-    (servicesData.sgc?.data || []).forEach((d: any) => {
+    sgcDataFiltered.forEach((d: any) => {
       const fecha = d.fecha_documento?.split('T')[0];
       if (fecha) {
         if (!ticketsPorDia[fecha]) {
@@ -1264,40 +1297,31 @@ export function DashboardMetrics({
   const totalClientesActivos = clientesUnicos.length;
   const totalServiciosActivos = services.filter(s => !s.isComingSoon).length;
   
-  const totalDocs = realInvoiceData.length;
-  const errorInfraDocs = realInvoiceData.filter(f => isInfraestructuraError(f.motivo)).length;
-  const disponibilidad = totalDocs > 0 ? ((totalDocs - errorInfraDocs) / totalDocs) * 100 : 100;
+  const disponibilidad = useMemo(() => {
+    const activeServices = services.filter(s => !s.isComingSoon);
+    if (activeServices.length === 0) return 100;
+    const sum = activeServices.reduce((acc, s) => acc + getServiceAvailability(s.id), 0);
+    return sum / activeServices.length;
+  }, [services, operacionStats.disponibilidadGlobal]);
 
   // ✅ INFRAESTRUCTURA: Calcular promedio de Servidores Core y Bases de Datos (sin Enlaces de Red)
   const infraestructuraZabbix = (infraStats.servidoresCore + infraStats.database) / 2;
 
   const ticketsPorDia = useMemo(() => {
-    const tickets: { [key: string]: { ingresados: number; asignados: number; resueltos: number; cerrados: number } } = {};
-    
-    realInvoiceData.forEach((f: any) => {
-      const fecha = f.fecha_proceso?.split('T')[0];
-      if (fecha) {
-        if (!tickets[fecha]) {
-          tickets[fecha] = { ingresados: 0, asignados: 0, resueltos: 0, cerrados: 0 };
-        }
-        tickets[fecha].ingresados++;
-        if (f.estado === "Aprobado" || f.estado === "Rechazado") {
-          tickets[fecha].resueltos++;
-        }
-        if (f.estado === "Manual") {
-          tickets[fecha].asignados++;
-        }
-        if (f.estado === "Rechazado") {
-          tickets[fecha].cerrados++;
+    return detalleTickets.map(t => {
+      let formattedDate = t.fecha;
+      if (t.fecha && t.fecha.includes("-")) {
+        const parts = t.fecha.split("-");
+        if (parts.length === 3) {
+          formattedDate = `${parts[2]}/${parts[1]}`;
         }
       }
-    });
-
-    return Object.keys(tickets).sort().map(fecha => ({
-      fecha: format(new Date(fecha), "dd/MM"),
-      ...tickets[fecha]
-    })).slice(-14);
-  }, [realInvoiceData]);
+      return {
+        ...t,
+        fecha: formattedDate
+      };
+    }).slice(-14);
+  }, [detalleTickets]);
 
   if (loading) {
     return (
@@ -1455,7 +1479,6 @@ export function DashboardMetrics({
                 <Gauge className="h-4 w-4 text-emerald-500" />
               </div>
               <p className="text-xl font-black text-slate-800 mt-1">{disponibilidad.toFixed(2)}%</p>
-              <span className="text-[8px] text-slate-400 block mt-1">SLA General</span>
             </div>
 
             {/* ✅ INFRAESTRUCTURA - PROMEDIO DE SERVIDORES CORE Y BASES DE DATOS */}
@@ -1628,33 +1651,37 @@ export function DashboardMetrics({
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={[
-                            { name: "Crítico", value: 3, color: "#ef4444" },
-                            { name: "Alto", value: 8, color: "#f97316" },
-                            { name: "Medio", value: 15, color: "#f59e0b" },
-                            { name: "Bajo", value: 27, color: "#3b82f6" }
-                          ]}
+                          data={incidentesSeveridad}
                           cx="50%"
                           cy="50%"
                           innerRadius={25}
                           outerRadius={40}
                           dataKey="value"
                         >
-                          {[
-                            { color: "#ef4444" },
-                            { color: "#f97316" },
-                            { color: "#f59e0b" },
-                            { color: "#3b82f6" }
-                          ].map((cell, idx) => <Cell key={idx} fill={cell.color} />)}
+                          {incidentesSeveridad.map((cell, idx) => (
+                            <Cell key={`cell-${idx}`} fill={cell.color} />
+                          ))}
                         </Pie>
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
                   <div className="text-[8px] text-slate-600 space-y-1 pr-2 font-medium">
-                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-red-500 block" /> Crítico: 3</div>
-                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-orange-500 block" /> Alto: 8</div>
-                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-500 block" /> Medio: 15</div>
-                    <div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-blue-500 block" /> Bajo: 27</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 block" /> 
+                      Crítico: {incidentesSeveridad.find(i => i.name === "Crítico")?.value || 0}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500 block" /> 
+                      Alto: {incidentesSeveridad.find(i => i.name === "Alto")?.value || 0}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 block" /> 
+                      Medio: {incidentesSeveridad.find(i => i.name === "Medio")?.value || 0}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500 block" /> 
+                      Bajo: {incidentesSeveridad.find(i => i.name === "Bajo")?.value || 0}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2072,7 +2099,7 @@ export function DashboardMetrics({
       </Dialog>
 
       <Dialog open={showTicketsModal} onOpenChange={setShowTicketsModal}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <Ticket className="h-5 w-5 text-amber-500" />
@@ -2089,10 +2116,10 @@ export function DashboardMetrics({
                 <p>No hay tickets registrados</p>
               </div>
             ) : (
-              <div className="w-full h-[300px]">
+              <div className="w-full h-[450px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={ticketsPorDia}>
-                    <XAxis dataKey="fecha" fontSize={10} />
+                  <BarChart data={ticketsPorDia} margin={{ bottom: 20 }}>
+                    <XAxis dataKey="fecha" fontSize={10} interval={0} angle={-45} textAnchor="end" height={50} />
                     <YAxis fontSize={10} />
                     <Tooltip 
                       contentStyle={{ fontSize: '11px', padding: '8px 12px' }}

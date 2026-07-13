@@ -78,7 +78,7 @@ interface ClientDashboardProps {
 }
 
 // Lista de servicios que están próximamente
-const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
 
 // Mapeo de códigos de estado de OFITEC a sus descripciones
 const OFITEC_STATUS_MAP: Record<string, string> = {
@@ -174,6 +174,7 @@ const SERVICE_API_MAP: Record<string, string> = {
   "oficore": "/api/oficore/stats",
   "ofitec": "/api/ofitec/stats",
   "sgc": "/api/sgc/stats",
+  "dte": "/api/dte/stats",
 };
 
 // Generar datos de muestra REALISTAS para cada servicio
@@ -190,6 +191,12 @@ const generateRealisticSampleData = (serviceId: string, count: number = 876) => 
         { estado: "Rechazado", porcentaje: 0.04 },
         { estado: "Manual", porcentaje: 0.21 },
         { estado: "Pendiente", porcentaje: 0.01 },
+      ];
+      break;
+    case "dte":
+      distribution = [
+        { estado: "Aprobado", porcentaje: 0.95 },
+        { estado: "Rechazado", porcentaje: 0.05 },
       ];
       break;
     case "ofitec":
@@ -379,11 +386,13 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
               rawData = responseData.detalles || [];
             } else if (selectedServiceId === "sgc") {
               rawData = responseData.data || [];
+            } else if (selectedServiceId === "dte") {
+              rawData = responseData.data || [];
             }
             
             // Normalizar a formato unificado
             const normalizedData = rawData.map((item: any, index: number) => {
-              const fecha = item.fecha_proceso || item.fecha_detalle || item.LLA_FEC_LLAMADA || item.fecha_documento || new Date().toISOString();
+              const fecha = item.fecha_proceso || item.fecha_detalle || item.LLA_FEC_LLAMADA || item.fecha_documento || item.fecha_inicio_ejecucion || new Date().toISOString();
               let estado = item.estado;
               
               if (selectedServiceId === "oficore") {
@@ -413,18 +422,20 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
                 } else {
                   estado = "Pendiente";
                 }
+              } else if (selectedServiceId === "dte") {
+                estado = item.Estado === "EXITOSO" ? "Aprobado" : "Rechazado";
               }
               
               return {
                 ...item,
-                id_proceso: item.id_proceso || item.id_incidencia || item.LLA_CORRELATIVO || index + 1,
+                id_proceso: item.id_proceso || item.id_incidencia || item.LLA_CORRELATIVO || item.id_log || index + 1,
                 fecha_proceso: fecha,
                 estado: estado || "Pendiente",
-                tipo_documento: item.tipo_documento || item.tipo_de_documento || item.id_accion || item.LLA_CORRELATIVO || "N/A",
-                folio_documento: item.folio_documento || item.id_incidencia || item.LLA_CORRELATIVO || item.cantidad || index + 1,
-                razon_social: item.razon_social || item.contacto_nombre || item.SISTEMA_ORIGEN || "N/A",
-                rut_proveedor: item.rut_proveedor || item.codigo_cliente || "N/A",
-                motivo: item.motivo || item.estado_descripcion || (item.LLA_ESTADO_DESC ? `Estado: ${item.LLA_ESTADO_DESC}` : (item.LLA_ESTADO ? `Estado: ${OFITEC_STATUS_MAP[item.LLA_ESTADO.toString().trim()] || item.LLA_ESTADO}` : null)) || (item.tipo_de_venta ? `Venta: ${item.tipo_de_venta}` : null) || "",
+                tipo_documento: item.tipo_documento || item.tipo_de_documento || item.id_accion || item.LLA_CORRELATIVO || (selectedServiceId === "dte" ? "Ejecución RPA" : "N/A"),
+                folio_documento: item.folio_documento || item.id_incidencia || item.LLA_CORRELATIVO || item.cantidad || item.id_log || index + 1,
+                razon_social: item.razon_social || item.contacto_nombre || item.SISTEMA_ORIGEN || (selectedServiceId === "dte" ? "Servicio DTE" : "N/A"),
+                rut_proveedor: item.rut_proveedor || item.codigo_cliente || (selectedServiceId === "dte" ? "BOT DTE" : "N/A"),
+                motivo: item.motivo || item.estado_descripcion || (item.LLA_ESTADO_DESC ? `Estado: ${item.LLA_ESTADO_DESC}` : (item.LLA_ESTADO ? `Estado: ${OFITEC_STATUS_MAP[item.LLA_ESTADO.toString().trim()] || item.LLA_ESTADO}` : null)) || (item.tipo_de_venta ? `Venta: ${item.tipo_de_venta}` : null) || (selectedServiceId === "dte" ? `Duración: ${Math.round((new Date(item.fecha_fin_ejecucion).getTime() - new Date(item.fecha_inicio_ejecucion).getTime()) / 1000)}s` : "") || "",
               };
             });
             

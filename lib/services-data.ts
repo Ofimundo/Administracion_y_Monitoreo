@@ -47,7 +47,7 @@ export interface MetricDataPoint {
 
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
-  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc"] },
+  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte"] },
   { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
   { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: [] },
   { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: [] },
@@ -66,7 +66,6 @@ const COMING_SOON_SERVICES = [
   "saldos",
   "finiquitos", 
   "cuentas",
-  "dte",
   "contabilizacion",
   "notas-credito"
 ];
@@ -121,12 +120,14 @@ const baseServices: Service[] = [
   {
     id: "dte",
     name: "DTE",
-    description: "🚀 Próximamente - Sistema de Documentos Tributarios Electrónicos que gestiona la emisión, recepción y almacenamiento de facturas, boletas y notas.",
+    description: "Sistema de Documentos Tributarios Electrónicos (DTE) que monitorea las ejecuciones del bot de facturas, boletas y notas de crédito en SII y Softland.",
     errorPercentage: 0,
     status: "success",
-    clients: [],
+    clients: [
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+    ],
     logs: [],
-    isComingSoon: true,
+    isComingSoon: false,
   },
   {
     id: "contabilizacion",

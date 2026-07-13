@@ -65,7 +65,7 @@ interface Filters {
 }
 
 // Lista de servicios que están próximamente
-const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "dte", "contabilizacion", "notas-credito"];
+const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
 
 // ✅ SOLO ERRORES DE INFRAESTRUCTURA REALES
 const ERRORES_INFRAESTRUCTURA = [
