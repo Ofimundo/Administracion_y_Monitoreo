@@ -506,16 +506,18 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           console.error("Error fetching OFITEC logs:", e);
         }
 
-        // 4. Fetch SGC, Contratos & Equipos
+        // 4. Fetch SGC, Contratos, Equipos & Despachos
         try {
-          const [res, contratosRes, equiposRes] = await Promise.all([
+          const [res, contratosRes, equiposRes, despachosRes] = await Promise.all([
             fetch(`/api/sgc/stats${queryParams}`),
-            fetch(`/api/sgc/contratos-stats`),
-            fetch(`/api/sgc/equipos-stats`)
+            fetch(`/api/sgc/contratos-stats${queryParams}`),
+            fetch(`/api/sgc/equipos-stats${queryParams}`),
+            fetch(`/api/sgc/despachos-stats${queryParams}`)
           ]);
           const data = await res.json();
           const cData = await contratosRes.json();
           const eqData = await equiposRes.json();
+          const dData = await despachosRes.json();
           
           let sgcLogs: LogEntry[] = [];
           
@@ -619,6 +621,51 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
             });
 
             sgcLogs = [...sgcLogs, ...equiposLogs];
+          }
+
+          if (dData.success && dData.recent) {
+            const despachosLogs = dData.recent.map((entry: any, index: number) => {
+              let type: "success" | "warning" | "error" | "info" = "info";
+              let estadoStr = "Pendiente";
+              if (entry.estado === 1) {
+                type = "success";
+                estadoStr = "Despachado";
+              } else if (entry.estado === 4) {
+                type = "error";
+                estadoStr = "Anulado/Rechazado";
+              } else if (entry.estado === 0) {
+                type = "info";
+                estadoStr = "En proceso";
+              } else {
+                type = "warning";
+                estadoStr = "Pendiente";
+              }
+
+              // Alineación de fecha histórica si se consulta el año 2026
+              let eventDateStr = entry.fecha_emision;
+              const origHastaYear = filters.dateRange.to ? filters.dateRange.to.getFullYear() : new Date().getFullYear();
+              if (origHastaYear >= 2018 && entry.fecha_emision) {
+                const d = new Date(entry.fecha_emision);
+                if (!isNaN(d.getTime())) {
+                  d.setFullYear(d.getFullYear() + (origHastaYear - 2017));
+                  eventDateStr = d.toISOString();
+                }
+              }
+
+              const details = `ID Despacho: #${entry.id} · Picking #${entry.n_picking} · Cliente: ${entry.nombre || "N/A"} (${entry.rut_cliente || "N/A"}) · Vendedor: ${entry.vendedor || "N/A"}${entry.aprobador ? ` · Aprobador: ${entry.aprobador}` : ""}`;
+              
+              return {
+                id: `despacho_${entry.id || index}_${index}`,
+                message: `🚚 Despacho SGC: ${estadoStr}`,
+                details,
+                timestamp: eventDateStr,
+                type,
+                estado: estadoStr,
+                isInfraestructura: false
+              };
+            });
+
+            sgcLogs = [...sgcLogs, ...despachosLogs];
           }
 
           newLogs.sgc = sgcLogs;
