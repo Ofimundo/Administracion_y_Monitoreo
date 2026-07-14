@@ -506,12 +506,21 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           console.error("Error fetching OFITEC logs:", e);
         }
 
-        // 4. Fetch SGC
+        // 4. Fetch SGC, Contratos & Equipos
         try {
-          const res = await fetch(`/api/sgc/stats${queryParams}`);
+          const [res, contratosRes, equiposRes] = await Promise.all([
+            fetch(`/api/sgc/stats${queryParams}`),
+            fetch(`/api/sgc/contratos-stats`),
+            fetch(`/api/sgc/equipos-stats`)
+          ]);
           const data = await res.json();
+          const cData = await contratosRes.json();
+          const eqData = await equiposRes.json();
+          
+          let sgcLogs: LogEntry[] = [];
+          
           if (data.success && data.data) {
-            newLogs.sgc = data.data.slice(0, 200).map((entry: any, index: number) => {
+            sgcLogs = data.data.slice(0, 100).map((entry: any, index: number) => {
               if (entry.tipo_de_documento === "PICKING") {
                 const obs = entry.observacion || "";
                 let type: "success" | "warning" | "error" | "info" = "info";
@@ -553,6 +562,66 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               };
             });
           }
+
+          if (cData.success && cData.recentContracts) {
+            const formattedCLP = (val: number) => {
+              return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(val);
+            };
+
+            const contratosLogs = cData.recentContracts.map((entry: any, index: number) => {
+              let monSymbol = "CLP";
+              let valClp = entry.valor || 0;
+              if (entry.moneda?.toString().trim() === "2") {
+                monSymbol = "USD";
+                valClp = (entry.valor || 0) * (entry.tipo_cambio || 1);
+              } else if (entry.moneda?.toString().trim() === "5") {
+                monSymbol = "UF";
+                valClp = (entry.valor || 0) * (entry.tipo_cambio || 1);
+              }
+
+              const details = `Folio #${entry.folio} · RUT Cliente: ${entry.rut_cliente || "N/A"} · Valor: ${entry.valor} ${monSymbol} (${formattedCLP(valClp)}) · Responsable: ${entry.responsable || "N/A"}`;
+              
+              const isApproved = entry.estado_comercial?.toString().trim() === "AP";
+              const isVigente = entry.estado_servicio?.toString().trim() === "VIGENTE";
+
+              return {
+                id: `contrato_${entry.folio || index}_${index}`,
+                message: `💼 Contrato SGC: ${isVigente ? "VIGENTE" : "INACTIVO"} (${isApproved ? "Aprobado" : "Pendiente"})`,
+                details,
+                timestamp: entry.fecha_ingreso,
+                type: isVigente ? "success" : "info",
+                estado: isApproved ? "Aprobado" : "Pendiente",
+                isInfraestructura: false
+              };
+            });
+
+            sgcLogs = [...sgcLogs, ...contratosLogs];
+          }
+
+          if (eqData.success && eqData.recentEquipos) {
+            const formattedCLP = (val: number) => {
+              return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(val);
+            };
+
+            const equiposLogs = eqData.recentEquipos.map((entry: any, index: number) => {
+              const details = `Serie: ${entry.serie} · Contrato: ${entry.folio_contrato || "N/A"} · Ubicación: ${entry.ubicacion?.trim()} (${entry.comuna}) · Cargo Fijo: ${formattedCLP(entry.cargo_fijo)}`;
+              const isHabilitado = entry.estado === 1;
+
+              return {
+                id: `equipo_${entry.serie}_${index}`,
+                message: `🖨️ Equipo Habilitado SGC: ${entry.modelo}`,
+                details,
+                timestamp: entry.fecha_habilitacion,
+                type: "info",
+                estado: isHabilitado ? "Habilitado" : "Retirado",
+                isInfraestructura: false
+              };
+            });
+
+            sgcLogs = [...sgcLogs, ...equiposLogs];
+          }
+
+          newLogs.sgc = sgcLogs;
         } catch (e) {
           console.error("Error fetching SGC logs:", e);
         }

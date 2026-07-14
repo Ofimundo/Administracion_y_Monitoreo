@@ -67,6 +67,7 @@ import {
   LayoutDashboard,
   Clock,
   FileSpreadsheet,
+  Printer,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -92,19 +93,23 @@ const isServiceComingSoon = (serviceId: string): boolean => {
 
 // Función para obtener datos reales de todos los servicios activos
 const fetchAllRealData = async () => {
-  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null };
+  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null };
   try {
-    const [factRes, oficoreRes, ofitecRes, sgcRes] = await Promise.all([
+    const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes] = await Promise.all([
       fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
       fetch("/api/oficore/stats").then(r => r.json()).catch(() => null),
       fetch("/api/ofitec/stats").then(r => r.json()).catch(() => null),
       fetch("/api/sgc/stats").then(r => r.json()).catch(() => null),
+      fetch("/api/sgc/contratos-stats").then(r => r.json()).catch(() => null),
+      fetch("/api/sgc/equipos-stats").then(r => r.json()).catch(() => null),
     ]);
 
     if (factRes && factRes.success) results.facturas = factRes;
     if (oficoreRes && oficoreRes.success) results.oficore = oficoreRes;
     if (ofitecRes && ofitecRes.success) results.ofitec = ofitecRes;
     if (sgcRes && sgcRes.success) results.sgc = sgcRes;
+    if (contratosRes && contratosRes.success) results.contratos = contratosRes;
+    if (equiposRes && equiposRes.success) results.equipos = equiposRes;
   } catch (error) {
     console.error("Error fetching all services data for HeatMap:", error);
   }
@@ -161,6 +166,8 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
+  const [contratosStats, setContratosStats] = useState<any>(null);
+  const [equiposStats, setEquiposStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedServiceDetail, setSelectedServiceDetail] = useState<Service | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -181,6 +188,12 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
       setLoading(true);
       try {
         const allData = await fetchAllRealData();
+        if (allData.contratos) {
+          setContratosStats(allData.contratos.stats);
+        }
+        if (allData.equipos) {
+          setEquiposStats(allData.equipos.summary);
+        }
         
         const updatedServices = importedServices.map(service => {
           const enrichedClients = service.clients.map(client => {
@@ -242,9 +255,11 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             errorPercentage = 0;
             status = "success";
           }
-          else if (service.id === "sgc" && allData.sgc?.data) {
-            const docs = allData.sgc.data;
-            totalRequests = docs.length;
+          else if (service.id === "sgc") {
+            const docs = allData.sgc?.data || [];
+            const contratosCount = allData.contratos?.stats?.total || 0;
+            const equiposCount = allData.equipos?.summary?.total || 0;
+            totalRequests = docs.length + contratosCount + equiposCount;
             errorDocs = 0;
             errorPercentage = 0;
             status = "success";
@@ -1153,6 +1168,12 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                             <p className="text-xs text-muted-foreground">{service.description}</p>
                             <p className="text-xs">📊 Error: {service.errorPercentage}%</p>
                             <p className="text-xs">👥 Clientes: {service.clients.length}</p>
+                            {service.id === "sgc" && contratosStats && (
+                              <p className="text-xs text-amber-600 font-semibold">💼 Contratos: {contratosStats.total?.toLocaleString()} ({contratosStats.active?.toLocaleString()} activos)</p>
+                            )}
+                            {service.id === "sgc" && equiposStats && (
+                              <p className="text-xs text-blue-600 font-semibold">📍 Equipos: {equiposStats.total?.toLocaleString()} ({equiposStats.active?.toLocaleString()} activos)</p>
+                            )}
                             <p className="text-xs">✅ Estado: {service.errorPercentage === 100 ? "100% Caído" : service.status === "success" ? "Excelente" : service.status === "warning" ? "Atención" : "Crítico"}</p>
                           </div>
                         </TooltipContent>
@@ -1231,6 +1252,68 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                     </p>
                   </div>
                 </div>
+
+                {selectedServiceDetail.id === "sgc" && contratosStats && (
+                  <div className="border border-amber-200 bg-amber-50/20 rounded-lg p-4 space-y-2">
+                    <h4 className="text-sm font-semibold text-amber-800 flex items-center gap-1.5">
+                      <Briefcase className="h-4 w-4 text-amber-650" />
+                      Resumen de Contratos (Base SGCX)
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Total Contratos:</span>
+                        <p className="font-bold text-slate-800 text-sm">{contratosStats.total?.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Contratos Activos:</span>
+                        <p className="font-bold text-emerald-600 text-sm">
+                          {contratosStats.active?.toLocaleString()} ({((contratosStats.active / contratosStats.total) * 100).toFixed(1)}%)
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Valor Cartera:</span>
+                        <p className="font-bold text-slate-800 text-sm truncate" title={new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(contratosStats.portfolio_value)}>
+                          {new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(contratosStats.portfolio_value)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Aprobación:</span>
+                        <p className="font-bold text-slate-800 text-sm">{contratosStats.approval_rate?.toFixed(1)}%</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedServiceDetail.id === "sgc" && equiposStats && (
+                  <div className="border border-blue-200 bg-blue-50/20 rounded-lg p-4 space-y-2 mt-2">
+                    <h4 className="text-sm font-semibold text-blue-800 flex items-center gap-1.5">
+                      <Printer className="h-4 w-4 text-blue-600" />
+                      Resumen de Equipos en Parque (Base SGCX)
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Total Equipos:</span>
+                        <p className="font-bold text-slate-800 text-sm">{equiposStats.total?.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Equipos Activos:</span>
+                        <p className="font-bold text-emerald-600 text-sm">
+                          {equiposStats.active?.toLocaleString()} ({((equiposStats.active / equiposStats.total) * 100).toFixed(1)}%)
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">En Bodega:</span>
+                        <p className="font-bold text-slate-800 text-sm">{equiposStats.in_warehouse?.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Ingreso Recurrente:</span>
+                        <p className="font-bold text-slate-800 text-sm truncate" title={new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(equiposStats.monthly_revenue)}>
+                          {new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(equiposStats.monthly_revenue)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {!(isServiceComingSoon(selectedServiceDetail.id) || selectedServiceDetail.isComingSoon) && (
                   <div>

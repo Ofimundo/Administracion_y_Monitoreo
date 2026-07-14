@@ -56,6 +56,9 @@ import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ContratosDashboardView } from "@/components/contratos-dashboard-view";
+import { EquiposDashboardView } from "@/components/equipos-dashboard-view";
+import { DespachosDashboardView } from "@/components/despachos-dashboard-view";
 
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
@@ -240,7 +243,22 @@ export default function ServiceDetailPage() {
   const [alertHours, setAlertHours] = useState(24);
   const [pickingError, setPickingError] = useState<string | null>(null);
   const [pickingPeriod, setPickingPeriod] = useState<"day" | "week" | "month">("day");
-  const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking">("docs");
+  const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking" | "contratos" | "equipos" | "despachos">("docs");
+
+  // Estados para Monitoreo de Contratos SGC
+  const [contratosStats, setContratosStats] = useState<any>(null);
+  const [contratosLoading, setContratosLoading] = useState(false);
+  const [contratosError, setContratosError] = useState<string | null>(null);
+
+  // Estados para Monitoreo de Equipos en Parque SGC
+  const [equiposStats, setEquiposStats] = useState<any>(null);
+  const [equiposLoading, setEquiposLoading] = useState(false);
+  const [equiposError, setEquiposError] = useState<string | null>(null);
+
+  // Estados para Monitoreo de Despachos SGC
+  const [despachosStats, setDespachosStats] = useState<any>(null);
+  const [despachosLoading, setDespachosLoading] = useState(false);
+  const [despachosError, setDespachosError] = useState<string | null>(null);
 
   const serviceStatic = services.find((s) => s.id === params.id);
   const comingSoon = serviceStatic ? isServiceComingSoon(serviceStatic.id) : false;
@@ -274,7 +292,7 @@ export default function ServiceDetailPage() {
       // FACTURAS - CORREGIDO CON FUERZA A VERDE
       // ============================================================
       if (serviceId === "facturas") {
-        const res = await fetch("/api/facturas/bitacora?estado=todos");
+        const res = await fetch(`/api/facturas/bitacora?estado=todos${queryParams ? '&' + queryParams.slice(1) : ''}`);
         const data = await res.json();
         if (data.success && data.data && Array.isArray(data.data)) {
           setRawData(data.data);
@@ -527,21 +545,54 @@ export default function ServiceDetailPage() {
         try {
           setPickingLoading(true);
           setPickingError(null);
+          setContratosLoading(true);
+          setContratosError(null);
+          setEquiposLoading(true);
+          setEquiposError(null);
+          setDespachosLoading(true);
+          setDespachosError(null);
           
           const connector = queryParams ? "&" : "?";
-          const [res, pickingRes] = await Promise.all([
+          const [res, pickingRes, contratosRes, equiposRes, despachosRes] = await Promise.all([
             fetch(`/api/sgc/stats${queryParams}`),
-            fetch(`/api/sgc/picking-stats${queryParams}${connector}hours=${alertHours}`)
+            fetch(`/api/sgc/picking-stats${queryParams}${connector}hours=${alertHours}`),
+            fetch(`/api/sgc/contratos-stats${queryParams}`),
+            fetch(`/api/sgc/equipos-stats${queryParams}`),
+            fetch(`/api/sgc/despachos-stats${queryParams}`)
           ]);
           
           const data = await res.json();
           const pData = await pickingRes.json();
+          const cData = await contratosRes.json();
+          const eqData = await equiposRes.json();
+          const dData = await despachosRes.json();
           
           setPickingLoading(false);
           if (pData.success) {
             setPickingStats(pData);
           } else {
             setPickingError(pData.message || "⚠️ Error al obtener estadísticas de picking");
+          }
+
+          setContratosLoading(false);
+          if (cData.success) {
+            setContratosStats(cData);
+          } else {
+            setContratosError(cData.message || "⚠️ Error al obtener estadísticas de contratos");
+          }
+
+          setEquiposLoading(false);
+          if (eqData.success) {
+            setEquiposStats(eqData);
+          } else {
+            setEquiposError(eqData.message || "⚠️ Error al obtener estadísticas de equipos en parque");
+          }
+
+          setDespachosLoading(false);
+          if (dData.success) {
+            setDespachosStats(dData);
+          } else {
+            setDespachosError(dData.message || "⚠️ Error al obtener estadísticas de despachos");
           }
           
           if (res.status === 403 || !data.success) {
@@ -622,6 +673,9 @@ export default function ServiceDetailPage() {
           }
         } catch (e) {
           setPickingLoading(false);
+          setContratosLoading(false);
+          setEquiposLoading(false);
+          setDespachosLoading(false);
           console.error("Error fetching SGC data:", e);
           setRawData([]);
           setLiveClients([]);
@@ -748,13 +802,11 @@ export default function ServiceDetailPage() {
   };
 
   const resetStatsDateFilter = () => {
-    const isOfitec = params.id === "ofitec";
-    const isOficore = params.id === "oficore";
-    const defaultRange = isOfitec 
-      ? { from: new Date(2025, 3, 1), to: new Date(2025, 3, 30) }
-      : isOficore
-        ? { from: new Date(2026, 4, 1), to: new Date(2026, 4, 30) }
-        : { from: new Date(new Date().getFullYear(), 0, 1), to: new Date(new Date().getFullYear(), 11, 31) };
+    const currentYear = new Date().getFullYear();
+    const defaultRange = {
+      from: new Date(currentYear, 0, 1),
+      to: new Date(currentYear, 11, 31)
+    };
     setStatsDateRange(defaultRange);
     fetchLiveData(defaultRange);
     setHasStatsFilter(false);
@@ -772,23 +824,13 @@ export default function ServiceDetailPage() {
       setServiceClients(serviceStatic.clients);
       
       if (activeServices.includes(serviceStatic.id)) {
-        if (serviceStatic.id === "ofitec") {
-          const defaultRange = {
-            from: new Date(2025, 3, 1),
-            to: new Date(2025, 3, 30),
-          };
-          setStatsDateRange(defaultRange);
-          fetchLiveData(defaultRange);
-        } else if (serviceStatic.id === "oficore") {
-          const defaultRange = {
-            from: new Date(2026, 4, 1),
-            to: new Date(2026, 4, 30),
-          };
-          setStatsDateRange(defaultRange);
-          fetchLiveData(defaultRange);
-        } else {
-          fetchLiveData();
-        }
+        const currentYear = new Date().getFullYear();
+        const defaultRange = {
+          from: new Date(currentYear, 0, 1),
+          to: new Date(currentYear, 11, 31)
+        };
+        setStatsDateRange(defaultRange);
+        fetchLiveData(defaultRange);
       }
     }
   }, [params.id, serviceStatic, comingSoon]);
@@ -975,12 +1017,12 @@ export default function ServiceDetailPage() {
           {/* TAB - ESTADÍSTICAS */}
           <TabsContent value="stats">
             <Card>
-               <CardHeader className="pb-3">
+              <CardHeader className="pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <CardTitle className="text-lg font-medium flex items-center gap-2">
                       <Activity className="h-5 w-5 text-emerald-500" />
-                      {isTicketService ? "Estadísticas de Tickets" : isSgcService ? (sgcSubTab === "docs" ? "Estadísticas de Documentos SGC" : "Monitoreo de Picking SGC") : "Estadísticas de Documentos"}
+                      {isTicketService ? "Estadísticas de Tickets" : isSgcService ? (sgcSubTab === "docs" ? "Estadísticas de Documentos SGC" : sgcSubTab === "picking" ? "Monitoreo de Picking SGC" : sgcSubTab === "contratos" ? "Monitoreo de Contratos SGC" : "Monitoreo de Equipos en Parque SGC") : "Estadísticas de Documentos"}
                     </CardTitle>
                     {isSgcService && (
                       <div className="flex bg-muted p-0.5 rounded-lg border border-border/50 shrink-0">
@@ -1009,6 +1051,45 @@ export default function ServiceDetailPage() {
                           )}
                         >
                           Monitoreo de Picking
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSgcSubTab("contratos")}
+                          className={cn(
+                            "h-7 text-xs px-3 font-medium transition-all",
+                            sgcSubTab === "contratos" 
+                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                          )}
+                        >
+                          Contratos
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSgcSubTab("equipos")}
+                          className={cn(
+                            "h-7 text-xs px-3 font-medium transition-all",
+                            sgcSubTab === "equipos" 
+                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                          )}
+                        >
+                          Equipos en Parque
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSgcSubTab("despachos")}
+                          className={cn(
+                            "h-7 text-xs px-3 font-medium transition-all",
+                            sgcSubTab === "despachos" 
+                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                          )}
+                        >
+                          Despachos
                         </Button>
                       </div>
                     )}
@@ -1213,7 +1294,7 @@ export default function ServiceDetailPage() {
                         <p className="text-xs text-rose-600">📉 Notas de Débito</p>
                       </div>
                     </div>
-                  ) : (
+                  ) : sgcSubTab === "picking" ? (
                     <div className="space-y-6">
                       {pickingLoading ? (
                         <div className="flex flex-col items-center justify-center py-12">
@@ -1251,6 +1332,31 @@ export default function ServiceDetailPage() {
                         </div>
                       )}
                     </div>
+                  ) : sgcSubTab === "contratos" ? (
+                    <ContratosDashboardView 
+                      stats={contratosStats?.stats}
+                      byMonth={contratosStats?.byMonth}
+                      byCurrency={contratosStats?.byCurrency} 
+                      loading={contratosLoading} 
+                      error={contratosError} 
+                    />
+                  ) : sgcSubTab === "equipos" ? (
+                    <EquiposDashboardView
+                      summary={equiposStats?.summary}
+                      alerts={equiposStats?.alerts}
+                      volume={equiposStats?.volume}
+                      topModels={equiposStats?.topModels}
+                      geo={equiposStats?.geo}
+                      topComunas={equiposStats?.topComunas}
+                      loading={equiposLoading}
+                      error={equiposError}
+                    />
+                  ) : (
+                    <DespachosDashboardView
+                      stats={despachosStats}
+                      loading={despachosLoading}
+                      error={despachosError}
+                    />
                   )
                 ) : params.id === "dte" ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

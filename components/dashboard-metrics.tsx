@@ -202,6 +202,8 @@ export function DashboardMetrics({
   const [ofitecData, setOfitecData] = useState<any[]>([]);
   const [sgcData, setSgcData] = useState<any[]>([]);
   const [serviciosData, setServiciosData] = useState<any[]>([]);
+  const [contratosStats, setContratosStats] = useState<any>(null);
+  const [equiposStats, setEquiposStats] = useState<any>(null);
   
   const [proyectosActivos, setProyectosActivos] = useState<Array<{
     id: number;
@@ -363,7 +365,7 @@ export function DashboardMetrics({
 
   const fetchAllServicesData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
     try {
-      const serviceIds = ["facturas", "oficore", "ofitec", "sgc"];
+      const serviceIds = ["facturas", "oficore", "ofitec", "sgc", "dte"];
       const results: any = {};
 
       let queryParams = "";
@@ -395,6 +397,8 @@ export function DashboardMetrics({
             url = `/api/ofitec/stats${queryParams}`;
           } else if (serviceId === "sgc") {
             url = `/api/sgc/stats${queryParams}`;
+          } else if (serviceId === "dte") {
+            url = `/api/dte/stats${queryParams}`;
           }
 
           const res = await fetch(url);
@@ -949,6 +953,23 @@ export function DashboardMetrics({
         calculateAllMetrics(servicesData, facturasArray);
       }
 
+      try {
+        const [contratosRes, equiposRes] = await Promise.all([
+          fetch("/api/sgc/contratos-stats"),
+          fetch("/api/sgc/equipos-stats")
+        ]);
+        const contratosData = await contratosRes.json();
+        const equiposData = await equiposRes.json();
+        if (contratosData.success) {
+          setContratosStats(contratosData.stats);
+        }
+        if (equiposData.success) {
+          setEquiposStats(equiposData.summary);
+        }
+      } catch (err) {
+        console.error("Error fetching SGC stats in dashboard:", err);
+      }
+
       if (facturasArray.length > 0) {
         const dailyStats: { [key: string]: any } = {};
         
@@ -1322,6 +1343,14 @@ export function DashboardMetrics({
       };
     }).slice(-14);
   }, [detalleTickets]);
+
+  const formatCLP = (val: number) => {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    }).format(val);
+  };
 
   if (loading) {
     return (
@@ -1857,46 +1886,12 @@ export function DashboardMetrics({
           <div className="hidden lg:block h-6 w-6" />
         </div>
 
-        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
-          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6">
-            <div className="bg-amber-50 text-amber-700 p-3 rounded-full mb-3 border border-amber-100 shadow-sm animate-bounce">
-              <FileSpreadsheet className="h-6 w-6" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-800 tracking-tight uppercase">Módulo de Presupuesto y Contratos</h3>
-            <p className="text-xs text-slate-500 max-w-md mt-1">
-              Próximamente: Gestión de presupuestos, contratos, seguimiento de costos y análisis financiero.
-            </p>
-            <span className="mt-3 text-[10px] font-extrabold text-amber-600 bg-amber-100/60 px-2.5 py-1 rounded-full border border-amber-200 uppercase tracking-wider">
-              Próximamente
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 opacity-30 select-none pointer-events-none">
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Presupuesto Anual</span>
-              <p className="text-xl font-black text-slate-800 mt-1">$2.4B</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Asignado 2026</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ejecutado</span>
-              <p className="text-xl font-black text-slate-800 mt-1">$1.8B</p>
-              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">75% del presupuesto</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Contratos Activos</span>
-              <p className="text-xl font-black text-slate-800 mt-1">34</p>
-              <span className="text-[8px] text-slate-400 block mt-1">En vigencia</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ahorros Identificados</span>
-              <p className="text-xl font-black text-slate-800 mt-1">$186M</p>
-              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">YTD</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">ROI Promedio</span>
-              <p className="text-xl font-black text-slate-800 mt-1">2.8x</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Proyectos</span>
-            </div>
+        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px] flex flex-col items-center justify-center">
+          <div className="flex flex-col items-center justify-center z-10 select-none">
+            <Badge className="bg-[#f59e0b] text-white hover:bg-[#f59e0b] font-bold px-3 py-1 text-xs uppercase tracking-wider shadow-sm animate-pulse">
+              PRÓXIMAMENTE
+            </Badge>
+            <p className="text-xs text-slate-500 font-semibold mt-2">Módulo financiero en fase de integración</p>
           </div>
         </div>
       </div>

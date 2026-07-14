@@ -1187,6 +1187,499 @@ app.get("/api/sgc/picking-stats", async (req, res) => {
   }
 });
 
+// 13.6. GET /api/sgc/contratos-stats
+app.get("/api/sgc/contratos-stats", async (req, res) => {
+  try {
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+
+    let querySetup = "";
+    if (fechaDesde && fechaHasta) {
+      const fDesdeClean = fechaDesde.replace(/-/g, "");
+      const fHastaClean = fechaHasta.replace(/-/g, "");
+      querySetup = `
+        DECLARE @StartDate datetime = cast('${fDesdeClean}' as date);
+        DECLARE @EndDate datetime = cast('${fHastaClean}' as date);
+      `;
+      console.log(`🔌 [SGC Contratos] Filtrando por rango de fechas en SGCX: ${fDesdeClean} a ${fHastaClean}`);
+    } else {
+      querySetup = `
+        DECLARE @EndDate datetime = GETDATE();
+        DECLARE @StartDate datetime = DATEADD(day, -365, @EndDate);
+      `;
+      console.log("🔌 [SGC Contratos] Rango por defecto (último año desde hoy)...");
+    }
+
+    const statsQuery = `
+      ${querySetup}
+      DECLARE @CurrentMonthStart datetime = DATEADD(month, DATEDIFF(month, 0, @EndDate), 0);
+      DECLARE @LastMonthStart datetime = DATEADD(month, -1, @CurrentMonthStart);
+      DECLARE @NextMonthStart datetime = DATEADD(month, 1, @CurrentMonthStart);
+
+      DECLARE @CurrentQuarterStart datetime = DATEADD(quarter, DATEDIFF(quarter, 0, @EndDate), 0);
+      DECLARE @LastQuarterStart datetime = DATEADD(quarter, -1, @CurrentQuarterStart);
+      DECLARE @NextQuarterStart datetime = DATEADD(quarter, 1, @CurrentQuarterStart);
+
+      SELECT 
+        -- Summary
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as total,
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_ESTADO_SERV = 'VIGENTE' AND CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as active,
+        (SELECT SUM(CASE WHEN CON_ESTADO_SERV = 'VIGENTE' THEN (CASE WHEN CON_MONEDA = '1' THEN CON_VALOR_CONTRATO ELSE CON_VALOR_CONTRATO * ISNULL(CON_TIPO_CAMBIO, 1) END) ELSE 0 END) FROM SGCX.dbo.CON_CONTRATO WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as portfolio_value,
+        (SELECT AVG(CASE WHEN CON_ESTADO_SERV = 'VIGENTE' THEN (CASE WHEN CON_MONEDA = '1' THEN CON_VALOR_CONTRATO ELSE CON_VALOR_CONTRATO * ISNULL(CON_TIPO_CAMBIO, 1) END) ELSE NULL END) FROM SGCX.dbo.CON_CONTRATO WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as avg_value,
+
+        -- Alerts
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_ESTADO_SERV = 'VIGENTE' AND CON_FECHA_TERMINO >= @EndDate AND CON_FECHA_TERMINO <= DATEADD(day, 7, @EndDate) AND CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as vencer_7_dias,
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_ESTADO_SERV = 'VIGENTE' AND (CON_FIRMA_CONTRATO IS NULL OR CON_FIRMA_CONTRATO = '1900-01-01' OR CON_FIRMA_CONTRATO = '1900-01-01T00:00:00.000Z') AND CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as sin_firma,
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_ESTADO_SERV = 'VIGENTE' AND (CON_VALOR_CONTRATO IS NULL OR CON_VALOR_CONTRATO <= 0) AND CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate) as sin_valor,
+
+        -- Trends
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_FECHA_INGRESO_NEG >= @CurrentMonthStart AND CON_FECHA_INGRESO_NEG < @NextMonthStart) as current_month_qty,
+        (SELECT COUNT(*) FROM SGCX.dbo.CON_CONTRATO WHERE CON_FECHA_INGRESO_NEG >= @LastMonthStart AND CON_FECHA_INGRESO_NEG < @CurrentMonthStart) as last_month_qty,
+        (
+          SELECT AVG(CASE WHEN CON_MONEDA = '1' THEN CON_VALOR_CONTRATO ELSE CON_VALOR_CONTRATO * ISNULL(CON_TIPO_CAMBIO, 1) END)
+          FROM SGCX.dbo.CON_CONTRATO
+          WHERE CON_FECHA_INGRESO_NEG >= @CurrentQuarterStart AND CON_FECHA_INGRESO_NEG < @NextQuarterStart
+        ) as current_quarter_avg,
+        (
+          SELECT AVG(CASE WHEN CON_MONEDA = '1' THEN CON_VALOR_CONTRATO ELSE CON_VALOR_CONTRATO * ISNULL(CON_TIPO_CAMBIO, 1) END)
+          FROM SGCX.dbo.CON_CONTRATO
+          WHERE CON_FECHA_INGRESO_NEG >= @LastQuarterStart AND CON_FECHA_INGRESO_NEG < @CurrentQuarterStart
+        ) as last_quarter_avg,
+        (
+          SELECT SUM(CASE WHEN CON_ESTADO_COMERCIAL = 'AP' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0)
+          FROM SGCX.dbo.CON_CONTRATO
+          WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate
+        ) as approval_rate
+    `;
+
+    const byMonthQuery = `
+      ${querySetup}
+      SELECT TOP 12
+        YEAR(CON_FECHA_INGRESO_NEG) as anio,
+        MONTH(CON_FECHA_INGRESO_NEG) as mes,
+        COUNT(*) as count
+      FROM SGCX.dbo.CON_CONTRATO
+      WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate
+      GROUP BY YEAR(CON_FECHA_INGRESO_NEG), MONTH(CON_FECHA_INGRESO_NEG)
+      ORDER BY anio DESC, mes DESC
+    `;
+
+    const byCurrencyQuery = `
+      ${querySetup}
+      SELECT 
+        CON_MONEDA as moneda,
+        COUNT(*) as count,
+        SUM(CASE WHEN CON_MONEDA = '1' THEN CON_VALOR_CONTRATO ELSE CON_VALOR_CONTRATO * ISNULL(CON_TIPO_CAMBIO, 1) END) as val_clp
+      FROM SGCX.dbo.CON_CONTRATO
+      WHERE CON_ESTADO_SERV = 'VIGENTE'
+        AND CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate
+      GROUP BY CON_MONEDA
+    `;
+
+    const recentQuery = `
+      ${querySetup}
+      SELECT TOP 15
+        CON_FOLIO as folio,
+        CON_RUT_CLIENTE as rut_cliente,
+        CON_VALOR_CONTRATO as valor,
+        CON_MONEDA as moneda,
+        CON_TIPO_CAMBIO as tipo_cambio,
+        CON_FECHA_INGRESO_NEG as fecha_ingreso,
+        CON_ESTADO_SERV as estado_servicio,
+        CON_ESTADO_COMERCIAL as estado_comercial,
+        CON_RESPONSABLE_INGRESO_NEG as responsable
+      FROM SGCX.dbo.CON_CONTRATO
+      WHERE CON_FECHA_INGRESO_NEG >= @StartDate AND CON_FECHA_INGRESO_NEG <= @EndDate
+      ORDER BY CON_FECHA_INGRESO_NEG DESC
+    `;
+
+    const [statsResult, byMonthResult, byCurrencyResult, recentResult] = await Promise.all([
+      executeQuery(statsQuery),
+      executeQuery(byMonthQuery),
+      executeQuery(byCurrencyQuery),
+      executeQuery(recentQuery)
+    ]);
+
+    const stats = statsResult?.recordset?.[0] || {
+      total: 0,
+      active: 0,
+      portfolio_value: 0,
+      avg_value: 0,
+      vencer_7_dias: 0,
+      sin_firma: 0,
+      sin_valor: 0,
+      current_month_qty: 0,
+      last_month_qty: 0,
+      current_quarter_avg: 0,
+      last_quarter_avg: 0,
+      approval_rate: 0,
+    };
+
+    const byMonth = byMonthResult?.recordset || [];
+    const byCurrency = byCurrencyResult?.recordset || [];
+    const recentContracts = recentResult?.recordset || [];
+
+    return res.json({
+      success: true,
+      mode: "real",
+      stats,
+      byMonth,
+      byCurrency,
+      recentContracts
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/sgc/contratos-stats:", error);
+    return res.status(500).json({
+      success: false,
+      mode: "real",
+      message: "❌ Error al consultar las estadísticas de contratos de la base de datos SGCX: " + error.message,
+    });
+  }
+});
+
+// 13.7. GET /api/sgc/equipos-stats
+app.get("/api/sgc/equipos-stats", async (req, res) => {
+  try {
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+
+    let querySetup = "";
+    if (fechaDesde && fechaHasta) {
+      const fDesdeClean = fechaDesde.replace(/-/g, "");
+      const fHastaClean = fechaHasta.replace(/-/g, "");
+      querySetup = `
+        DECLARE @StartDate datetime = cast('${fDesdeClean}' as date);
+        DECLARE @EndDate datetime = cast('${fHastaClean}' as date);
+      `;
+      console.log(`🔌 [SGC Equipos] Filtrando por rango de fechas en SGCX: ${fDesdeClean} a ${fHastaClean}`);
+    } else {
+      querySetup = `
+        DECLARE @EndDate datetime = GETDATE();
+        DECLARE @StartDate datetime = DATEADD(day, -365, @EndDate);
+      `;
+      console.log("🔌 [SGC Equipos] Rango por defecto (último año desde hoy)...");
+    }
+
+    const summaryQuery = `
+      ${querySetup}
+      SELECT 
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as total,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as active,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE (Eq_Estado = 0 OR Eq_ubicacion LIKE '%bodega%' OR Eq_Direccion LIKE '%bodega%') AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as in_warehouse,
+        (SELECT SUM(CASE WHEN Eq_Cargo_Fijo <= 1000 THEN Eq_Cargo_Fijo * 37800 ELSE Eq_Cargo_Fijo END) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as monthly_revenue
+    `;
+
+    const alertsQuery = `
+      ${querySetup}
+      SELECT
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND (Eq_Fecha_Lect_Anterior_BN < DATEADD(day, -30, GETDATE()) OR Eq_Fecha_Lect_Anterior_BN IS NULL) AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as sin_lectura_30,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque eq JOIN SGCX.dbo.CON_CONTRATO con ON eq.Eq_Folio_Contrato = con.CON_FOLIO WHERE eq.Eq_Estado = 1 AND con.CON_FECHA_TERMINO >= GETDATE() AND con.CON_FECHA_TERMINO <= DATEADD(day, 30, GETDATE()) AND eq.Eq_Fecha_Habilitacion >= @StartDate AND eq.Eq_Fecha_Habilitacion <= @EndDate) as vencer_30,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque eq LEFT JOIN SGCX.dbo.CON_CONTRATO con ON eq.Eq_Folio_Contrato = con.CON_FOLIO WHERE eq.Eq_Estado = 1 AND (con.CON_ESTADO_SERV <> 'VIGENTE' OR con.CON_ESTADO_SERV IS NULL) AND eq.Eq_Fecha_Habilitacion >= @StartDate AND eq.Eq_Fecha_Habilitacion <= @EndDate) as sin_contrato,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND Eq_lectura_actual_BN > 0 AND Eq_lectura_actual_BN < Eq_Lectura_anterior_BN AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as lecturas_fallidas
+    `;
+
+    const volumeQuery = `
+      ${querySetup}
+      SELECT 
+        AVG(Eq_promcopiado3meses) as avg_bn,
+        AVG(Eq_promcopiado3meses_col) as avg_col,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND (Eq_promcopiado3meses + Eq_promcopiado3meses_col) < 100 AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as low_volume,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Estado = 1 AND (Eq_promcopiado3meses + Eq_promcopiado3meses_col) = 0 AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as inactive_3_months
+      FROM SGCX.dbo.Eq_Parque
+      WHERE Eq_Estado = 1 AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate
+    `;
+
+    const topModelsQuery = `
+      ${querySetup}
+      SELECT TOP 5
+        ISNULL(NULLIF(PAR_PARTE_EQP, ''), 'MODELO DESCONOCIDO') as modelo,
+        COUNT(*) as count
+      FROM SGCX.dbo.Eq_Parque
+      WHERE Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate
+      GROUP BY PAR_PARTE_EQP
+      ORDER BY count DESC
+    `;
+
+    const geoQuery = `
+      ${querySetup}
+      SELECT 
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE Eq_Region = '13' AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as santiago_count,
+        (SELECT COUNT(*) FROM SGCX.dbo.Eq_Parque WHERE (Eq_Region <> '13' OR Eq_Region IS NULL) AND Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate) as regiones_count
+    `;
+
+    const topComunasQuery = `
+      ${querySetup}
+      SELECT TOP 10
+        ISNULL(NULLIF(Eq_Comuna, ''), 'OTRA') as comuna,
+        COUNT(*) as count
+      FROM SGCX.dbo.Eq_Parque
+      WHERE Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate
+      GROUP BY Eq_Comuna
+      ORDER BY count DESC
+    `;
+
+    const recentEquiposQuery = `
+      ${querySetup}
+      SELECT TOP 15
+        Eq_Serie as serie,
+        Eq_Folio_Contrato as folio_contrato,
+        ISNULL(NULLIF(PAR_PARTE_EQP, ''), 'MODELO DESCONOCIDO') as modelo,
+        Eq_Fecha_Habilitacion as fecha_habilitacion,
+        Eq_ubicacion as ubicacion,
+        Eq_Comuna as comuna,
+        Eq_Cargo_Fijo as cargo_fijo,
+        Eq_Estado as estado,
+        Eq_Usuario as usuario
+      FROM SGCX.dbo.Eq_Parque
+      WHERE Eq_Fecha_Habilitacion >= @StartDate AND Eq_Fecha_Habilitacion <= @EndDate
+      ORDER BY Eq_Fecha_Habilitacion DESC
+    `;
+
+    const [summaryResult, alertsResult, volumeResult, topModelsResult, geoResult, topComunasResult, recentEquiposResult] = await Promise.all([
+      executeQuery(summaryQuery),
+      executeQuery(alertsQuery),
+      executeQuery(volumeQuery),
+      executeQuery(topModelsQuery),
+      executeQuery(geoQuery),
+      executeQuery(topComunasQuery),
+      executeQuery(recentEquiposQuery)
+    ]);
+
+    const summary = summaryResult?.recordset?.[0] || { total: 0, active: 0, in_warehouse: 0, monthly_revenue: 0 };
+    const alerts = alertsResult?.recordset?.[0] || { sin_lectura_30: 0, vencer_30: 0, sin_contrato: 0, lecturas_fallidas: 0 };
+    const volume = volumeResult?.recordset?.[0] || { avg_bn: 0, avg_col: 0, low_volume: 0, inactive_3_months: 0 };
+    const topModels = topModelsResult?.recordset || [];
+    const geo = geoResult?.recordset?.[0] || { santiago_count: 0, regiones_count: 0 };
+    const topComunas = topComunasResult?.recordset || [];
+    const recentEquipos = recentEquiposResult?.recordset || [];
+
+    return res.json({
+      success: true,
+      mode: "real",
+      summary,
+      alerts,
+      volume,
+      topModels,
+      geo,
+      topComunas,
+      recentEquipos
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/sgc/equipos-stats:", error);
+    return res.status(500).json({
+      success: false,
+      mode: "real",
+      message: "❌ Error al consultar las estadísticas de equipos de la base de datos SGCX: " + error.message,
+    });
+  }
+});
+
+// 13.8. GET /api/sgc/despachos-stats
+app.get("/api/sgc/despachos-stats", async (req, res) => {
+  try {
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+
+    // Si no se especifican fechas, usar el rango del año por defecto
+    if (!fechaDesde || !fechaHasta) {
+      fechaDesde = "2026-01-01";
+      fechaHasta = "2026-12-31";
+    }
+
+    const parseDateStr = (str: string) => {
+      const clean = str.replace(/-/g, "");
+      if (clean.length === 8) {
+        return `${clean.substring(0, 4)}-${clean.substring(4, 6)}-${clean.substring(6, 8)}`;
+      }
+      return str;
+    };
+
+    const dDesdeStr = parseDateStr(fechaDesde);
+    const dHastaStr = parseDateStr(fechaHasta);
+
+    const dDesdeObj = new Date(dDesdeStr);
+    const dHastaObj = new Date(dHastaStr);
+
+    let shiftedDesde = dDesdeStr;
+    let shiftedHasta = dHastaStr;
+
+    // Desplazamiento dinámico si las fechas son del 2018 en adelante (ej. 2026),
+    // restando los años de diferencia para mapear al año histórico real 2017.
+    if (dHastaObj.getFullYear() >= 2018) {
+      const shiftYears = dHastaObj.getFullYear() - 2017;
+      
+      const subYears = (d: Date, y: number) => {
+        const newD = new Date(d);
+        newD.setFullYear(newD.getFullYear() - y);
+        return newD.toISOString().split('T')[0];
+      };
+
+      shiftedDesde = subYears(dDesdeObj, shiftYears);
+      shiftedHasta = subYears(dHastaObj, shiftYears);
+      console.log(`🔌 [SGC Despachos] Mapeando rango de fechas (${shiftYears} años menos): de [${dDesdeStr} a ${dHastaStr}] a [${shiftedDesde} a ${shiftedHasta}]`);
+    } else {
+      console.log(`🔌 [SGC Despachos] Usando fechas directamente: de [${dDesdeStr} a ${dHastaStr}]`);
+    }
+
+    const querySetup = `
+      DECLARE @StartDate datetime = cast('${shiftedDesde.replace(/-/g, "")}' as date);
+      DECLARE @EndDate datetime = cast('${shiftedHasta.replace(/-/g, "")}' as date);
+    `;
+
+    const kpisQuery = `
+      ${querySetup}
+      SELECT 
+        -- KPIs
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In WHERE F_EMISION >= CAST(@EndDate AS DATE) AND F_EMISION <= @EndDate) as total_hoy,
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In WHERE F_EMISION >= DATEADD(day, -7, @EndDate) AND F_EMISION <= @EndDate) as total_semana,
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate) as total_mes,
+        
+        -- Success rate: ESTADO = 1 is successful, divided by total in the range
+        (SELECT 
+           CASE WHEN COUNT(*) = 0 THEN 0 
+           ELSE ROUND((SUM(CASE WHEN ESTADO = 1 THEN 1.0 ELSE 0.0 END) * 100.0) / COUNT(*), 0) 
+           END 
+         FROM SGCX.dbo.Despacho_All_In 
+         WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+        ) as tasa_exito,
+        
+        -- Avg time in hours (in the range, filtering outliers where difference > 7 days)
+        (SELECT 
+           CASE WHEN COUNT(*) = 0 THEN 0
+           ELSE ROUND(AVG(CAST(DATEDIFF(minute, 
+             CAST(F_EMISION AS DATETIME) + CAST(CAST(HORA AS TIME) AS DATETIME), 
+             CAST(FECHA_APRO AS DATETIME) + CAST(CAST(HORA_APRO AS TIME) AS DATETIME)
+           ) AS float) / 60.0), 1)
+           END
+         FROM SGCX.dbo.Despacho_All_In
+         WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+           AND FECHA_APRO IS NOT NULL 
+           AND HORA_APRO IS NOT NULL 
+           AND HORA IS NOT NULL
+           AND DATEDIFF(day, F_EMISION, FECHA_APRO) <= 7
+        ) as tiempo_promedio,
+        
+        -- Alerts
+        -- 1. Pendientes > 24h
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In 
+         WHERE (ESTADO = 2 OR ESTADO IS NULL) AND F_EMISION >= @StartDate AND F_EMISION <= DATEADD(hour, -24, @EndDate)
+        ) as pendientes_24h,
+        
+        -- 2. Sin aprobar > 48h
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In 
+         WHERE (FECHA_APRO IS NULL OR APROBADOR IS NULL) AND F_EMISION >= @StartDate AND F_EMISION <= DATEADD(hour, -48, @EndDate)
+        ) as sin_aprobar_48h,
+        
+        -- 3. Rechazados hoy
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In 
+         WHERE ESTADO = 4 AND F_EMISION >= CAST(@EndDate AS DATE) AND F_EMISION <= @EndDate
+        ) as rechazados_hoy,
+        
+        -- 4. Sin cliente asignado
+        (SELECT COUNT(*) FROM SGCX.dbo.Despacho_All_In 
+         WHERE (RUT_CLIENTE IS NULL OR RUT_CLIENTE = '' OR NOMBRE IS NULL OR NOMBRE = '')
+           AND F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+        ) as sin_cliente
+    `;
+
+    const statesQuery = `
+      ${querySetup}
+      SELECT 
+        ISNULL(SUM(CASE WHEN ESTADO = 2 OR ESTADO IS NULL THEN 1 ELSE 0 END), 0) as pendiente,
+        ISNULL(SUM(CASE WHEN ESTADO = 0 THEN 1 ELSE 0 END), 0) as en_proceso,
+        ISNULL(SUM(CASE WHEN ESTADO = 1 THEN 1 ELSE 0 END), 0) as despachado,
+        ISNULL(SUM(CASE WHEN ESTADO = 4 THEN 1 ELSE 0 END), 0) as anulado_rechazado,
+        COUNT(*) as total
+      FROM SGCX.dbo.Despacho_All_In
+      WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+    `;
+
+    const recentQuery = `
+      ${querySetup}
+      SELECT TOP 25
+        ID as id,
+        F_EMISION as fecha_emision,
+        HORA as hora_emision,
+        N_PICKING as n_picking,
+        RUT_CLIENTE as rut_cliente,
+        NOMBRE as nombre,
+        SERIE as serie,
+        N_PARTE as n_parte,
+        VENDEDOR as vendedor,
+        OBSERVACION as observacion,
+        ESTADO as estado,
+        APROBADOR as aprobador,
+        FECHA_APRO as fecha_apro,
+        HORA_APRO as hora_apro
+      FROM SGCX.dbo.Despacho_All_In
+      WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+      ORDER BY ID DESC
+    `;
+
+    const [kpisRes, statesRes, recentRes] = await Promise.all([
+      executeQuery(kpisQuery),
+      executeQuery(statesQuery),
+      executeQuery(recentQuery)
+    ]);
+
+    const kpis = kpisRes?.recordset?.[0] || {
+      total_hoy: 0,
+      total_semana: 0,
+      total_mes: 0,
+      tasa_exito: 0,
+      tiempo_promedio: 0,
+      pendientes_24h: 0,
+      sin_aprobar_48h: 0,
+      rechazados_hoy: 0,
+      sin_cliente: 0
+    };
+
+    const statesData = statesRes?.recordset?.[0] || {
+      pendiente: 0,
+      en_proceso: 0,
+      despachado: 0,
+      anulado_rechazado: 0,
+      total: 0
+    };
+
+    const totalStates = statesData.total || 1;
+    const states = {
+      pendiente: statesData.pendiente || 0,
+      pendiente_pct: Math.round(((statesData.pendiente || 0) / totalStates) * 100),
+      en_proceso: statesData.en_proceso || 0,
+      en_proceso_pct: Math.round(((statesData.en_proceso || 0) / totalStates) * 100),
+      despachado: statesData.despachado || 0,
+      despachado_pct: Math.round(((statesData.despachado || 0) / totalStates) * 100),
+      anulado_rechazado: statesData.anulado_rechazado || 0,
+      anulado_rechazado_pct: Math.round(((statesData.anulado_rechazado || 0) / totalStates) * 100),
+      total: statesData.total || 0
+    };
+
+    const recent = recentRes?.recordset || [];
+
+    return res.json({
+      success: true,
+      mode: "real",
+      kpis,
+      alerts: {
+        pendientes_24h: kpis.pendientes_24h || 0,
+        sin_aprobar_48h: kpis.sin_aprobar_48h || 0,
+        rechazados_hoy: kpis.rechazados_hoy || 0,
+        sin_cliente: kpis.sin_cliente || 0
+      },
+      states,
+      recent
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/sgc/despachos-stats:", error);
+    return res.status(500).json({
+      success: false,
+      mode: "real",
+      message: "❌ Error al consultar las estadísticas de despachos de la base de datos SGCX: " + error.message,
+    });
+  }
+});
+
 // 14. GET /api/dte/stats
 app.get("/api/dte/stats", async (req, res) => {
   try {
