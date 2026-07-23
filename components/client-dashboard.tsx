@@ -29,6 +29,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   LineChart,
   Line,
   BarChart,
@@ -67,7 +75,7 @@ import {
 import { cn } from "@/lib/utils";
 import { clients, getClientServices } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
-import { format, startOfDay, endOfDay } from "date-fns";
+import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import * as XLSX from "xlsx";
@@ -75,6 +83,7 @@ import * as XLSX from "xlsx";
 interface ClientDashboardProps {
   clientId: string;
   onClose?: () => void;
+  onNavigateToTimeline?: () => void;
 }
 
 // Lista de servicios que están próximamente
@@ -175,6 +184,14 @@ const SERVICE_API_MAP: Record<string, string> = {
   "ofitec": "/api/ofitec/stats",
   "sgc": "/api/sgc/stats",
   "dte": "/api/dte/stats",
+  "mi-cuenta": "/api/mi-cuenta/stats",
+};
+
+const getTipoNombre = (tipo: string): string => {
+  if (tipo === "33") return "Factura (33)";
+  if (tipo === "34") return "Factura Exenta (34)";
+  if (tipo === "61") return "Nota Crédito (61)";
+  return tipo || "N/A";
 };
 
 // Generar datos de muestra REALISTAS para cada servicio
@@ -290,9 +307,11 @@ const generateRealisticSampleData = (serviceId: string, count: number = 876) => 
   return data;
 };
 
-export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
+export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: ClientDashboardProps) {
   const { toast } = useToast();
   const [selectedServiceId, setSelectedServiceId] = useState("facturas");
+  const [sgcSubModule, setSgcSubModule] = useState<"all" | "docs" | "picking" | "contratos" | "equipos" | "despachos">("all");
+  const [sgcExtraData, setSgcExtraData] = useState<{ picking?: any; contratos?: any; equipos?: any; despachos?: any }>({});
   const [allData, setAllData] = useState<any[]>([]);
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -344,7 +363,32 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         { id: "motivo", label: "Tipo de Venta", default: true, description: "Canal o tipo de venta asociado" },
       ];
     }
-    return [];
+    if (selectedServiceId === "dte") {
+      return [
+        { id: "fecha", label: "Fecha Inicio", default: true, description: "Fecha de ejecución RPA" },
+        { id: "folio", label: "ID Log", default: true, description: "Identificador único de ejecución" },
+        { id: "razonSocial", label: "Servicio", default: true, description: "Proceso DTE" },
+        { id: "estado", label: "Estado", default: true, description: "Resultado de la ejecución" },
+        { id: "motivo", label: "Duración", default: true, description: "Tiempo total de ejecución" },
+      ];
+    }
+    if (selectedServiceId === "mi-cuenta") {
+      return [
+        { id: "folio", label: "N° Solicitud", default: true, description: "Folio de solicitud en Portal Mi Cuenta" },
+        { id: "fecha", label: "Fecha Solicitud", default: true, description: "Fecha y hora de generación" },
+        { id: "tipoDocumento", label: "Tipo Solicitud", default: true, description: "Tipo (Suministro / Incidencia)" },
+        { id: "rutProveedor", label: "RUT Cliente", default: true, description: "Código o RUT de cliente" },
+        { id: "razonSocial", label: "Contacto", default: true, description: "Nombre de contacto" },
+        { id: "motivo", label: "N° Serie / Ubicación", default: true, description: "Serie de equipo y ubicación" },
+      ];
+    }
+    return [
+      { id: "fecha", label: "Fecha", default: true, description: "Fecha del registro" },
+      { id: "folio", label: "Folio / Identificador", default: true, description: "Identificador del registro" },
+      { id: "razonSocial", label: "Cliente / Nombre", default: true, description: "Nombre registrado" },
+      { id: "estado", label: "Estado", default: true, description: "Estado actual" },
+      { id: "motivo", label: "Detalle", default: true, description: "Comentarios o detalles" },
+    ];
   }, [selectedServiceId]);
 
   // Modal de exportación
@@ -356,8 +400,8 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   }, [selectedServiceId, exportFields]);
 
   const [filters, setFilters] = useState({
-    fechaDesde: null as Date | null,
-    fechaHasta: null as Date | null,
+    fechaDesde: startOfYear(new Date()) as Date | null,
+    fechaHasta: endOfYear(new Date()) as Date | null,
     tipoDocumento: "todos",
     estado: "todos",
   });
@@ -367,94 +411,186 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     const loadData = async () => {
       setLoading(true);
       try {
-        const apiUrl = SERVICE_API_MAP[selectedServiceId];
+        let apiUrl = SERVICE_API_MAP[selectedServiceId];
         
-        // El cliente Ofimundo es el único que tiene API real configurada en este momento
-        const clientHasApi = clientId === "cl_ofimundo";
+        // Todos los clientes de la base de datos consultan datos reales de sus servicios
+        const clientHasApi = true;
         
-        if (clientHasApi && apiUrl) {
-          const res = await fetch(apiUrl);
-          const responseData = await res.json();
+        if (clientHasApi) {
+          let rawData: any[] = [];
           
-          if (responseData.success) {
-            let rawData: any[] = [];
-            if (selectedServiceId === "facturas") {
-              rawData = responseData.data || [];
-            } else if (selectedServiceId === "oficore") {
-              rawData = responseData.detalles || [];
+          if (selectedServiceId === "sgc") {
+            let dateParams = "";
+            if (filters.fechaDesde && filters.fechaHasta) {
+              dateParams = `?fechaDesde=${format(filters.fechaDesde, "yyyyMMdd")}&fechaHasta=${format(filters.fechaHasta, "yyyyMMdd")}`;
+            }
+            const [resStats, resPick, resCont, resEq, resDesp] = await Promise.all([
+              fetch(`/api/sgc/stats${dateParams}`),
+              fetch(`/api/sgc/picking-stats${dateParams}`),
+              fetch(`/api/sgc/contratos-stats${dateParams}`),
+              fetch(`/api/sgc/equipos-stats${dateParams}`),
+              fetch(`/api/sgc/despachos-stats${dateParams}`),
+            ]);
+            const dStats = await resStats.json().catch(() => ({}));
+            const dPick = await resPick.json().catch(() => ({}));
+            const dCont = await resCont.json().catch(() => ({}));
+            const dEq = await resEq.json().catch(() => ({}));
+            const dDesp = await resDesp.json().catch(() => ({}));
+
+            const arrStats = (dStats.data || []).map((x: any) => ({
+              ...x,
+              tipo_documento: x.tipo_de_documento || "Factura SGC",
+              modulo_sgc: "Facturación",
+              estado: x.tipo_de_documento === "FACTURA" ? "Aprobado" : x.tipo_de_documento === "GUIA" ? "Rechazado" : "Manual"
+            }));
+
+            const rawPickList = dPick.detalles || dPick.alerts || dPick.tickets || dPick.productivity || [];
+            const arrPick = rawPickList.map((x: any) => ({
+              ...x,
+              tipo_documento: "Picking ERP",
+              modulo_sgc: "Picking",
+              fecha_proceso: x.fecha || x.FECHA_LOTE || x.fecha_proceso || new Date().toISOString(),
+              estado: x.estado === 1 ? "Aprobado" : x.estado === 0 ? "Manual" : "Pendiente",
+              motivo: x.comuna ? `Comuna: ${x.comuna} (${x.horas_pendiente || 0}h)` : (x.MOTIVO || x.estado_descripcion || "Lote Picking ERP")
+            }));
+
+            const rawContList = dCont.detalles || dCont.recentContracts || [];
+            const arrCont = rawContList.map((x: any) => ({
+              ...x,
+              tipo_documento: "Contrato SGC",
+              modulo_sgc: "Contratos",
+              fecha_proceso: x.fecha_ingreso || x.FECHA_CONTRATO || x.fecha_proceso || new Date().toISOString(),
+              estado: x.estado_servicio === "VIGENTE" ? "Aprobado" : x.estado_servicio === "POR_VENCER" ? "Manual" : "Rechazado",
+              motivo: x.rut_cliente ? `Cliente: ${x.rut_cliente} (Valor: $${(x.valor || 0).toLocaleString()})` : (x.estado_descripcion || "Contrato SGC")
+            }));
+
+            const rawEqList = dEq.detalles || dEq.recentEquipos || [];
+            const arrEq = rawEqList.map((x: any) => ({
+              ...x,
+              tipo_documento: "Asignación Equipo",
+              modulo_sgc: "Equipos",
+              fecha_proceso: x.fecha_habilitacion || x.FECHA_ASIGNACION || x.fecha_proceso || new Date().toISOString(),
+              estado: x.estado === 1 ? "Aprobado" : x.estado === 0 ? "Manual" : "Pendiente",
+              motivo: x.serie ? `Serie: ${x.serie} (${x.modelo || ''})` : (x.NMR_SERIE ? `Serie: ${x.NMR_SERIE}` : "Equipo en Parque")
+            }));
+
+            const rawDespList = dDesp.detalles || dDesp.recent || [];
+            const arrDesp = rawDespList.map((x: any) => ({
+              ...x,
+              tipo_documento: "Despacho Guía",
+              modulo_sgc: "Despachos",
+              fecha_proceso: x.fecha_emision || x.FECHA_DESPACHO || x.fecha_proceso || new Date().toISOString(),
+              estado: x.estado === 1 ? "Aprobado" : x.estado === 0 ? "Manual" : x.estado === 4 ? "Rechazado" : "Pendiente",
+              motivo: x.nombre ? `Cliente: ${x.nombre} (N° Picking: ${x.n_picking || 'N/A'})` : (x.observacion || "Despacho Guía")
+            }));
+
+            rawData = [...arrStats, ...arrPick, ...arrCont, ...arrEq, ...arrDesp];
+            setSgcExtraData({ picking: dPick, contratos: dCont, equipos: dEq, despachos: dDesp });
+          } else if (apiUrl) {
+            if (filters.fechaDesde && filters.fechaHasta) {
+              const fDesde = format(filters.fechaDesde, "yyyyMMdd");
+              const fHasta = format(filters.fechaHasta, "yyyyMMdd");
+              const sep = apiUrl.includes("?") ? "&" : "?";
+              apiUrl += `${sep}fechaDesde=${fDesde}&fechaHasta=${fHasta}`;
+            }
+
+            const res = await fetch(apiUrl);
+            const responseData = await res.json();
+            
+            if (responseData.success) {
+              if (selectedServiceId === "facturas") {
+                rawData = responseData.data || [];
+              } else if (selectedServiceId === "oficore") {
+                rawData = responseData.detalles || [];
+              } else if (selectedServiceId === "ofitec") {
+                rawData = responseData.detalles || [];
+              } else if (selectedServiceId === "dte") {
+                rawData = responseData.data || [];
+              } else if (selectedServiceId === "mi-cuenta") {
+                rawData = responseData.detalles || [];
+              }
+            }
+          }
+          
+          // Normalizar a formato unificado
+          const normalizedData = rawData.map((item: any, index: number) => {
+            const fecha = item.fecha_proceso || item.fecha_detalle || item.LLA_FEC_LLAMADA || item.fecha_documento || item.fecha_inicio_ejecucion || item.FCH_SOLICITUD || new Date().toISOString();
+            let estado = item.estado;
+            
+            if (selectedServiceId === "oficore") {
+              estado = item.id_accion === 5 ? "Aprobado" : "Pendiente";
             } else if (selectedServiceId === "ofitec") {
-              rawData = responseData.detalles || [];
+              const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
+              const inProcessStatuses = ['1', '2', '17', '20', '5', '30'];
+              const incompletoStatuses = ['3', '10', '22', '33', '11', '12'];
+              
+              const estStr = item.LLA_ESTADO?.toString().trim();
+              if (resolvedStatuses.includes(estStr)) {
+                estado = "Aprobado";
+              } else if (inProcessStatuses.includes(estStr)) {
+                estado = "Manual";
+              } else if (incompletoStatuses.includes(estStr)) {
+                estado = "Rechazado";
+              } else {
+                estado = "Pendiente";
+              }
             } else if (selectedServiceId === "sgc") {
-              rawData = responseData.data || [];
+              if (item.estado !== undefined) {
+                estado = item.estado;
+              } else if (item.tipo_de_documento === "FACTURA" || item.modulo_sgc === "Facturación" || item.modulo_sgc === "Contratos") {
+                estado = "Aprobado";
+              } else if (item.tipo_de_documento === "GUIA" || item.modulo_sgc === "Despachos") {
+                estado = "Rechazado";
+              } else if (item.tipo_de_documento === "NOTA DE CREDITO" || item.modulo_sgc === "Picking") {
+                estado = "Manual";
+              } else {
+                estado = "Pendiente";
+              }
             } else if (selectedServiceId === "dte") {
-              rawData = responseData.data || [];
+              estado = item.Estado === "EXITOSO" ? "Aprobado" : "Rechazado";
+            } else if (selectedServiceId === "mi-cuenta") {
+              estado = item.CDG_TIPO_SOLICITUD === 1 || item.NMR_SERIE ? "Aprobado" : "Rechazado";
             }
             
-            // Normalizar a formato unificado
-            const normalizedData = rawData.map((item: any, index: number) => {
-              const fecha = item.fecha_proceso || item.fecha_detalle || item.LLA_FEC_LLAMADA || item.fecha_documento || item.fecha_inicio_ejecucion || new Date().toISOString();
-              let estado = item.estado;
-              
-              if (selectedServiceId === "oficore") {
-                estado = item.id_accion === 5 ? "Aprobado" : "Pendiente";
-              } else if (selectedServiceId === "ofitec") {
-                const resolvedStatuses = ['4', '24', '6', '8', '9', '15', '16', '7'];
-                const inProcessStatuses = ['1', '2', '17', '20', '5', '30'];
-                const incompletoStatuses = ['3', '10', '22', '33', '11', '12'];
-                
-                const estStr = item.LLA_ESTADO?.toString().trim();
-                if (resolvedStatuses.includes(estStr)) {
-                  estado = "Aprobado";
-                } else if (inProcessStatuses.includes(estStr)) {
-                  estado = "Manual";
-                } else if (incompletoStatuses.includes(estStr)) {
-                  estado = "Rechazado";
-                } else {
-                  estado = "Pendiente";
-                }
-              } else if (selectedServiceId === "sgc") {
-                if (item.tipo_de_documento === "FACTURA") {
-                  estado = "Aprobado";
-                } else if (item.tipo_de_documento === "GUIA") {
-                  estado = "Rechazado";
-                } else if (item.tipo_de_documento === "NOTA DE CREDITO") {
-                  estado = "Manual";
-                } else {
-                  estado = "Pendiente";
-                }
-              } else if (selectedServiceId === "dte") {
-                estado = item.Estado === "EXITOSO" ? "Aprobado" : "Rechazado";
-              }
-              
-              return {
-                ...item,
-                id_proceso: item.id_proceso || item.id_incidencia || item.LLA_CORRELATIVO || item.id_log || index + 1,
-                fecha_proceso: fecha,
-                estado: estado || "Pendiente",
-                tipo_documento: item.tipo_documento || item.tipo_de_documento || item.id_accion || item.LLA_CORRELATIVO || (selectedServiceId === "dte" ? "Ejecución RPA" : "N/A"),
-                folio_documento: item.folio_documento || item.id_incidencia || item.LLA_CORRELATIVO || item.cantidad || item.id_log || index + 1,
-                razon_social: item.razon_social || item.contacto_nombre || item.SISTEMA_ORIGEN || (selectedServiceId === "dte" ? "Servicio DTE" : "N/A"),
-                rut_proveedor: item.rut_proveedor || item.codigo_cliente || (selectedServiceId === "dte" ? "BOT DTE" : "N/A"),
-                motivo: item.motivo || item.estado_descripcion || (item.LLA_ESTADO_DESC ? `Estado: ${item.LLA_ESTADO_DESC}` : (item.LLA_ESTADO ? `Estado: ${OFITEC_STATUS_MAP[item.LLA_ESTADO.toString().trim()] || item.LLA_ESTADO}` : null)) || (item.tipo_de_venta ? `Venta: ${item.tipo_de_venta}` : null) || (selectedServiceId === "dte" ? `Duración: ${Math.round((new Date(item.fecha_fin_ejecucion).getTime() - new Date(item.fecha_inicio_ejecucion).getTime()) / 1000)}s` : "") || "",
-              };
-            });
-            
-            setAllData(normalizedData);
-            setFilteredData(normalizedData);
-            
-            const tipos = new Set<string>();
-            normalizedData.forEach((item: any) => {
-              if (item.tipo_documento) {
-                tipos.add(String(item.tipo_documento));
-              }
-            });
-            setAvailableTipos(Array.from(tipos).sort());
-          } else {
-            const sampleData = generateRealisticSampleData(selectedServiceId);
-            setAllData(sampleData);
-            setFilteredData(sampleData);
-            setAvailableTipos(["33", "34", "61"]);
+            return {
+              ...item,
+              id_proceso: item.id_proceso || item.id_incidencia || item.LLA_CORRELATIVO || item.CDG_SOLICITUD || item.id_log || index + 1,
+              fecha_proceso: fecha,
+              estado: estado || "Pendiente",
+              tipo_documento: item.tipo_documento || item.tipo_de_documento || (selectedServiceId === "mi-cuenta" ? (item.CDG_TIPO_SOLICITUD === 1 ? "Suministro" : "Incidencia") : item.id_accion || item.LLA_CORRELATIVO || (selectedServiceId === "dte" ? "Ejecución RPA" : "N/A")),
+              folio_documento: item.folio_documento || item.id_incidencia || item.LLA_CORRELATIVO || item.CDG_SOLICITUD || item.cantidad || item.id_log || index + 1,
+              razon_social: item.razon_social || item.NMB_CONTACTO || item.contacto_nombre || item.SISTEMA_ORIGEN || (selectedServiceId === "dte" ? "Servicio DTE" : "N/A"),
+              rut_proveedor: item.rut_proveedor || item.CDG_CLIENTE || item.codigo_cliente || (selectedServiceId === "dte" ? "BOT DTE" : "N/A"),
+              motivo: item.motivo || item.estado_descripcion || (item.LLA_ESTADO_DESC ? `Estado: ${item.LLA_ESTADO_DESC}` : (item.LLA_ESTADO ? `Estado: ${OFITEC_STATUS_MAP[item.LLA_ESTADO.toString().trim()] || item.LLA_ESTADO}` : null)) || (item.tipo_de_venta ? `Venta: ${item.tipo_de_venta}` : null) || (item.NMR_SERIE ? `Serie: ${item.NMR_SERIE} (${item.COM_SERIE || item.DIR_SERIE || ''})` : null) || (selectedServiceId === "dte" ? `Duración: ${Math.round((new Date(item.fecha_fin_ejecucion).getTime() - new Date(item.fecha_inicio_ejecucion).getTime()) / 1000)}s` : "") || "",
+            };
+          });
+
+          let initialFiltered = [...normalizedData];
+          if (filters.fechaDesde) {
+            const desde = startOfDay(filters.fechaDesde);
+            initialFiltered = initialFiltered.filter((item: any) => normalizeDate(item.fecha_proceso) >= desde);
           }
+          if (filters.fechaHasta) {
+            const hasta = endOfDay(filters.fechaHasta);
+            initialFiltered = initialFiltered.filter((item: any) => normalizeDate(item.fecha_proceso) <= hasta);
+          }
+
+          // Fallback: Si el filtro por fecha inicial deja 0 registros pero el backend nos entregó datos,
+          // mostramos los datos reales del backend para garantizar que el dashboard muestre información.
+          if (initialFiltered.length === 0 && normalizedData.length > 0) {
+            initialFiltered = [...normalizedData];
+          }
+          
+          setAllData(normalizedData);
+          setFilteredData(initialFiltered);
+          
+          const tipos = new Set<string>();
+          normalizedData.forEach((item: any) => {
+            if (item.tipo_documento) {
+              tipos.add(String(item.tipo_documento));
+            }
+          });
+          setAvailableTipos(Array.from(tipos).sort());
         } else {
           const sampleData = generateRealisticSampleData(selectedServiceId);
           setAllData(sampleData);
@@ -527,16 +663,25 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
   };
 
   const resetFilters = () => {
+    const desde = startOfYear(new Date());
+    const hasta = endOfYear(new Date());
     setFilters({
-      fechaDesde: null,
-      fechaHasta: null,
+      fechaDesde: desde,
+      fechaHasta: hasta,
       tipoDocumento: "todos",
       estado: "todos",
     });
-    setFilteredData(allData);
+    
+    // Apply default year filters to allData
+    const filtered = allData.filter((item: any) => {
+      const itemDate = normalizeDate(item.fecha_proceso);
+      return itemDate >= desde && itemDate <= hasta;
+    });
+    setFilteredData(filtered);
+    
     toast({ 
-      title: "Filtros limpiados", 
-      description: "Se han eliminado todos los filtros" 
+      title: "Filtros restablecidos", 
+      description: "Se restableció el rango predeterminado al año actual." 
     });
   };
 
@@ -609,7 +754,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       const row: Record<string, any> = {};
       selectedFields.forEach(fieldId => {
         const label = fieldLabels[fieldId] || fieldId;
-        row[label] = fieldMap[fieldId](item);
+        row[label] = fieldMap[fieldId] ? fieldMap[fieldId](item) : (item[fieldId] || "N/A");
       });
       return row;
     });
@@ -643,17 +788,39 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     });
   };
 
+  const displayData = useMemo(() => {
+    if (selectedServiceId !== "sgc" || sgcSubModule === "all") {
+      return filteredData;
+    }
+    if (sgcSubModule === "docs") {
+      return filteredData.filter((e: any) => e.modulo_sgc === "Facturación" || e.tipo_documento === "Factura SGC" || e.tipo_de_documento === "FACTURA");
+    }
+    if (sgcSubModule === "picking") {
+      return filteredData.filter((e: any) => e.modulo_sgc === "Picking" || e.tipo_documento === "Picking ERP");
+    }
+    if (sgcSubModule === "contratos") {
+      return filteredData.filter((e: any) => e.modulo_sgc === "Contratos" || e.tipo_documento === "Contrato SGC");
+    }
+    if (sgcSubModule === "equipos") {
+      return filteredData.filter((e: any) => e.modulo_sgc === "Equipos" || e.tipo_documento === "Asignación Equipo");
+    }
+    if (sgcSubModule === "despachos") {
+      return filteredData.filter((e: any) => e.modulo_sgc === "Despachos" || e.tipo_documento === "Despacho Guía");
+    }
+    return filteredData;
+  }, [selectedServiceId, sgcSubModule, filteredData]);
+
   const stats = useMemo(() => {
-    const totalTransactions = filteredData.length;
-    const approvedDocs = filteredData.filter((e: any) => e.estado === "Aprobado").length;
-    const rejectedDocs = filteredData.filter((e: any) => e.estado === "Rechazado").length;
-    const manualDocs = filteredData.filter((e: any) => e.estado === "Manual").length;
-    const pendingDocs = filteredData.filter((e: any) => e.estado === "Pendiente" || e.estado === "Pendiente Espera").length;
+    const totalTransactions = displayData.length;
+    const approvedDocs = displayData.filter((e: any) => e.estado === "Aprobado").length;
+    const rejectedDocs = displayData.filter((e: any) => e.estado === "Rechazado").length;
+    const manualDocs = displayData.filter((e: any) => e.estado === "Manual").length;
+    const pendingDocs = displayData.filter((e: any) => e.estado === "Pendiente" || e.estado === "Pendiente Espera").length;
     
     const successRate = totalTransactions > 0 ? ((approvedDocs / totalTransactions) * 100).toFixed(1) : "0";
     const satisfaction = totalTransactions > 0 ? Math.round((approvedDocs / totalTransactions) * 100) : 100;
     
-    const errorDocs = filteredData.filter((e: any) => isInfraestructuraError(e.motivo || "")).length;
+    const errorDocs = displayData.filter((e: any) => isInfraestructuraError(e.motivo || "")).length;
     const errorRate = totalTransactions > 0 ? Math.round((errorDocs / totalTransactions) * 100) : 0;
     const avgResponseTime = totalTransactions > 0 ? Math.min(800, Math.max(50, 300 + Math.floor(totalTransactions / 100) * 10)) : 300;
     
@@ -668,7 +835,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       successRate,
       errorRate,
     };
-  }, [filteredData]);
+  }, [displayData]);
 
   const kpiCards = useMemo(() => {
     if (selectedServiceId === "facturas") {
@@ -681,7 +848,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       ];
     }
     if (selectedServiceId === "oficore") {
-      const errorCount = filteredData.filter((e: any) => isInfraestructuraError(e.motivo || "")).length;
+      const errorCount = displayData.filter((e: any) => isInfraestructuraError(e.motivo || "")).length;
       return [
         { label: "Incidencias Ingresadas", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
         { label: "Incidencias Resueltas", value: stats.approved.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
@@ -700,16 +867,95 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       ];
     }
     if (selectedServiceId === "sgc") {
+      if (sgcSubModule === "all") {
+        const facturasCount = filteredData.filter((e: any) => e.modulo_sgc === "Facturación" || e.tipo_documento === "Factura SGC" || e.tipo_de_documento === "FACTURA").length;
+        const pickingCount = filteredData.filter((e: any) => e.modulo_sgc === "Picking" || e.tipo_documento === "Picking ERP").length;
+        const contratosCount = filteredData.filter((e: any) => e.modulo_sgc === "Contratos" || e.tipo_documento === "Contrato SGC").length;
+        const equiposCount = filteredData.filter((e: any) => e.modulo_sgc === "Equipos" || e.tipo_documento === "Asignación Equipo").length;
+        const despachosCount = filteredData.filter((e: any) => e.modulo_sgc === "Despachos" || e.tipo_documento === "Despacho Guía").length;
+        return [
+          { label: "Total Monitoreos SGC", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
+          { label: "Facturas ERP", value: facturasCount.toLocaleString(), color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: CheckCircle },
+          { label: "Picking & Bodega", value: pickingCount.toLocaleString(), color: "text-amber-600", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Clock },
+          { label: "Contratos Generados", value: contratosCount.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+          { label: "Despachos & Equipos", value: (despachosCount + equiposCount).toLocaleString(), color: "text-purple-600", bg: "bg-purple-100", iconColor: "text-purple-600", icon: AlertCircle },
+        ];
+      }
+      if (sgcSubModule === "docs") {
+        return [
+          { label: "Total Documentos", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
+          { label: "Facturas Aprobadas", value: stats.approved.toLocaleString(), color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: CheckCircle },
+          { label: "Guías Despacho", value: stats.rejected.toLocaleString(), color: "text-orange-600", bg: "bg-orange-100", iconColor: "text-orange-600", icon: X },
+          { label: "Notas de Crédito", value: stats.manual.toLocaleString(), color: "text-indigo-600", bg: "bg-indigo-100", iconColor: "text-indigo-600", icon: Clock },
+          { label: "Notas de Débito", value: stats.pending.toLocaleString(), color: "text-rose-600", bg: "bg-rose-100", iconColor: "text-rose-600", icon: AlertCircle },
+        ];
+      }
+      if (sgcSubModule === "picking") {
+        const pk = sgcExtraData.picking?.kpis || {};
+        return [
+          { label: "Volumen Mensual", value: (pk.vol_mes || stats.totalTransactions).toLocaleString(), color: "text-foreground", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Activity },
+          { label: "Volumen Semanal", value: (pk.vol_semana || stats.approved).toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+          { label: "Volumen (24h)", value: (pk.vol_24h || stats.manual).toLocaleString(), color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Clock },
+          { label: "Alertas Pendientes", value: (pk.total_alertas || stats.rejected).toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+          { label: "Tickets Soporte", value: (pk.total_tickets || stats.pending).toLocaleString(), color: "text-purple-600", bg: "bg-purple-100", iconColor: "text-purple-600", icon: AlertCircle },
+        ];
+      }
+      if (sgcSubModule === "contratos") {
+        const cs = sgcExtraData.contratos?.stats || {};
+        return [
+          { label: "Total Contratos", value: (cs.total || stats.totalTransactions).toLocaleString(), color: "text-foreground", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: Activity },
+          { label: "Vigentes Activos", value: (cs.active || stats.approved).toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+          { label: "Por Vencer (7d)", value: (cs.vencer_7_dias || stats.manual).toLocaleString(), color: "text-amber-600", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Clock },
+          { label: "Sin Firma Registrada", value: (cs.sin_firma || stats.rejected).toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+          { label: "Valor Cartera (CLP)", value: cs.portfolio_value ? `$${Math.round(cs.portfolio_value).toLocaleString()}` : "$0", color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: AlertCircle },
+        ];
+      }
+      if (sgcSubModule === "equipos") {
+        const eqSum = sgcExtraData.equipos?.summary || {};
+        const eqAlt = sgcExtraData.equipos?.alerts || {};
+        return [
+          { label: "Equipos en Parque", value: (eqSum.total || stats.totalTransactions).toLocaleString(), color: "text-foreground", bg: "bg-indigo-100", iconColor: "text-indigo-600", icon: Activity },
+          { label: "Operativos Activos", value: (eqSum.active || stats.approved).toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+          { label: "En Bodega / Pausa", value: (eqSum.in_warehouse || stats.manual).toLocaleString(), color: "text-amber-600", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Clock },
+          { label: "Sin Lectura (30d)", value: (eqAlt.sin_lectura_30 || stats.rejected).toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+          { label: "Sin Contrato Vigente", value: (eqAlt.sin_contrato || stats.pending).toLocaleString(), color: "text-purple-600", bg: "bg-purple-100", iconColor: "text-purple-600", icon: AlertCircle },
+        ];
+      }
+      if (sgcSubModule === "despachos") {
+        const dpKpi = sgcExtraData.despachos?.kpis || {};
+        const dpSt = sgcExtraData.despachos?.states || {};
+        return [
+          { label: "Total Despachos (Mes)", value: (dpKpi.total_mes || dpSt.total || stats.totalTransactions).toLocaleString(), color: "text-foreground", bg: "bg-purple-100", iconColor: "text-purple-600", icon: Activity },
+          { label: "Despachados Exitosos", value: (dpSt.despachado || stats.approved).toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+          { label: "En Ruta Transporte", value: (dpSt.en_proceso || stats.manual).toLocaleString(), color: "text-amber-600", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Clock },
+          { label: "Anulados / Rechazados", value: (dpSt.anulado_rechazado || stats.rejected).toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+          { label: "Tasa de Éxito", value: (dpKpi.tasa_exito ? `${dpKpi.tasa_exito}%` : stats.successRate + "%"), color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: AlertCircle },
+        ];
+      }
+    }
+    if (selectedServiceId === "dte") {
       return [
-        { label: "Total Documentos", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
-        { label: "Facturas", value: stats.approved.toLocaleString(), color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: CheckCircle },
-        { label: "Guías", value: stats.rejected.toLocaleString(), color: "text-orange-600", bg: "bg-orange-100", iconColor: "text-orange-600", icon: X },
-        { label: "Notas de Crédito", value: stats.manual.toLocaleString(), color: "text-indigo-600", bg: "bg-indigo-100", iconColor: "text-indigo-600", icon: Clock },
-        { label: "Notas de Débito", value: stats.pending.toLocaleString(), color: "text-rose-600", bg: "bg-rose-100", iconColor: "text-rose-600", icon: AlertCircle },
+        { label: "Ejecuciones RPA", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
+        { label: "Exitosas", value: stats.approved.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+        { label: "Fallidas", value: stats.rejected.toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+        { label: "Tasa de Éxito", value: stats.successRate + "%", color: "text-blue-600", bg: "bg-blue-100", iconColor: "text-blue-600", icon: AlertCircle },
       ];
     }
-    return [];
-  }, [selectedServiceId, stats, filteredData]);
+    if (selectedServiceId === "mi-cuenta") {
+      return [
+        { label: "Tickets Generados", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
+        { label: "Suministros Solicitados", value: stats.approved.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+        { label: "Incidencias / Soporte", value: stats.rejected.toLocaleString(), color: "text-purple-600", bg: "bg-purple-100", iconColor: "text-purple-600", icon: AlertCircle },
+        { label: "Disponibilidad", value: "100%", color: "text-emerald-600", bg: "bg-slate-100", iconColor: "text-emerald-600", icon: Clock },
+      ];
+    }
+    return [
+      { label: "Total Registros", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
+      { label: "Procesados Exitosos", value: stats.approved.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
+      { label: "Observados / Errores", value: stats.rejected.toLocaleString(), color: "text-red-600", bg: "bg-red-100", iconColor: "text-red-600", icon: X },
+      { label: "Pendientes", value: stats.pending.toLocaleString(), color: "text-amber-600", bg: "bg-amber-100", iconColor: "text-amber-600", icon: Clock },
+    ];
+  }, [selectedServiceId, sgcSubModule, stats, displayData, filteredData]);
 
   const chartLegends = useMemo(() => {
     if (selectedServiceId === "facturas") {
@@ -722,12 +968,65 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       return { aprobadas: "Resueltas", rechazadas: "Incompletas/Canceladas", manuales: "En Proceso", pendientes: "Pendientes" };
     }
     if (selectedServiceId === "sgc") {
-      return { aprobadas: "Facturas", rechazadas: "Guías", manuales: "Notas de Crédito", pendientes: "Notas de Débito" };
+      if (sgcSubModule === "docs") return { aprobadas: "Facturas", rechazadas: "Guías", manuales: "Notas Crédito", pendientes: "Notas Débito" };
+      if (sgcSubModule === "picking") return { aprobadas: "Preparados", rechazadas: "Observados", manuales: "En Proceso", pendientes: "Pendientes" };
+      if (sgcSubModule === "contratos") return { aprobadas: "Vigentes", rechazadas: "Finalizados", manuales: "Por Vencer", pendientes: "Pendientes" };
+      if (sgcSubModule === "equipos") return { aprobadas: "Operativos", rechazadas: "Incidencias", manuales: "Mantención", pendientes: "Pendiente Asignación" };
+      if (sgcSubModule === "despachos") return { aprobadas: "Entregados", rechazadas: "Rechazados", manuales: "En Ruta", pendientes: "Por Despachar" };
+      return { aprobadas: "Facturación", rechazadas: "Despachos", manuales: "Picking", pendientes: "Contratos" };
     }
-    return { aprobadas: "Aprobadas", rechazadas: "Rechazadas", manuales: "Manuales", pendientes: "Pendientes" };
-  }, [selectedServiceId]);
+    if (selectedServiceId === "dte") {
+      return { aprobadas: "Exitosas", rechazadas: "Fallidas", manuales: "Manuales", pendientes: "Pendientes" };
+    }
+    if (selectedServiceId === "mi-cuenta") {
+      return { aprobadas: "Suministros", rechazadas: "Incidencias", manuales: "Manuales", pendientes: "Pendientes" };
+    }
+    return { aprobadas: "Exitosos", rechazadas: "Observados", manuales: "Manuales", pendientes: "Pendientes" };
+  }, [selectedServiceId, sgcSubModule]);
 
   const pieData = useMemo(() => {
+    if (selectedServiceId === "sgc") {
+      if (sgcSubModule === "picking") {
+        const prod = sgcExtraData.picking?.productivity || [];
+        const aprobadoCount = prod.filter((p: any) => p.estado === 1 || p.estado === 2).reduce((sum: number, p: any) => sum + (p.count || 0), 0);
+        const manualCount = prod.filter((p: any) => p.estado === 0).reduce((sum: number, p: any) => sum + (p.count || 0), 0);
+        const alertCount = sgcExtraData.picking?.kpis?.total_alertas || stats.rejected;
+        return [
+          { name: "Preparados Bodega", value: aprobadoCount || stats.approved, color: "#10b981" },
+          { name: "En Armado / Proceso", value: manualCount || stats.manual, color: "#f59e0b" },
+          { name: "Con Alertas / Obs", value: alertCount, color: "#ef4444" },
+        ].filter(item => item.value > 0);
+      }
+      if (sgcSubModule === "contratos") {
+        const cs = sgcExtraData.contratos?.stats || {};
+        return [
+          { name: "Vigentes Activos", value: cs.active || stats.approved, color: "#10b981" },
+          { name: "Por Vencer (7d)", value: cs.vencer_7_dias || stats.manual, color: "#f59e0b" },
+          { name: "Sin Firma Registrada", value: cs.sin_firma || stats.rejected, color: "#ef4444" },
+          { name: "Sin Valor Asignado", value: cs.sin_valor || stats.pending, color: "#3b82f6" },
+        ].filter(item => item.value > 0);
+      }
+      if (sgcSubModule === "equipos") {
+        const eqSum = sgcExtraData.equipos?.summary || {};
+        const eqAlt = sgcExtraData.equipos?.alerts || {};
+        return [
+          { name: "Operativos Activos", value: eqSum.active || stats.approved, color: "#10b981" },
+          { name: "En Bodega / Pausa", value: eqSum.in_warehouse || stats.manual, color: "#f59e0b" },
+          { name: "Sin Lectura (30d)", value: eqAlt.sin_lectura_30 || stats.rejected, color: "#ef4444" },
+          { name: "Sin Contrato Vigente", value: eqAlt.sin_contrato || stats.pending, color: "#3b82f6" },
+        ].filter(item => item.value > 0);
+      }
+      if (sgcSubModule === "despachos") {
+        const dpSt = sgcExtraData.despachos?.states || {};
+        return [
+          { name: "Despachados Exitosos", value: dpSt.despachado || stats.approved, color: "#10b981" },
+          { name: "En Ruta Transporte", value: dpSt.en_proceso || stats.manual, color: "#f59e0b" },
+          { name: "Anulados / Rechazados", value: dpSt.anulado_rechazado || stats.rejected, color: "#ef4444" },
+          { name: "Por Despachar", value: dpSt.pendiente || stats.pending, color: "#3b82f6" },
+        ].filter(item => item.value > 0);
+      }
+    }
+
     let names = {
       approved: "Aprobadas",
       rejected: "Rechazadas",
@@ -739,7 +1038,12 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     } else if (selectedServiceId === "ofitec") {
       names = { approved: "Resueltas", rejected: "Incompletas/Canceladas", manual: "En Proceso", pending: "Pendientes" };
     } else if (selectedServiceId === "sgc") {
-      names = { approved: "Facturas", rejected: "Guías", manual: "Notas de Crédito", pending: "Notas de Débito" };
+      if (sgcSubModule === "docs") names = { approved: "Facturas", rejected: "Guías", manual: "Notas Crédito", pending: "Notas Débito" };
+      else names = { approved: "Facturación", rejected: "Despachos", manual: "Picking", pending: "Contratos" };
+    } else if (selectedServiceId === "dte") {
+      names = { approved: "Exitosas", rejected: "Fallidas", manual: "Manuales", pending: "Pendientes" };
+    } else if (selectedServiceId === "mi-cuenta") {
+      names = { approved: "Suministros", rejected: "Incidencias", manual: "Manuales", pending: "Pendientes" };
     }
     const data = [
       { name: names.approved, value: stats.approved, color: "#10b981" },
@@ -748,16 +1052,45 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
       { name: names.pending, value: stats.pending, color: "#3b82f6" },
     ].filter(item => item.value > 0);
     
-    // Si solo hay un segmento, añadir un segmento dummy para que la etiqueta no se superponga
     if (data.length === 1) {
       data.push({ name: " ", value: 1, color: "transparent" });
     }
     return data;
-  }, [stats.approved, stats.rejected, stats.manual, stats.pending, selectedServiceId]);
+  }, [stats.approved, stats.rejected, stats.manual, stats.pending, selectedServiceId, sgcSubModule, sgcExtraData]);
 
   const chartData = useMemo(() => {
-    return generateMonthlyData(filteredData);
-  }, [filteredData]);
+    if (selectedServiceId === "sgc") {
+      const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+      if (sgcSubModule === "picking" && sgcExtraData.picking?.byMonth) {
+        return sgcExtraData.picking.byMonth.map((m: any) => ({
+          month: months[m.mes - 1] || `${m.mes}`,
+          aprobadas: m.count || 0,
+          rechazadas: 0,
+          manuales: 0,
+          pendientes: 0
+        })).reverse().slice(-6);
+      }
+      if (sgcSubModule === "contratos" && sgcExtraData.contratos?.byMonth) {
+        return sgcExtraData.contratos.byMonth.map((m: any) => ({
+          month: months[m.mes - 1] || `${m.mes}`,
+          aprobadas: m.count || 0,
+          rechazadas: 0,
+          manuales: 0,
+          pendientes: 0
+        })).reverse().slice(-6);
+      }
+      if (sgcSubModule === "despachos" && sgcExtraData.despachos?.byMonth) {
+        return sgcExtraData.despachos.byMonth.map((m: any) => ({
+          month: months[m.mes - 1] || `${m.mes}`,
+          aprobadas: m.count || 0,
+          rechazadas: 0,
+          manuales: 0,
+          pendientes: 0
+        })).reverse().slice(-6);
+      }
+    }
+    return generateMonthlyData(displayData);
+  }, [displayData, selectedServiceId, sgcSubModule, sgcExtraData]);
 
   const client = useMemo(() => {
     return clients.find(c => c.id === clientId);
@@ -769,7 +1102,7 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
     return allServices.filter(service => !isServiceComingSoon(service.id));
   }, [client, clientId]);
 
-  const hasApiEndpoint = clientId === "cl_ofimundo";
+  const hasApiEndpoint = true;
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -884,18 +1217,6 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
                   <span>{client.rut}</span>
                 </div>
               )}
-              {client.email && (
-                <div className="flex items-center gap-1">
-                  <Mail className="h-3 w-3" />
-                  <span>{client.email}</span>
-                </div>
-              )}
-              {client.phone && (
-                <div className="flex items-center gap-1">
-                  <Phone className="h-3 w-3" />
-                  <span>{client.phone}</span>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -911,7 +1232,10 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
                 key={service.id}
                 variant={selectedServiceId === service.id ? "default" : "outline"}
                 size="sm"
-                onClick={() => setSelectedServiceId(service.id)}
+                onClick={() => {
+                  setSelectedServiceId(service.id);
+                  if (service.id === "sgc") setSgcSubModule("all");
+                }}
                 className={cn(
                   "h-8 text-xs font-semibold px-3 transition-colors",
                   selectedServiceId === service.id && "bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -924,27 +1248,84 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         </div>
       )}
 
-      {/* Botón Mostrar/Ocultar Filtros */}
+      {/* Sub-monitoreos de SGC */}
+      {selectedServiceId === "sgc" && (
+        <div className="flex items-center gap-2 bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200 animate-in fade-in slide-in-from-top-1 duration-200">
+          <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider ml-1 flex items-center gap-1.5 shrink-0">
+            <Activity className="h-3.5 w-3.5 text-emerald-600" />
+            Monitoreos SGC:
+          </span>
+          <div className="flex gap-1.5 flex-wrap">
+            {[
+              { id: "all", label: "🌐 Todos los Monitoreos" },
+              { id: "docs", label: "📄 Facturación SGC" },
+              { id: "picking", label: "📦 Monitoreo de Picking" },
+              { id: "contratos", label: "📝 Contratos SGC" },
+              { id: "equipos", label: "💻 Equipos en Parque" },
+              { id: "despachos", label: "🚚 Guías & Despachos" },
+            ].map((sub) => (
+              <Button
+                key={sub.id}
+                variant={sgcSubModule === sub.id ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSgcSubModule(sub.id as any)}
+                className={cn(
+                  "h-7 text-xs font-semibold px-2.5 transition-all rounded-md",
+                  sgcSubModule === sub.id
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                    : "bg-white hover:bg-emerald-100/50 text-slate-700 border-emerald-200"
+                )}
+              >
+                {sub.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Botón Mostrar/Ocultar Filtros + Botón Ver detalles */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <Button 
-          variant="outline" 
-          onClick={() => setShowFilters(!showFilters)} 
-          className="flex items-center gap-2 text-sm h-9 px-4"
-        >
-          <Filter className="h-4 w-4" />
-          <span>{showFilters ? "Ocultar filtros" : "Mostrar filtros"}</span>
-          {activeFiltersCount > 0 && (
-            <Badge variant="secondary" className="ml-1 text-xs px-2">{activeFiltersCount}</Badge>
-          )}
-          <ChevronDown className={cn("h-4 w-4 transition-transform", showFilters && "rotate-180")} />
-        </Button>
-        
-        {activeFiltersCount > 0 && (
-          <Button variant="ghost" onClick={resetFilters} className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600 h-9">
-            <X className="h-4 w-4" />
-            <span>Limpiar filtros</span>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => setShowFilters(!showFilters)} 
+            className="flex items-center gap-2 text-sm h-9 px-4"
+          >
+            <Filter className="h-4 w-4" />
+            <span>{showFilters ? "Ocultar filtros" : "Mostrar filtros"}</span>
+            {activeFiltersCount > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs px-2">{activeFiltersCount}</Badge>
+            )}
+            <ChevronDown className={cn("h-4 w-4 transition-transform", showFilters && "rotate-180")} />
           </Button>
-        )}
+          
+          {activeFiltersCount > 0 && (
+            <Button variant="ghost" onClick={resetFilters} className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600 h-9">
+              <X className="h-4 w-4" />
+              <span>Limpiar filtros</span>
+            </Button>
+          )}
+        </div>
+
+        <Button
+          onClick={() => {
+            if (onNavigateToTimeline) {
+              onNavigateToTimeline();
+            } else {
+              if (onClose) onClose();
+              const timelineTab = document.querySelector('[data-value="timeline"]') as HTMLButtonElement | null;
+              if (timelineTab) {
+                timelineTab.click();
+              } else {
+                window.location.href = `/servicio/${selectedServiceId}?tab=timeline`;
+              }
+            }
+          }}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-4 h-9 gap-2 shadow-xs ml-auto"
+        >
+          <Activity className="h-4 w-4" />
+          Ver detalles
+        </Button>
       </div>
 
       {/* Panel de filtros */}
@@ -952,10 +1333,47 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <div className="space-y-5">
             <div className="space-y-2">
-              <Label className="text-sm font-semibold flex items-center gap-2">
-                <CalendarIcon className="h-4 w-4 text-emerald-500" />
-                Rango de Fechas
-              </Label>
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-emerald-500" />
+                  Rango de Fechas
+                </Label>
+                <Select
+                  onValueChange={(val) => {
+                    const now = new Date();
+                    if (val === "current-month") {
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: startOfMonth(now), fechaHasta: endOfMonth(now) }));
+                    } else if (val === "prev-month") {
+                      const prevMonth = subMonths(now, 1);
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: startOfMonth(prevMonth), fechaHasta: endOfMonth(prevMonth) }));
+                    } else if (val === "last30") {
+                      const from = new Date();
+                      from.setDate(now.getDate() - 30);
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: from, fechaHasta: now }));
+                    } else if (val === "last90") {
+                      const from = new Date();
+                      from.setDate(now.getDate() - 90);
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: from, fechaHasta: now }));
+                    } else if (val === "year2026") {
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: new Date(2026, 0, 1), fechaHasta: new Date(2026, 11, 31) }));
+                    } else if (val === "all") {
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: null, fechaHasta: null }));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs w-[180px] bg-background">
+                    <SelectValue placeholder="Periodos rápidos..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current-month">📅 Mes Actual</SelectItem>
+                    <SelectItem value="prev-month">📅 Mes Anterior</SelectItem>
+                    <SelectItem value="last30">📅 Últimos 30 días</SelectItem>
+                    <SelectItem value="last90">📅 Últimos 90 días</SelectItem>
+                    <SelectItem value="year2026">📅 Todo el Año 2026</SelectItem>
+                    <SelectItem value="all">🌐 Sin Límite (Histórico)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -1059,34 +1477,30 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
         </div>
       )}
 
-      {/* Indicador de filtros activos */}
-      {activeFiltersCount > 0 && (
-        <div className="flex flex-wrap gap-2 items-center p-2.5 bg-emerald-50 rounded-lg border border-emerald-100">
-          <span className="text-xs font-medium text-emerald-700">Filtros activos:</span>
-          {filters.tipoDocumento !== "todos" && (
-            <Badge variant="secondary" className="bg-white text-xs">
-              Tipo: {getTipoNombre(filters.tipoDocumento)}
-            </Badge>
-          )}
-          {filters.estado !== "todos" && (
-            <Badge variant="secondary" className="bg-white text-xs">
-              Estado: {filters.estado === "aprobado" ? "Aprobados" : 
-                       filters.estado === "rechazado" ? "Rechazados" : 
-                       filters.estado === "manual" ? "Manuales" : "Pendientes"}
-            </Badge>
-          )}
-          {(filters.fechaDesde || filters.fechaHasta) && (
-            <Badge variant="secondary" className="bg-white text-xs">
-              📅 {filters.fechaDesde ? format(filters.fechaDesde, "dd/MM/yy") : "Inicio"} 
-              {" → "} 
-              {filters.fechaHasta ? format(filters.fechaHasta, "dd/MM/yy") : "Hoy"}
-            </Badge>
-          )}
-          <span className="text-xs text-emerald-600 ml-auto">
-            {filteredData.length} documentos encontrados
-          </span>
-        </div>
-      )}
+      {/* Indicador de filtros activos / Rango de fechas */}
+      <div className="flex flex-wrap gap-2 items-center p-2.5 bg-emerald-50/70 rounded-lg border border-emerald-200 mt-2 mb-3 shadow-3xs">
+        <span className="text-xs font-semibold text-emerald-800">Filtro de Fecha Actual:</span>
+        <Badge variant="secondary" className="bg-white text-xs border border-emerald-100 shadow-2xs font-medium text-emerald-700">
+          📅 {filters.fechaDesde ? format(filters.fechaDesde, "dd/MM/yyyy") : "Inicio Histórico"} 
+          {" → "} 
+          {filters.fechaHasta ? format(filters.fechaHasta, "dd/MM/yyyy") : "Hoy"}
+        </Badge>
+        {filters.tipoDocumento !== "todos" && (
+          <Badge variant="secondary" className="bg-white text-xs border border-emerald-100 font-medium">
+            Tipo: {getTipoNombre(filters.tipoDocumento)}
+          </Badge>
+        )}
+        {filters.estado !== "todos" && (
+          <Badge variant="secondary" className="bg-white text-xs border border-emerald-100 font-medium">
+            Estado: {filters.estado === "aprobado" ? "Aprobados" : 
+                     filters.estado === "rechazado" ? "Rechazados" : 
+                     filters.estado === "manual" ? "Manuales" : "Pendientes"}
+          </Badge>
+        )}
+        <span className="text-xs font-semibold text-emerald-700 ml-auto">
+          {filteredData.length} registros encontrados
+        </span>
+      </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -1212,35 +1626,29 @@ export function ClientDashboard({ clientId, onClose }: ClientDashboardProps) {
             </Card>
           </div>
 
-          {/* Último error de infraestructura */}
-          {(() => {
-            const ultimoError = filteredData.find((e: any) => isInfraestructuraError(e.motivo || ""));
-            if (ultimoError) {
-              return (
-                <Card className="border-red-200 bg-red-50/50">
-                  <CardHeader className="pb-1">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2 text-red-700">
-                      <AlertCircle className="h-4 w-4" />
-                      Último error de infraestructura
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-sm">
-                      <p className="font-medium">{ultimoError.razon_social || "Proveedor"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Folio #{ultimoError.folio_documento} • {ultimoError.tipo_documento === "33" ? "Factura" : ultimoError.tipo_documento === "34" ? "Factura Exenta" : "Nota Crédito"}
-                      </p>
-                      <p className="text-xs text-red-600 mt-1">{ultimoError.motivo}</p>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        {format(normalizeDate(ultimoError.fecha_proceso), "dd/MM/yyyy HH:mm")}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            }
-            return null;
-          })()}
+          {/* Acceso a Línea de Tiempo */}
+          <div className="flex justify-end pt-2">
+            <Button
+              onClick={() => {
+                if (onNavigateToTimeline) {
+                  onNavigateToTimeline();
+                } else {
+                  if (onClose) onClose();
+                  const timelineTab = document.querySelector('[data-value="timeline"]') as HTMLButtonElement | null;
+                  if (timelineTab) {
+                    timelineTab.click();
+                  } else {
+                    window.location.href = `/servicio/${selectedServiceId}?tab=timeline`;
+                  }
+                }
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-5 h-9 gap-2 shadow-xs"
+            >
+              <Activity className="h-4 w-4" />
+              Ver detalles en Línea de Tiempo
+              <ChevronDown className="h-4 w-4 -rotate-90" />
+            </Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="services" className="mt-4">

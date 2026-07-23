@@ -36,7 +36,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { services, clients, getClientById, getClientServices, type Service, type Client } from "@/lib/services-data";
+import { services, clients, getClientById, getClientServices, subscribeToData, type Service, type Client } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { cn } from "@/lib/utils";
@@ -149,6 +149,7 @@ export function ServicesList() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showClientDashboard, setShowClientDashboard] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
   
   // Modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
@@ -156,6 +157,13 @@ export function ServicesList() {
     EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
   );
   const [selectAll, setSelectAll] = useState(true);
+
+  // Suscribirse a cambios en los datos reales de la base de datos
+  useEffect(() => {
+    return subscribeToData(() => {
+      setDataVersion(v => v + 1);
+    });
+  }, []);
 
   // Función para verificar si un servicio está próximo
   const isComingSoon = (serviceId: string): boolean => {
@@ -226,7 +234,7 @@ export function ServicesList() {
       status: getRealServiceStatus(service),
       isComingSoon: isComingSoon(service.id),
     }));
-  }, [services]);
+  }, [services, dataVersion]);
 
   const filteredServices = useMemo(() => {
     let result = [...services];

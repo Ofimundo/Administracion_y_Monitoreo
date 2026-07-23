@@ -133,22 +133,7 @@ export function ClientDetailModal({
             </Card>
           </div>
 
-          {/* Contact Info */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Información de Contacto</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex items-center gap-2 text-sm">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-                <span>{clientData.contactEmail}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{clientData.contactPhone}</span>
-              </div>
-            </CardContent>
-          </Card>
+
 
           {/* Recent Activity */}
           <Card>

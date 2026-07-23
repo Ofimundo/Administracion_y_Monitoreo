@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,10 +97,34 @@ interface Filters {
   fechaHasta: Date | null;
 }
 
+const EXPORT_FIELDS = [
+  { id: "tipo", label: "Tipo Documento", default: true },
+  { id: "folio", label: "Folio Documento", default: true },
+  { id: "rut_proveedor", label: "RUT Proveedor", default: true },
+  { id: "razon_social", label: "Razón Social", default: true },
+  { id: "orden_compra", label: "Orden de Compra (OC)", default: true },
+  { id: "dias_por_vencer", label: "Días por Vencer", default: true },
+  { id: "estado", label: "Estado Proceso", default: true },
+  { id: "fecha_proceso", label: "Fecha de Proceso", default: true },
+  { id: "motivo", label: "Motivo / Detalle", default: true },
+  { id: "id_proceso", label: "ID Proceso", default: false },
+  { id: "id_regla", label: "ID Regla Aplicada", default: false },
+  { id: "horas_por_revisar", label: "Horas por Revisar", default: false },
+  { id: "fecha_modificacion", label: "Fecha Modificación", default: false },
+  { id: "exportDate", label: "Fecha de Exportación", default: true },
+];
+
 export function InvoiceAcceptanceDashboard() {
   const [activeTab, setActiveTab] = useState("bitacora");
   const [bitacora, setBitacora] = useState<BitacoraEntry[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Estados de exportación
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
+  );
+  const [selectAll, setSelectAll] = useState(true);
   
   // Estados de filtros
   const [filters, setFilters] = useState<Filters>({
@@ -231,43 +256,97 @@ export function InvoiceAcceptanceDashboard() {
     }, 100);
   };
 
-  const handleExportExcel = () => {
+  const handleOpenExportModal = () => {
     if (bitacora.length === 0) {
       toast.error("No hay datos para exportar");
       return;
     }
+    setShowExportModal(true);
+  };
+
+  const handleToggleField = (fieldId: string) => {
+    setSelectedFields(prev => {
+      const newSelection = prev.includes(fieldId)
+        ? prev.filter(id => id !== fieldId)
+        : [...prev, fieldId];
+      
+      setSelectAll(newSelection.length === EXPORT_FIELDS.length);
+      return newSelection;
+    });
+  };
+
+  const handleToggleAllFields = () => {
+    if (selectAll) {
+      setSelectedFields([]);
+      setSelectAll(false);
+    } else {
+      setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+      setSelectAll(true);
+    }
+  };
+
+  const handleExportToExcel = () => {
+    if (selectedFields.length === 0) {
+      toast.error("Por favor selecciona al menos un campo para exportar.");
+      return;
+    }
+    if (bitacora.length === 0) {
+      toast.error("No hay datos para exportar");
+      return;
+    }
+
     try {
-      const exportData = bitacora.map(entry => ({
-        "Tipo": entry.tipo_documento === 33 ? "33" : entry.tipo_documento === 34 ? "34" : "61",
-        "Folio": entry.folio_documento,
-        "RUT Proveedor": entry.rut_proveedor,
-        "Razón Social": entry.razon_social,
-        "OC": entry.orden_compra || "—",
-        "Días": entry.dias_por_vencer,
-        "Estado": entry.estado === "Pendiente Espera" ? "Espera Express" : (entry.estado === "Manual" ? "Revisión Manual" : (entry.estado || "No Procesado")),
-        "Fecha Proceso": format(new Date(entry.fecha_proceso), "dd/MM/yyyy HH:mm:ss"),
-        "Motivo": entry.motivo || "—",
-      }));
+      const fieldMap: Record<string, (entry: BitacoraEntry) => any> = {
+        tipo: (e) => e.tipo_documento === 33 ? "33 (Factura)" : e.tipo_documento === 34 ? "34 (Exenta)" : e.tipo_documento === 61 ? "61 (Nota Crédito)" : e.tipo_documento,
+        folio: (e) => e.folio_documento,
+        rut_proveedor: (e) => e.rut_proveedor,
+        razon_social: (e) => e.razon_social,
+        orden_compra: (e) => e.orden_compra || "—",
+        dias_por_vencer: (e) => e.dias_por_vencer,
+        estado: (e) => e.estado === "Pendiente Espera" ? "Espera Express" : (e.estado === "Manual" ? "Revisión Manual" : (e.estado || "No Procesado")),
+        fecha_proceso: (e) => e.fecha_proceso ? format(new Date(e.fecha_proceso), "dd/MM/yyyy HH:mm:ss") : "N/A",
+        motivo: (e) => e.motivo || "—",
+        id_proceso: (e) => e.id_proceso ?? "N/A",
+        id_regla: (e) => e.id_regla ?? "N/A",
+        horas_por_revisar: (e) => e.horas_por_revisar ?? "N/A",
+        fecha_modificacion: (e) => e.fecha_modificacion ? format(new Date(e.fecha_modificacion), "dd/MM/yyyy HH:mm:ss") : "N/A",
+        exportDate: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
+      };
+
+      const fieldLabels: Record<string, string> = {};
+      EXPORT_FIELDS.forEach(f => fieldLabels[f.id] = f.label);
+
+      const exportData = bitacora.map(entry => {
+        const row: Record<string, any> = {};
+        selectedFields.forEach(fieldId => {
+          const label = fieldLabels[fieldId] || fieldId;
+          row[label] = fieldMap[fieldId](entry);
+        });
+        return row;
+      });
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(exportData);
       
-      const colWidths = [
-        { wch: 10 }, // Tipo
-        { wch: 12 }, // Folio
-        { wch: 15 }, // RUT
-        { wch: 30 }, // Razón Social
-        { wch: 18 }, // OC
-        { wch: 10 }, // Días
-        { wch: 18 }, // Estado
-        { wch: 22 }, // Fecha Proceso
-        { wch: 45 }, // Motivo
-      ];
+      const colWidths = selectedFields.map(() => ({ wch: 25 }));
       ws['!cols'] = colWidths;
       
-      XLSX.utils.book_append_sheet(wb, ws, "Bitacora RPA");
+      XLSX.utils.book_append_sheet(wb, ws, "Bitácora RPA");
+
+      const summaryData = [
+        { "Métrica": "Total Evaluadas", "Valor": stats.total },
+        { "Métrica": "Aprobadas SII", "Valor": stats.aprobados },
+        { "Métrica": "Rechazadas SII", "Valor": stats.rechazados },
+        { "Métrica": "En Espera / Pendiente", "Valor": stats.pendientes },
+        { "Métrica": "Revisión Manual", "Valor": stats.manuales },
+        { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      ];
+      const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+
       XLSX.writeFile(wb, `reporte_aceptacion_rechazo_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
-      toast.success("Reporte Excel descargado exitosamente");
+      toast.success(`Reporte Excel descargado (${selectedFields.length} campos)`);
+      setShowExportModal(false);
     } catch (err) {
       console.error(err);
       toast.error("Error al exportar a Excel");
@@ -499,7 +578,7 @@ export function InvoiceAcceptanceDashboard() {
             <RefreshCw className="h-4 w-4" />
             Sincronizar Softland
           </Button>
-          <Button onClick={handleExportExcel} variant="outline" className="gap-2 border-emerald-600/30 hover:bg-emerald-50 text-emerald-700 font-semibold">
+          <Button onClick={handleOpenExportModal} variant="outline" className="gap-2 border-emerald-600/30 hover:bg-emerald-50 text-emerald-700 font-semibold">
             <FileSpreadsheet className="h-4 w-4" />
             Descargar Reporte
           </Button>
@@ -962,6 +1041,71 @@ export function InvoiceAcceptanceDashboard() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Modal de Exportación a Excel */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              Seleccionar Campos para Exportar
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectAll}
+                  onCheckedChange={handleToggleAllFields}
+                  id="select-all-invoice"
+                />
+                <Label htmlFor="select-all-invoice" className="font-semibold">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedFields.length} de {EXPORT_FIELDS.length} campos seleccionados
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {EXPORT_FIELDS.map((field) => (
+                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedFields.includes(field.id)}
+                    onCheckedChange={() => handleToggleField(field.id)}
+                    id={`field-invoice-${field.id}`}
+                  />
+                  <Label htmlFor={`field-invoice-${field.id}`} className="text-sm cursor-pointer">
+                    {field.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            {selectedFields.length === 0 && (
+              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
+                ⚠️ Debes seleccionar al menos un campo para exportar.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportModal(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleExportToExcel} 
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={selectedFields.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFields.length} campos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

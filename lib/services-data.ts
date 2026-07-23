@@ -25,8 +25,9 @@ export interface Log {
   id: string;
   message: string;
   timestamp: string;
-  type: "success" | "error" | "warning" | "info";
+  type: "success" | "error" | "warning" | "info" | "comingSoon";
   details?: string;
+  estado?: string;
 }
 
 export type ServiceStatus = "success" | "warning" | "error";
@@ -47,18 +48,7 @@ export interface MetricDataPoint {
 
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
-  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte"] },
-  { id: "cl1", name: "Empresa A", rut: "76.123.456-7", email: "contacto@empresaa.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl2", name: "Empresa B", rut: "77.234.567-8", email: "info@empresab.cl", phone: "+56 2 2345 6789", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl3", name: "Empresa C", rut: "78.345.678-9", email: "gerencia@empresac.cl", phone: "+56 2 3456 7890", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl4", name: "Banco Santander", rut: "79.456.789-0", email: "soporte@santander.cl", phone: "+56 2 4567 8901", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl5", name: "Banco Chile", rut: "80.567.890-1", email: "atencion@bancochile.cl", phone: "+56 2 5678 9012", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl6", name: "Recursos Humanos SA", rut: "81.678.901-2", email: "contacto@rrhhsa.cl", phone: "+56 2 6789 0123", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl8", name: "Banco Estado", rut: "82.789.012-3", email: "servicios@bancoestado.cl", phone: "+56 2 7890 1234", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl9", name: "Coopeuch", rut: "83.890.123-4", email: "atencion@coopeuch.cl", phone: "+56 2 8901 2345", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl10", name: "Servicio de Impuestos Internos", rut: "84.901.234-5", email: "sii@hacienda.cl", phone: "+56 2 9012 3456", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl12", name: "Auditores Asociados", rut: "85.012.345-6", email: "contacto@auditores.cl", phone: "+56 2 0123 4567", errorPercentage: 0, status: "success", services: [] },
-  { id: "cl14", name: "Distribuidora Nacional", rut: "86.123.456-7", email: "ventas@distribuidora.cl", phone: "+56 2 1234 5678", errorPercentage: 0, status: "success", services: [] },
+  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"] },
 ];
 
 // Servicios que están próximamente (muestran mensaje especial)
@@ -185,10 +175,43 @@ const baseServices: Service[] = [
     logs: [],
     isComingSoon: false,
   },
+  {
+    id: "mi-cuenta",
+    name: "Portal Mi Cuenta",
+    description: "Portal de autoservicio de clientes para la gestión de solicitudes, pedidos de suministros de impresoras y equipos, generación de tickets y seguimiento de peticiones por cliente.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
 ];
 
 // Variable mutable para los servicios (permite actualización dinámica)
 let services: Service[] = [...baseServices];
+
+// Sistema de Suscripción para Reactividad
+type DataListener = () => void;
+const listeners = new Set<DataListener>();
+
+export function subscribeToData(listener: DataListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function notifyListeners(): void {
+  listeners.forEach(listener => {
+    try {
+      listener();
+    } catch (e) {
+      console.error("Error in data listener:", e);
+    }
+  });
+}
 
 // Función para actualizar un servicio con datos reales
 export function updateServiceStatus(serviceId: string, errorPercentage: number, status: "success" | "warning" | "error", logs?: Log[]) {
@@ -215,6 +238,7 @@ export function updateServiceStatus(serviceId: string, errorPercentage: number, 
         status,
       };
     }
+    notifyListeners();
   }
 }
 
@@ -236,6 +260,7 @@ export function updateServiceLogs(serviceId: string, logs: Log[]) {
       ...services[serviceIndex],
       logs: [...logs, ...services[serviceIndex].logs].slice(0, 100),
     };
+    notifyListeners();
   }
 }
 
@@ -257,7 +282,9 @@ export const getClientById = (clientId: string): Client | undefined => {
 // Función para resetear servicios a estado base (útil para recarga)
 export const resetServicesToBase = () => {
   services = [...baseServices];
+  notifyListeners();
 };
+
 
 // Generar datos de métricas para el dashboard basados en los servicios reales
 export const generateMetricsData = (): MetricDataPoint[] => {
@@ -317,3 +344,145 @@ export const isServiceComingSoon = (serviceId: string): boolean => {
   const service = services.find(s => s.id === serviceId);
   return service?.isComingSoon || false;
 };
+
+// Mapeo de códigos de base de datos a IDs del frontend
+const serviceIdMap: Record<string, string> = {
+  "ACRF_01": "facturas",
+  "DTE_01": "dte",
+  "OFI_01": "oficore",
+  "SGC_01": "sgc",
+  "OFT_01": "ofitec",
+  "MIC_01": "mi-cuenta"
+};
+
+// Variables mutables para prospectos y proyectos
+export let prospectos: any[] = [];
+export let proyectos: any[] = [];
+
+// Inicializar dinámicamente los clientes y servicios desde la base de datos
+export async function initializeDatabaseData(): Promise<boolean> {
+  try {
+    const [res, resProspectos, resProyectos] = await Promise.all([
+      fetch("/api/mon/services-data"),
+      fetch("/api/mon/fichas-prospecto"),
+      fetch("/api/mon/proyectos")
+    ]);
+    
+    const data = await res.json();
+    const dataProspectos = await resProspectos.json();
+    const dataProyectos = await resProyectos.json();
+    
+    if (dataProspectos.success && dataProspectos.data) {
+      prospectos.length = 0;
+      const normalized = dataProspectos.data.map((f: any) => ({
+        id: f.Id !== undefined ? f.Id : f.id,
+        codigo: f.Codigo !== undefined ? f.Codigo : f.codigo,
+        nombreProyecto: f.NombreProyecto !== undefined ? f.NombreProyecto : f.nombreProyecto,
+        estado: f.Estado !== undefined ? f.Estado : f.estado,
+        cliente: f.Cliente !== undefined ? f.Cliente : f.cliente,
+        gestorComercial: f.GestorComercial !== undefined ? f.GestorComercial : f.gestorComercial,
+        valorServicio: f.ValorServicio !== undefined ? f.ValorServicio : (f.valorServicio || 0),
+        lineaServicio: f.LineaServicio !== undefined ? f.LineaServicio : (f.lineaServicio || 'ACRF_01')
+      }));
+      prospectos.push(...normalized);
+    }
+    
+    if (dataProyectos.success && dataProyectos.data) {
+      proyectos.length = 0;
+      const normalized = dataProyectos.data.map((p: any) => ({
+        id: p.Id !== undefined ? p.Id : p.id,
+        codigo: p.Codigo !== undefined ? p.Codigo : p.codigo,
+        nombreProyecto: p.NombreProyecto !== undefined ? p.NombreProyecto : p.nombreProyecto,
+        cliente: p.Cliente !== undefined ? p.Cliente : p.cliente,
+        lider: p.Lider !== undefined ? p.Lider : p.lider,
+        estado: p.Estado !== undefined ? p.Estado : p.estado,
+        avance: p.Avance !== undefined ? p.Avance : p.avance,
+        venta: p.Venta !== undefined ? p.Venta : p.venta,
+        hhPlanificadas: p.HHPlanificadas !== undefined ? p.HHPlanificadas : p.hhPlanificadas,
+        hhReal: p.HHReal !== undefined ? p.HHReal : p.hhReal,
+        fechaInicio: p.FechaInicio !== undefined ? p.FechaInicio : p.fechaInicio,
+        fechaFin: p.FechaFin !== undefined ? p.FechaFin : p.fechaFin,
+        descripcion: p.Descripcion !== undefined ? p.Descripcion : p.descripcion
+      }));
+      proyectos.push(...normalized);
+    }
+
+    if (data.success && data.clientes && data.servicios && data.relaciones) {
+      // 1. Mapear servicios de base de datos
+      const dbServices: Service[] = data.servicios.map((s: any) => {
+        const mappedId = serviceIdMap[s.Codigo_Servicio] || s.Codigo_Servicio.toLowerCase();
+        
+        // Buscar definición de servicio base para heredar propiedades visuales
+        const existing = baseServices.find(b => b.id === mappedId);
+        
+        return {
+          id: mappedId,
+          name: s.Nombre_Servicio,
+          description: s.Descripcion || existing?.description || "",
+          errorPercentage: 0,
+          status: "success",
+          clients: [],
+          logs: existing?.logs || [],
+          isComingSoon: false
+        };
+      });
+
+      // 2. Mapear clientes de base de datos
+      const dbClients: Client[] = data.clientes.map((c: any) => {
+        return {
+          id: `client_${c.Cliente_ID}`,
+          name: c.Nombre_cliente || `Cliente ${c.Codigo_Cliente}`,
+          rut: c.Rut_Cliente,
+          email: c.Usuario_Creacion || `contacto@${(c.Nombre_cliente || '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'cliente'}.cl`,
+          phone: "+56 2 2840 9300",
+          errorPercentage: 0,
+          status: "success",
+          services: []
+        };
+      });
+
+      // 3. Establecer relaciones de asignación
+      data.relaciones.forEach((r: any) => {
+        const client = dbClients.find(c => c.id === `client_${r.Cliente_ID}`);
+        const dbSrv = data.servicios.find((s: any) => s.Servicio_ID === r.Servicio_ID);
+        if (client && dbSrv) {
+          const mappedServiceId = serviceIdMap[dbSrv.Codigo_Servicio] || dbSrv.Codigo_Servicio.toLowerCase();
+          
+          // Asociar servicio al cliente
+          if (client.services && !client.services.includes(mappedServiceId)) {
+            client.services.push(mappedServiceId);
+          }
+          
+          // Asociar cliente al servicio
+          const service = dbServices.find(s => s.id === mappedServiceId);
+          if (service) {
+            if (!service.clients) service.clients = [];
+            if (!service.clients.some(cl => cl.id === client.id)) {
+              service.clients.push({
+                id: client.id,
+                name: client.name,
+                errorPercentage: 0,
+                status: "success"
+              });
+            }
+          }
+        }
+      });
+
+      // 4. Actualizar arreglos exportados in-place para conservar las referencias importadas
+      clients.length = 0;
+      clients.push(...dbClients);
+
+      const comingSoonSrvs = baseServices.filter(s => s.isComingSoon);
+      services.length = 0;
+      services.push(...dbServices, ...comingSoonSrvs);
+
+      console.log(`✅ Creados y cargados dinámicamente ${clients.length} clientes y ${services.length} servicios.`);
+      notifyListeners();
+      return true;
+    }
+  } catch (error) {
+    console.error("❌ Error al inicializar datos de monitoreo:", error);
+  }
+  return false;
+}

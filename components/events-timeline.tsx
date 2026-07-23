@@ -1006,7 +1006,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               const Icon = style.icon;
               const isLast = index === filteredEvents.length - 1;
               const isInfra = isInfraestructuraLog(event.log);
-              const InfraIcon = isInfra ? getInfraIcon(event.log) : null;
+              const InfraIconComponent = isInfra ? getInfraIcon(event.log) : null;
               
               return (
                 <div
@@ -1033,8 +1033,8 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                       event.isComingSoon ? "bg-gray-100" : "bg-white shadow-sm border",
                       isInfra && "shadow-lg shadow-red-200"
                     )}>
-                      {isInfra ? (
-                        <InfraIcon className="h-4 w-4 text-red-600" />
+                      {isInfra && InfraIconComponent ? (
+                        <InfraIconComponent className="h-4 w-4 text-red-600" />
                       ) : (
                         <Icon className={cn("h-4 w-4", style.iconColor)} />
                       )}

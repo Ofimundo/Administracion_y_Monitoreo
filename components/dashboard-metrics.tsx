@@ -102,7 +102,7 @@ import { cn } from "@/lib/utils";
 import { format, subDays, parseISO, startOfDay, endOfDay, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
-import { services, generateMetricsData, type MetricDataPoint } from "@/lib/services-data";
+import { services, clients, subscribeToData, generateMetricsData, type MetricDataPoint, prospectos } from "@/lib/services-data";
 import { useRouter } from "next/navigation";
 
 const COLORS = ["#10b981", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899"];
@@ -188,13 +188,41 @@ const EXPORT_FIELDS = [
 export function DashboardMetrics({
   onNavigateToServices,
   onNavigateToTimeline,
+  onNavigateToClients,
+  onNavigateToSupport,
 }: {
   onNavigateToServices?: () => void;
   onNavigateToTimeline?: () => void;
+  onNavigateToClients?: () => void;
+  onNavigateToSupport?: () => void;
 }) {
   const router = useRouter();
   const [allData, setAllData] = useState<MetricDataPoint[]>([]);
   const [realInvoiceData, setRealInvoiceData] = useState<InvoiceData[]>([]);
+  const [dataVersion, setDataVersion] = useState(0);
+  const [negociosSearch, setNegociosSearch] = useState("");
+  
+  const prospects = useMemo(() => {
+    return [...prospectos];
+  }, [dataVersion]);
+
+  const filteredProspects = useMemo(() => {
+    if (!negociosSearch) return prospects;
+    const term = negociosSearch.toLowerCase();
+    return prospects.filter(p => 
+      (p.codigo || "").toLowerCase().includes(term) ||
+      (p.nombreProyecto || "").toLowerCase().includes(term) ||
+      (p.cliente || "").toLowerCase().includes(term) ||
+      (p.gestorComercial || "").toLowerCase().includes(term) ||
+      (p.estado || "").toLowerCase().includes(term)
+    );
+  }, [prospects, negociosSearch]);
+  
+  useEffect(() => {
+    return subscribeToData(() => {
+      setDataVersion(v => v + 1);
+    });
+  }, []);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
@@ -283,12 +311,15 @@ export function DashboardMetrics({
 
   const [infraStats, setInfraStats] = useState({
     online: true,
-    equiposPrincipales: 99.4,
-    servidoresCore: 100,
-    database: 100,
-    enlacesRed: 98.2,
+    eldenringOnline: true,
+    pacmanOnline: true,
+    bmwOnline: true,
+    servidoresOnline: 6,
+    totalServidores: 6,
+    porcentajeInfra: 100.0,
     version: null as string | null,
-    error: null as string | null
+    error: null as string | null,
+    servidores: [] as any[]
   });
 
   useEffect(() => {
@@ -301,12 +332,15 @@ export function DashboardMetrics({
         if (isMounted && data.success) {
           setInfraStats({
             online: data.online,
-            equiposPrincipales: parseFloat(data.equiposPrincipales.toFixed(2)),
-            servidoresCore: data.servidoresCore,
-            database: data.database,
-            enlacesRed: parseFloat(data.enlacesRed.toFixed(2)),
+            eldenringOnline: data.eldenringOnline ?? true,
+            pacmanOnline: data.pacmanOnline ?? true,
+            bmwOnline: data.bmwOnline ?? true,
+            servidoresOnline: data.servidoresOnline ?? 6,
+            totalServidores: data.totalServidores ?? 6,
+            porcentajeInfra: data.porcentajeInfra ?? 100.0,
             version: data.version || null,
-            error: data.error
+            error: data.error,
+            servidores: data.servidores || []
           });
         }
       } catch (err) {
@@ -421,6 +455,9 @@ export function DashboardMetrics({
   };
 
   const calculateAllMetrics = (servicesData: any, facturasData: any[]) => {
+    setOficoreData(servicesData.oficore?.detalles || []);
+    setOfitecData(servicesData.ofitec?.detalles || []);
+
     const isFiltered = filters.dateRange.from !== undefined;
     const limitDate = new Date("2026-07-09T00:00:00");
     limitDate.setDate(limitDate.getDate() - 14);
@@ -1313,9 +1350,9 @@ export function DashboardMetrics({
     });
     
     return Array.from(clientesMap.values());
-  }, []);
+  }, [dataVersion]);
 
-  const totalClientesActivos = clientesUnicos.length;
+  const totalClientesActivos = clients.length;
   const totalServiciosActivos = services.filter(s => !s.isComingSoon).length;
   
   const disponibilidad = useMemo(() => {
@@ -1323,10 +1360,68 @@ export function DashboardMetrics({
     if (activeServices.length === 0) return 100;
     const sum = activeServices.reduce((acc, s) => acc + getServiceAvailability(s.id), 0);
     return sum / activeServices.length;
-  }, [services, operacionStats.disponibilidadGlobal]);
+  }, [services, operacionStats.disponibilidadGlobal, dataVersion]);
 
-  // ✅ INFRAESTRUCTURA: Calcular promedio de Servidores Core y Bases de Datos (sin Enlaces de Red)
-  const infraestructuraZabbix = (infraStats.servidoresCore + infraStats.database) / 2;
+  // ✅ INFRAESTRUCTURA: Integración real con Zabbix (6 servidores principales)
+  const servidoresInfra = useMemo(() => {
+    if (infraStats.servidores && infraStats.servidores.length > 0) {
+      return infraStats.servidores;
+    }
+    return [
+      { id: "doom", nombre: "DOOM", ip: "192.168.1.6", cpu: 1.6, ram: 68.2, disk: 79.3, online: true },
+      { id: "pacman", nombre: "PACMAN", ip: "192.168.1.14", cpu: 0.6, ram: 80.7, disk: 62.7, online: true },
+      { id: "bmw", nombre: "BMW", ip: "192.168.1.x", cpu: 3.0, ram: 42.0, disk: 45.0, online: true, isCore: true },
+      { id: "eldenring", nombre: "ELDENRING", ip: "192.168.1.12", cpu: 7.6, ram: 66.3, disk: 58.2, online: true },
+      { id: "sekiro", nombre: "SEKIRO", ip: "192.168.1.5", cpu: 0.4, ram: 68.1, disk: 65.2, online: true },
+      { id: "zelda", nombre: "ZELDA", ip: "192.168.1.8", cpu: 5.5, ram: 58.0, disk: 52.4, online: true },
+    ];
+  }, [infraStats]);
+
+  const servidoresOnlineCount = useMemo(() => {
+    return servidoresInfra.filter(s => s.online).length;
+  }, [servidoresInfra]);
+
+  const porcentajeInfra = useMemo(() => {
+    if (servidoresInfra.length === 0) return 100.0;
+    const pct = (servidoresOnlineCount / servidoresInfra.length) * 100;
+    return parseFloat(pct.toFixed(2));
+  }, [servidoresOnlineCount, servidoresInfra.length]);
+
+  const infraestructuraZabbix = porcentajeInfra;
+
+  // ✅ TICKETS TECNOLOGÍA: Monitoreo por fecha del día e incidentes del área de tecnología
+  const monitoredDateStr = useMemo(() => {
+    if (filters.dateRange.from) {
+      const fromStr = format(filters.dateRange.from, "dd/MM/yyyy");
+      if (filters.dateRange.to && format(filters.dateRange.from, "yyyyMMdd") !== format(filters.dateRange.to, "yyyyMMdd")) {
+        return `${fromStr} - ${format(filters.dateRange.to, "dd/MM/yyyy")}`;
+      }
+      return fromStr;
+    }
+    return format(new Date(), "dd/MM/yyyy");
+  }, [filters.dateRange]);
+
+  const tecnologiaTicketsCount = useMemo(() => {
+    const details = oficoreData || [];
+    
+    // Determinar la fecha/rango que se está monitoreando
+    const targetFrom = filters.dateRange.from ? startOfDay(filters.dateRange.from) : startOfDay(new Date());
+    const targetTo = filters.dateRange.to ? endOfDay(filters.dateRange.to) : endOfDay(new Date());
+    
+    const targetTickets = details.filter((t: any) => {
+      // Filtrar por área de tecnología
+      const area = t.area_nombre || "";
+      const isTech = area.toUpperCase().includes("TECNOLOG");
+      if (!isTech) return false;
+      
+      // Filtrar por fecha dentro del rango del día
+      if (!t.fecha_detalle) return false;
+      const ticketDate = parseISO(t.fecha_detalle);
+      return ticketDate >= targetFrom && ticketDate <= targetTo;
+    });
+    
+    return targetTickets.length;
+  }, [oficoreData, filters.dateRange]);
 
   const ticketsPorDia = useMemo(() => {
     return detalleTickets.map(t => {
@@ -1472,40 +1567,111 @@ export function DashboardMetrics({
           PANEL 1: OPERACIONES Y DISPONIBILIDAD
           ============================================================ */}
       <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#1e40af] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
-          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">1</div>
-          <div className="flex flex-col items-center gap-1.5 my-auto">
-            <Cloud className="h-7 w-7 text-white/90" />
-            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Operaciones y Disponibilidad</p>
-            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Servicios e Infraestructura</p>
+        <div className="w-full lg:w-[120px] shrink-0 p-3 bg-[#1e40af] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-5 w-5 rounded-full bg-white/20 flex items-center justify-center font-bold text-[10px]">1</div>
+          <div className="flex flex-col items-center gap-1 my-auto">
+            <Cloud className="h-6 w-6 text-white/90" />
+            <p className="font-extrabold text-[9px] leading-tight tracking-wider uppercase">Operaciones y Disponibilidad</p>
+            <p className="text-[7.5px] text-white/80 font-medium tracking-wide uppercase leading-tight">Servicios e Infraestructura</p>
           </div>
-          <div className="hidden lg:block h-6 w-6" />
+          <div className="hidden lg:block h-5 w-5" />
         </div>
 
         <div className="flex-1 p-4 space-y-4 bg-slate-50/20">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Clientes</span>
-                <User className="h-4 w-4 text-blue-500" />
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Número de Clientes</span>
+                <div className="flex items-center gap-0.5">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-5 w-5 text-blue-600 hover:text-blue-700 hover:bg-blue-50/50" title="Ver lista">
+                        <List className="h-3 w-3" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-3 bg-white border border-slate-200 shadow-md rounded-lg z-50">
+                      <h4 className="font-bold text-xs text-slate-700 mb-2 border-b pb-1">Lista de Clientes ({clients.length})</h4>
+                      <div className="max-h-40 overflow-y-auto pr-1">
+                        <ul className="space-y-1">
+                          {clients.map(c => (
+                            <li key={c.id} className="text-xs text-slate-600 truncate py-0.5 px-1 hover:bg-slate-50 rounded">
+                              • {c.name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={onNavigateToClients} 
+                    className="h-5 w-5 text-slate-400 hover:text-slate-650 hover:bg-slate-50"
+                    title="Ir a pestaña de clientes"
+                  >
+                    <ArrowRight className="h-3 w-3" />
+                  </Button>
+                  <User className="h-4 w-4 text-blue-500 ml-1 shrink-0" />
+                </div>
               </div>
               <p className="text-xl font-black text-slate-800 mt-1">{totalClientesActivos}</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Activos</span>
             </div>
 
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Servicios</span>
-                <Layers className="h-4 w-4 text-purple-500" />
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Número de Servicios</span>
+                <div className="flex items-center gap-0.5">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-5 w-5 text-purple-600 hover:text-purple-700 hover:bg-purple-50/50" title="Ver lista">
+                        <List className="h-3 w-3" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-3 bg-white border border-slate-200 shadow-md rounded-lg z-50">
+                      <h4 className="font-bold text-xs text-slate-700 mb-2 border-b pb-1">Lista de Servicios ({services.filter(s => !s.isComingSoon).length})</h4>
+                      <div className="max-h-40 overflow-y-auto pr-1">
+                        <ul className="space-y-1">
+                          {services.filter(s => !s.isComingSoon).map(s => (
+                            <li key={s.id} className="text-xs text-slate-600 truncate py-0.5 px-1 hover:bg-slate-50 rounded" title={s.name}>
+                              • {s.name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={onNavigateToServices} 
+                    className="h-5 w-5 text-slate-400 hover:text-slate-650 hover:bg-slate-50"
+                    title="Ir a pestaña de servicios"
+                  >
+                    <ArrowRight className="h-3 w-3" />
+                  </Button>
+                  <Layers className="h-4 w-4 text-purple-500 ml-1 shrink-0" />
+                </div>
               </div>
               <p className="text-xl font-black text-slate-800 mt-1">{totalServiciosActivos}</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Activos</span>
             </div>
 
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Disponibilidad</span>
-                <Gauge className="h-4 w-4 text-emerald-500" />
+                <div className="flex items-center gap-0.5">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={onNavigateToServices} 
+                    className="h-5 w-5 text-slate-400 hover:text-slate-650 hover:bg-slate-50"
+                    title="Ir a pestaña de servicios"
+                  >
+                    <ArrowRight className="h-3 w-3" />
+                  </Button>
+                  <Gauge className="h-4 w-4 text-emerald-500 ml-1 shrink-0" />
+                </div>
               </div>
               <p className="text-xl font-black text-slate-800 mt-1">{disponibilidad.toFixed(2)}%</p>
             </div>
@@ -1528,37 +1694,36 @@ export function DashboardMetrics({
 
             <div 
               className="bg-white border rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
-              onClick={() => setShowTicketsModal(true)}
+              onClick={onNavigateToSupport}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ticket</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Tickets Tecnología</span>
                 <Ticket className="h-4 w-4 text-amber-500" />
               </div>
               <p className="text-xl font-black text-slate-800 mt-1">
-                {realInvoiceData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length}
+                {tecnologiaTicketsCount}
               </p>
-              <div className="flex items-center gap-1 text-[8px] text-amber-600 font-semibold">
-                <span>Ver detalle</span>
-                <ArrowRight className="h-3 w-3" />
+              <div className="flex items-center justify-between text-[8px] text-slate-400 mt-1">
+                <span className="font-semibold">{monitoredDateStr}</span>
+                <span className="text-amber-600 flex items-center gap-0.5 font-bold">
+                  Ver soporte <ArrowRight className="h-2.5 w-2.5" />
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <Card 
-              className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
-              onClick={onNavigateToServices}
-            >
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Disponibilidad por Servicio</span>
-                <ArrowRight className="h-3 w-3 text-emerald-500" />
+                <ArrowRight className="h-3 w-3 text-emerald-500 animate-pulse" />
               </div>
-              <div className="space-y-2 max-h-[170px] overflow-y-auto pr-1 mt-2">
+              <div className="space-y-1 max-h-[180px] overflow-y-auto pr-1 mt-2">
                 {sortedServices.map(s => {
                   if (s.isComingSoon) {
                     return (
-                      <div key={s.id} className="space-y-0.5">
-                        <div className="flex justify-between text-[9px] font-bold text-slate-450">
+                      <div key={s.id} className="space-y-0.5 p-1">
+                        <div className="flex justify-between text-[9px] font-bold text-slate-400">
                           <span className="truncate max-w-[120px]">{s.name}</span>
                           <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-100">Próximamente</span>
                         </div>
@@ -1568,8 +1733,16 @@ export function DashboardMetrics({
                   const avail = getServiceAvailability(s.id);
                   const color = avail >= 99 ? "bg-emerald-500" : (avail >= 96 ? "bg-emerald-500" : "bg-amber-500");
                   return (
-                    <div key={s.id} className="space-y-0.5">
-                      <div className="flex justify-between text-[9px] font-bold text-slate-650">
+                    <div 
+                      key={s.id} 
+                      className="space-y-0.5 hover:bg-slate-50 rounded p-1 cursor-pointer transition-colors group"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/servicio/${s.id}`);
+                      }}
+                      title={`Ver detalle de ${s.name}`}
+                    >
+                      <div className="flex justify-between text-[9px] font-bold text-slate-650 group-hover:text-blue-600 transition-colors">
                         <span className="truncate max-w-[140px]">{s.name}</span>
                         <span>{avail.toFixed(2)}%</span>
                       </div>
@@ -1584,11 +1757,11 @@ export function DashboardMetrics({
 
             <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Estado de Servicios</span>
-              <div className="text-[9px] space-y-1.5 font-semibold text-slate-700 max-h-[170px] overflow-y-auto pr-1">
+              <div className="text-[9px] space-y-1 font-semibold text-slate-700 max-h-[180px] overflow-y-auto pr-1">
                 {sortedServices.map(s => {
                   if (s.isComingSoon) {
                     return (
-                      <div key={s.id} className="flex justify-between items-center">
+                      <div key={s.id} className="flex justify-between items-center p-1">
                         <span className="text-slate-400 font-semibold truncate max-w-[120px]">{s.name}</span>
                         <span className="flex items-center gap-1">
                           <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
@@ -1614,8 +1787,16 @@ export function DashboardMetrics({
                   }
                   
                   return (
-                    <div key={s.id} className="flex justify-between items-center">
-                      <span className="truncate max-w-[140px]">{s.name}</span>
+                    <div 
+                      key={s.id} 
+                      className="flex justify-between items-center hover:bg-slate-50 rounded p-1 cursor-pointer transition-colors group"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/servicio/${s.id}`);
+                      }}
+                      title={`Ver detalle de ${s.name}`}
+                    >
+                      <span className="truncate max-w-[140px] group-hover:text-blue-600 transition-colors">{s.name}</span>
                       <span className="flex items-center gap-1.5">
                         <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", statusColor)} />
                         <span className="text-slate-500 text-[8px]">{statusText}</span>
@@ -1626,10 +1807,15 @@ export function DashboardMetrics({
               </div>
             </Card>
 
-            {/* ✅ CUADRO DE INFRAESTRUCTURA - ZABBIX (SIN ENLACES DE RED) */}
             <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col justify-between">
-              <div className="flex justify-between items-center border-b pb-1 mb-2">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Infraestructura</span>
+              <div className="flex justify-between items-start border-b pb-2 mb-2">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Estado de servidores</h3>
+                    <Badge variant="outline" className="text-[7.5px] px-1 py-0 border-emerald-250 bg-emerald-50 text-emerald-700 font-bold leading-none">{servidoresOnlineCount} activos</Badge>
+                  </div>
+                  <p className="text-[8px] text-slate-400 font-medium leading-tight">Recursos y espacio en disco de equipos principales</p>
+                </div>
                 {infraStats.online && infraStats.version && (
                   <span className="text-[7.5px] font-extrabold text-emerald-600 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
                     Zabbix v{infraStats.version}
@@ -1637,120 +1823,48 @@ export function DashboardMetrics({
                 )}
               </div>
               
-              <div className="text-[9px] space-y-1.5 font-semibold text-slate-700">
-                <div className="flex justify-between items-center">
-                  <span>Servidores Core</span>
-                  <span className={cn("text-[9.5px] font-bold", infraStats.servidoresCore >= 99 ? "text-emerald-600" : "text-amber-600")}>
-                    {infraStats.servidoresCore}%
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", infraStats.servidoresCore >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.servidoresCore}%` }} />
-                </div>
-
-                <div className="flex justify-between items-center pt-0.5">
-                  <span>Bases de Datos</span>
-                  <span className={cn("text-[9.5px] font-bold", infraStats.database >= 99 ? "text-emerald-600" : "text-amber-600")}>
-                    {infraStats.database}%
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", infraStats.database >= 99 ? "bg-emerald-500" : "bg-amber-500")} style={{ width: `${infraStats.database}%` }} />
-                </div>
-
-                <div className="flex justify-between items-center pt-0.5 text-xs text-muted-foreground">
-                  <span>Promedio General</span>
-                  <span className={cn("text-[9.5px] font-bold", infraestructuraZabbix >= 99 ? "text-emerald-600" : "text-amber-600")}>
-                    {infraestructuraZabbix.toFixed(2)}%
-                  </span>
-                </div>
-              </div>
-
-              <Button variant="ghost" size="sm" className="mt-3 w-full text-[9px] h-7 font-bold text-[#1e40af] hover:text-[#1d4ed8] hover:bg-blue-50 flex items-center justify-center gap-1 border border-blue-100 rounded" onClick={handleZabbixRedirect}>
-                Ver más
-                <ArrowRight className="h-3 w-3" />
-              </Button>
-            </Card>
-
-            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-1">Incidentes por Severidad</span>
-                <div className="flex items-center justify-between mt-2">
-                  <div className="h-[90px] w-[90px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={incidentesSeveridad}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={25}
-                          outerRadius={40}
-                          dataKey="value"
-                        >
-                          {incidentesSeveridad.map((cell, idx) => (
-                            <Cell key={`cell-${idx}`} fill={cell.color} />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="text-[8px] text-slate-600 space-y-1 pr-2 font-medium">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 block" /> 
-                      Crítico: {incidentesSeveridad.find(i => i.name === "Crítico")?.value || 0}
+              <div className="flex-1 overflow-y-auto pr-1 max-h-[110px] space-y-3.5 custom-scrollbar">
+                {servidoresInfra.map(srv => (
+                  <div key={srv.id} className="space-y-1">
+                    <div className="flex justify-between items-start text-[9.5px]">
+                      <div>
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-slate-800 leading-none">{srv.nombre}</span>
+                          {srv.isCore && (
+                            <Badge variant="outline" className="text-[6.5px] px-1 py-0 border-blue-200 bg-blue-50 text-blue-700 font-bold leading-none">Core</Badge>
+                          )}
+                          <span className={cn("h-1.5 w-1.5 rounded-full", srv.online ? "bg-emerald-500" : "bg-red-500")} />
+                        </div>
+                        <span className="text-[8px] text-slate-400 font-medium font-mono leading-none">[{srv.ip}]</span>
+                      </div>
+                      <div className="text-right text-slate-500 text-[9px] font-medium leading-tight">
+                        <span className="font-bold text-slate-700">{srv.disk.toFixed(1)}% disco</span>
+                        <span> (CPU: {srv.cpu.toFixed(1)}%, RAM: {srv.ram.toFixed(1)}%)</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500 block" /> 
-                      Alto: {incidentesSeveridad.find(i => i.name === "Alto")?.value || 0}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 block" /> 
-                      Medio: {incidentesSeveridad.find(i => i.name === "Medio")?.value || 0}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500 block" /> 
-                      Bajo: {incidentesSeveridad.find(i => i.name === "Bajo")?.value || 0}
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className={cn("h-full rounded-full transition-all duration-500", 
+                          srv.online ? (
+                            srv.disk > 90 ? "bg-red-500" :
+                            srv.disk > 75 ? "bg-amber-500" : "bg-emerald-500"
+                          ) : "bg-slate-350"
+                        )} 
+                        style={{ width: `${srv.online ? srv.disk : 0}%` }} 
+                      />
                     </div>
                   </div>
-                </div>
+                ))}
               </div>
-              <Button variant="ghost" size="sm" className="mt-3 w-full text-[9px] h-7 font-bold text-[#1e40af] hover:text-[#1d4ed8] hover:bg-blue-50 flex items-center justify-center gap-1 border border-blue-100 rounded" onClick={onNavigateToTimeline}>
-                Ver más
-                <ArrowRight className="h-3 w-3" />
-              </Button>
-            </Card>
 
-            <Card className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Tickets por Día</span>
-              <div className="w-full h-[90px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={ticketsPorDia}>
-                    <Bar dataKey="ingresados" stackId="a" fill="#3b82f6" name="Ingresados" />
-                    <Bar dataKey="asignados" stackId="a" fill="#f59e0b" name="Asignados" />
-                    <Bar dataKey="resueltos" stackId="a" fill="#10b981" name="Resueltos" />
-                    <Bar dataKey="cerrados" stackId="a" fill="#ef4444" name="Cerrados" />
-                    <Tooltip 
-                      contentStyle={{ fontSize: '10px', padding: '4px 8px' }}
-                      formatter={(value) => [value, '']}
-                      labelFormatter={(label) => `Fecha: ${label}`}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-2 mt-1 flex-wrap">
-                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> Ingresados
-                </span>
-                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Asignados
-                </span>
-                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Resueltos
-                </span>
-                <span className="flex items-center gap-1 text-[6px] font-medium text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> Cerrados
-                </span>
-              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-2 w-full text-[10px] h-7 font-bold bg-white border-slate-200 hover:bg-slate-50 flex items-center justify-center gap-1 rounded-lg shadow-sm text-slate-700 cursor-pointer"
+                onClick={handleZabbixRedirect}
+              >
+                Administrar servidores
+              </Button>
             </Card>
           </div>
         </div>
@@ -1760,56 +1874,85 @@ export function DashboardMetrics({
           PANEL 2: NEGOCIOS (PRÓXIMAMENTE)
           ============================================================ */}
       <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
-        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#10b981] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
-          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">2</div>
-          <div className="flex flex-col items-center gap-1.5 my-auto">
-            <DollarSign className="h-7 w-7 text-white/90" />
-            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Negocios</p>
-            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Lit / Propuestas / Cierres</p>
+        <div className="w-full lg:w-[120px] shrink-0 p-3 bg-[#10b981] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-5 w-5 rounded-full bg-white/20 flex items-center justify-center font-bold text-[10px]">2</div>
+          <div className="flex flex-col items-center gap-1 my-auto">
+            <DollarSign className="h-6 w-6 text-white/90" />
+            <p className="font-extrabold text-[9px] leading-tight tracking-wider uppercase">Negocios</p>
+            <p className="text-[7.5px] text-white/80 font-medium tracking-wide uppercase leading-tight">Lit / Propuestas / Cierres</p>
           </div>
-          <div className="hidden lg:block h-6 w-6" />
+          <div className="hidden lg:block h-5 w-5" />
         </div>
 
-        <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
-          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-6">
-            <div className="bg-emerald-50 text-emerald-700 p-3 rounded-full mb-3 border border-emerald-100 shadow-sm animate-bounce">
-              <TrendingUp className="h-6 w-6" />
+        <div className="flex-1 p-4 space-y-3 bg-slate-50/10 min-h-[250px]">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-2">
+            <div>
+              <h3 className="text-xs font-bold text-slate-805 tracking-tight uppercase flex items-center gap-1.5">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
+                Monitoreo de Fichas de Prospecto
+              </h3>
+              <p className="text-[9px] text-slate-400">Total Fichas: {prospects.length} | Sincronizado cada minuto</p>
             </div>
-            <h3 className="text-sm font-bold text-slate-800 tracking-tight uppercase">Módulo de Negocios</h3>
-            <p className="text-xs text-slate-500 max-w-md mt-1">
-              Próximamente: Integración con CRM, seguimiento de oportunidades, análisis de conversión y métricas de ventas.
-            </p>
-            <span className="mt-3 text-[10px] font-extrabold text-emerald-600 bg-emerald-100/60 px-2.5 py-1 rounded-full border border-emerald-200 uppercase tracking-wider">
-              Próximamente
-            </span>
+            
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="text"
+                placeholder="Buscar prospecto..."
+                value={negociosSearch}
+                onChange={(e) => setNegociosSearch(e.target.value)}
+                className="text-[9px] px-2 py-0.5 border border-slate-200 rounded bg-white w-full sm:w-44 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 opacity-30 select-none pointer-events-none">
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Oportunidades</span>
-              <p className="text-xl font-black text-slate-800 mt-1">24</p>
-              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">↑ +12% vs mes ant.</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Propuestas</span>
-              <p className="text-xl font-black text-slate-800 mt-1">18</p>
-              <span className="text-[8px] text-slate-400 block mt-1">En revisión</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Cierres</span>
-              <p className="text-xl font-black text-slate-800 mt-1">8</p>
-              <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">↑ +5% vs mes ant.</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Tasa Conversión</span>
-              <p className="text-xl font-black text-slate-800 mt-1">33%</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Promedio Q2</span>
-            </div>
-            <div className="bg-white border rounded-lg p-3 shadow-xs">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Pipeline</span>
-              <p className="text-xl font-black text-slate-800 mt-1">$456M</p>
-              <span className="text-[8px] text-slate-400 block mt-1">Valor total</span>
-            </div>
+          <div className="overflow-x-auto max-h-[180px] overflow-y-auto pr-1">
+            <table className="w-full text-left border-collapse text-[10px]">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[8px] bg-slate-50/30">
+                  <th className="py-2 px-3">Código</th>
+                  <th className="py-2 px-3">Proyecto</th>
+                  <th className="py-2 px-3">Cliente</th>
+                  <th className="py-2 px-3">Gestor Comercial</th>
+                  <th className="py-2 px-3 text-right">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredProspects.map((ficha) => {
+                  const estado = ficha.estado || "";
+                  const isApproved = estado.toLowerCase().includes("100%") || estado.toLowerCase().includes("aprobado") || estado.toLowerCase().includes("aceptado por cliente");
+                  
+                  let badgeClass = "bg-slate-100 text-slate-650 border-slate-200";
+                  if (isApproved) {
+                    badgeClass = "bg-emerald-50 text-emerald-600 border-emerald-250 font-bold";
+                  } else if (estado.toLowerCase().includes("30%") || estado.toLowerCase().includes("elaboración")) {
+                    badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+                  } else if (estado.toLowerCase().includes("10%") || estado.toLowerCase().includes("prospecto")) {
+                    badgeClass = "bg-amber-50 text-amber-600 border-amber-200";
+                  }
+
+                  return (
+                    <tr key={ficha.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-2 px-3 font-semibold text-slate-700">{ficha.codigo}</td>
+                      <td className="py-2 px-3 text-slate-600 font-semibold max-w-[200px] truncate" title={ficha.nombreProyecto}>{ficha.nombreProyecto}</td>
+                      <td className="py-2 px-3 text-slate-600 font-medium max-w-[200px] truncate" title={ficha.cliente}>{ficha.cliente}</td>
+                      <td className="py-2 px-3 text-slate-500">{ficha.gestorComercial || "Sin asignar"}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={cn("inline-block px-1.5 py-0.5 rounded border text-[8px] leading-none", badgeClass)}>
+                          {estado}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filteredProspects.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400 font-medium">
+                      No se encontraron prospectos.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1818,14 +1961,14 @@ export function DashboardMetrics({
           PANEL 3: PROYECTOS (PRÓXIMAMENTE)
           ============================================================ */}
       <div className="flex flex-col lg:flex-row bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
-        <div className="w-full lg:w-[150px] shrink-0 p-4 bg-[#7c3aed] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
-          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">3</div>
-          <div className="flex flex-col items-center gap-1.5 my-auto">
-            <FolderKanban className="h-7 w-7 text-white/90" />
-            <p className="font-extrabold text-[10px] leading-tight tracking-wider uppercase">Proyectos</p>
-            <p className="text-[8px] text-white/80 font-medium tracking-wide uppercase">Gestión y Entregas</p>
+        <div className="w-full lg:w-[120px] shrink-0 p-3 bg-[#7c3aed] text-white flex lg:flex-col justify-between items-center text-center select-none border-b lg:border-b-0 lg:border-r border-slate-200">
+          <div className="h-5 w-5 rounded-full bg-white/20 flex items-center justify-center font-bold text-[10px]">3</div>
+          <div className="flex flex-col items-center gap-1 my-auto">
+            <FolderKanban className="h-6 w-6 text-white/90" />
+            <p className="font-extrabold text-[9px] leading-tight tracking-wider uppercase">Proyectos</p>
+            <p className="text-[7.5px] text-white/80 font-medium tracking-wide uppercase leading-tight">Gestión y Entregas</p>
           </div>
-          <div className="hidden lg:block h-6 w-6" />
+          <div className="hidden lg:block h-5 w-5" />
         </div>
 
         <div className="flex-1 p-4 space-y-4 bg-slate-50/20 relative min-h-[250px]">
@@ -2098,34 +2241,67 @@ export function DashboardMetrics({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <Ticket className="h-5 w-5 text-amber-500" />
-              Tickets - Detalle por Día
+              Detalle de Tickets de Tecnología
               <Badge variant="secondary" className="ml-2">
-                {realInvoiceData.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length} Pendientes
+                {tecnologiaTicketsCount} del día
               </Badge>
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">Distribución de tickets por día</p>
-            {ticketsPorDia.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Listado de tickets del área de tecnología para el día {monitoredDateStr}</p>
+            {tecnologiaTicketsCount === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <p>No hay tickets registrados</p>
+                <p>No hay tickets registrados para esta fecha</p>
               </div>
             ) : (
-              <div className="w-full h-[450px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={ticketsPorDia} margin={{ bottom: 20 }}>
-                    <XAxis dataKey="fecha" fontSize={10} interval={0} angle={-45} textAnchor="end" height={50} />
-                    <YAxis fontSize={10} />
-                    <Tooltip 
-                      contentStyle={{ fontSize: '11px', padding: '8px 12px' }}
-                    />
-                    <Legend fontSize={10} />
-                    <Bar dataKey="ingresados" stackId="a" fill="#3b82f6" name="Ingresados" />
-                    <Bar dataKey="asignados" stackId="a" fill="#f59e0b" name="Asignados" />
-                    <Bar dataKey="resueltos" stackId="a" fill="#10b981" name="Resueltos" />
-                    <Bar dataKey="cerrados" stackId="a" fill="#ef4444" name="Cerrados" />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="p-3">ID Incidencia</th>
+                      <th className="p-3">Cliente</th>
+                      <th className="p-3">Contacto</th>
+                      <th className="p-3">Técnico</th>
+                      <th className="p-3">Fecha</th>
+                      <th className="p-3">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {oficoreData
+                      .filter((t: any) => {
+                        const area = t.area_nombre || "";
+                        const isTech = area.toUpperCase().includes("TECNOLOG");
+                        if (!isTech) return false;
+                        if (!t.fecha_detalle) return false;
+                        const ticketDate = parseISO(t.fecha_detalle);
+                        const targetFrom = filters.dateRange.from ? startOfDay(filters.dateRange.from) : startOfDay(new Date());
+                        const targetTo = filters.dateRange.to ? endOfDay(filters.dateRange.to) : endOfDay(new Date());
+                        return ticketDate >= targetFrom && ticketDate <= targetTo;
+                      })
+                      .map((t: any) => (
+                        <tr key={t.id_incidencia} className="hover:bg-slate-50/50">
+                          <td className="p-3 font-semibold text-blue-600">{t.id_incidencia}</td>
+                          <td className="p-3 font-medium">{t.codigo_cliente}</td>
+                          <td className="p-3">{t.contacto_nombre || "N/A"}</td>
+                          <td className="p-3">{t.tecnico || "Sin asignar"}</td>
+                          <td className="p-3 text-slate-400">{format(parseISO(t.fecha_detalle), "dd/MM/yyyy HH:mm")}</td>
+                          <td className="p-3">
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                "text-[9px] px-1.5 py-0.5 font-bold", 
+                                t.id_accion === 5 ? "bg-emerald-50 text-emerald-700 border-emerald-250" : 
+                                t.id_accion === 3 ? "bg-red-50 text-red-700 border-red-250" : 
+                                "bg-amber-50 text-amber-700 border-amber-250"
+                              )}
+                            >
+                              {t.estado_descripcion || "Abierto"}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

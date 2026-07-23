@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clients, services, type Service, type Client } from "@/lib/services-data";
+import { clients, services, type Service, type Client, initializeDatabaseData } from "@/lib/services-data";
 import Image from "next/image";
 import {
   LayoutDashboard,
@@ -18,12 +18,14 @@ import {
   Terminal,
   UserCircle,
   ArrowLeft,
+  Ticket,
 } from "lucide-react";
 
 // Lazy load components
 const DashboardMetrics = lazy(() => import("@/components/dashboard-metrics").then(mod => ({ default: mod.DashboardMetrics })));
 const ServicesList = lazy(() => import("@/components/services-list").then(mod => ({ default: mod.ServicesList })));
 const HeatMap = lazy(() => import("@/components/heat-map").then(mod => ({ default: mod.HeatMap })));
+const SupportTab = lazy(() => import("@/components/support-tab").then(mod => ({ default: mod.SupportTab })));
 const ClientsList = lazy(() => import("@/components/clients-list").then(mod => ({ default: mod.ClientsList })));
 const EventsTimeline = lazy(() => import("@/components/events-timeline").then(mod => ({ default: mod.EventsTimeline })));
 const ClientComparison = lazy(() => import("@/components/client-comparison").then(mod => ({ default: mod.ClientComparison })));
@@ -50,7 +52,13 @@ export default function HomePage() {
 
   useEffect(() => {
     mountedRef.current = true;
-    setIsInitialized(true);
+    const init = async () => {
+      await initializeDatabaseData();
+      if (mountedRef.current) {
+        setIsInitialized(true);
+      }
+    };
+    init();
     return () => {
       mountedRef.current = false;
     };
@@ -65,6 +73,9 @@ export default function HomePage() {
 
     const syncData = async () => {
       try {
+        // Refrescar los datos de clientes, servicios, prospectos y proyectos de base de datos
+        await initializeDatabaseData();
+
         // 1. Monitoreo de Facturas desde la Base de Datos
         let facturasErrPercent = 0;
         let facturasStatus = "success";
@@ -107,9 +118,11 @@ export default function HomePage() {
         if (srvFacturas && mountedRef.current) {
           srvFacturas.errorPercentage = facturasErrPercent;
           srvFacturas.status = facturasStatus as any;
-          if (srvFacturas.clients && srvFacturas.clients[0]) {
-            srvFacturas.clients[0].errorPercentage = facturasErrPercent;
-            srvFacturas.clients[0].status = facturasStatus as any;
+          if (srvFacturas.clients) {
+            srvFacturas.clients.forEach(cl => {
+              cl.errorPercentage = facturasErrPercent;
+              cl.status = facturasStatus as any;
+            });
           }
           if (facturasStatus === "error") {
             srvFacturas.logs = [
@@ -150,9 +163,11 @@ export default function HomePage() {
         if (srvOficore && mountedRef.current) {
           srvOficore.status = oficoreStatus as any;
           srvOficore.errorPercentage = oficoreErrPercent;
-          if (srvOficore.clients && srvOficore.clients[0]) {
-            srvOficore.clients[0].errorPercentage = oficoreErrPercent;
-            srvOficore.clients[0].status = oficoreStatus as any;
+          if (srvOficore.clients) {
+            srvOficore.clients.forEach(cl => {
+              cl.errorPercentage = oficoreErrPercent;
+              cl.status = oficoreStatus as any;
+            });
           }
         }
 
@@ -187,9 +202,11 @@ export default function HomePage() {
         if (srvOfitec && mountedRef.current) {
           srvOfitec.status = ofitecStatus as any;
           srvOfitec.errorPercentage = ofitecErrPercent;
-          if (srvOfitec.clients && srvOfitec.clients[0]) {
-            srvOfitec.clients[0].errorPercentage = ofitecErrPercent;
-            srvOfitec.clients[0].status = ofitecStatus as any;
+          if (srvOfitec.clients) {
+            srvOfitec.clients.forEach(cl => {
+              cl.errorPercentage = ofitecErrPercent;
+              cl.status = ofitecStatus as any;
+            });
           }
         }
 
@@ -224,9 +241,11 @@ export default function HomePage() {
         if (srvSgc && mountedRef.current) {
           srvSgc.status = sgcStatus as any;
           srvSgc.errorPercentage = sgcErrPercent;
-          if (srvSgc.clients && srvSgc.clients[0]) {
-            srvSgc.clients[0].errorPercentage = sgcErrPercent;
-            srvSgc.clients[0].status = sgcStatus as any;
+          if (srvSgc.clients) {
+            srvSgc.clients.forEach(cl => {
+              cl.errorPercentage = sgcErrPercent;
+              cl.status = sgcStatus as any;
+            });
           }
         }
 
@@ -268,21 +287,33 @@ export default function HomePage() {
         if (srvDte && mountedRef.current) {
           srvDte.status = dteStatus as any;
           srvDte.errorPercentage = dteErrPercent;
-          if (srvDte.clients && srvDte.clients[0]) {
-            srvDte.clients[0].errorPercentage = dteErrPercent;
-            srvDte.clients[0].status = dteStatus as any;
+          if (srvDte.clients) {
+            srvDte.clients.forEach(cl => {
+              cl.errorPercentage = dteErrPercent;
+              cl.status = dteStatus as any;
+            });
           }
         }
 
-        // Sincronizar estado global del cliente Ofimundo
-        const globalClient = clients.find(c => c.id === "cl_ofimundo");
-        if (globalClient && mountedRef.current) {
-          const clientServices = [srvFacturas, srvOficore, srvOfitec, srvSgc, srvDte];
-          const hasError = clientServices.some(s => s && s.status === "error");
-          const hasWarning = clientServices.some(s => s && s.status === "warning");
-          
-          globalClient.status = hasError ? "error" : (hasWarning ? "warning" : "success");
-          globalClient.errorPercentage = hasError ? 100 : (hasWarning ? 15 : 0);
+        // Sincronizar estado global de todos los clientes cargados
+        if (mountedRef.current) {
+          clients.forEach(client => {
+            if (!client.services || client.services.length === 0) {
+              client.status = "success";
+              client.errorPercentage = 0;
+              return;
+            }
+
+            const clientSrvObjects = services.filter(s => client.services?.includes(s.id));
+            const hasError = clientSrvObjects.some(s => s.status === "error");
+            const hasWarning = clientSrvObjects.some(s => s.status === "warning");
+            
+            client.status = hasError ? "error" : (hasWarning ? "warning" : "success");
+
+            // Promedio de error de sus servicios contratados
+            const totalErr = clientSrvObjects.reduce((acc, s) => acc + (s.errorPercentage || 0), 0);
+            client.errorPercentage = clientSrvObjects.length > 0 ? Math.round(totalErr / clientSrvObjects.length) : 0;
+          });
         }
       } catch (err) {
         console.error("Error syncing data:", err);
@@ -321,6 +352,7 @@ export default function HomePage() {
   const tabsConfig = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: DashboardMetrics, hasServiceCallback: false, hasClientCallback: false },
     { id: "heatmap", label: "Mapa de Calor", icon: Flame, component: HeatMap, hasServiceCallback: true, hasClientCallback: false },
+    { id: "soporte", label: "Soporte", icon: Ticket, component: SupportTab, hasServiceCallback: false, hasClientCallback: false },
     { id: "services", label: "Servicios", icon: Briefcase, component: ServicesList, hasServiceCallback: false, hasClientCallback: false },
     { id: "clients", label: "Clientes", icon: Users, component: ClientsList, hasServiceCallback: false, hasClientCallback: true },
     { id: "timeline", label: "Línea de Tiempo", icon: Clock, component: EventsTimeline, hasServiceCallback: true, hasClientCallback: false },
@@ -397,6 +429,7 @@ export default function HomePage() {
                     props.onNavigateToTimeline = () => setActiveTab("timeline");
                     props.onNavigateToHeatMap = () => setActiveTab("heatmap");
                     props.onNavigateToClients = () => setActiveTab("clients");
+                    props.onNavigateToSupport = () => setActiveTab("soporte");
                   }
                   return <tab.component {...props} />;
                 })()}

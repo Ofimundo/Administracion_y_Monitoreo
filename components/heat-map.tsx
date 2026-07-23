@@ -44,7 +44,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { services as importedServices, type Service, type Client, clients as globalClients } from "@/lib/services-data";
+import { services as importedServices, type Service, type Client, clients as globalClients, subscribeToData } from "@/lib/services-data";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
@@ -93,15 +93,16 @@ const isServiceComingSoon = (serviceId: string): boolean => {
 
 // Función para obtener datos reales de todos los servicios activos
 const fetchAllRealData = async () => {
-  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null };
+  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null, "mi-cuenta": null };
   try {
-    const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes] = await Promise.all([
+    const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes, miCuentaRes] = await Promise.all([
       fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
       fetch("/api/oficore/stats").then(r => r.json()).catch(() => null),
       fetch("/api/ofitec/stats").then(r => r.json()).catch(() => null),
       fetch("/api/sgc/stats").then(r => r.json()).catch(() => null),
       fetch("/api/sgc/contratos-stats").then(r => r.json()).catch(() => null),
       fetch("/api/sgc/equipos-stats").then(r => r.json()).catch(() => null),
+      fetch("/api/mi-cuenta/stats").then(r => r.json()).catch(() => null),
     ]);
 
     if (factRes && factRes.success) results.facturas = factRes;
@@ -110,6 +111,7 @@ const fetchAllRealData = async () => {
     if (sgcRes && sgcRes.success) results.sgc = sgcRes;
     if (contratosRes && contratosRes.success) results.contratos = contratosRes;
     if (equiposRes && equiposRes.success) results.equipos = equiposRes;
+    if (miCuentaRes && miCuentaRes.success) results["mi-cuenta"] = miCuentaRes;
   } catch (error) {
     console.error("Error fetching all services data for HeatMap:", error);
   }
@@ -174,6 +176,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
   const [sortBy, setSortBy] = useState<"name" | "error" | "clients">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [dataVersion, setDataVersion] = useState(0);
   
   // Estado para el modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
@@ -181,6 +184,13 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
   );
   const [selectAll, setSelectAll] = useState(true);
+
+  // Suscribirse a cambios en los datos reales de la base de datos
+  useEffect(() => {
+    return subscribeToData(() => {
+      setDataVersion(v => v + 1);
+    });
+  }, []);
 
   // Cargar servicios desde la API
   useEffect(() => {
@@ -299,7 +309,7 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     };
     
     loadServices();
-  }, []);
+  }, [dataVersion]);
 
   // ✅ Obtener solo servicios activos (excluyendo "Próximamente")
   const activeServices = useMemo(() => {
@@ -315,22 +325,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
     );
   }, [services]);
 
-  // ✅ Obtener clientes activos (solo de servicios activos)
+  // ✅ Obtener todos los clientes activos de la base de datos
   const activeClients = useMemo(() => {
-    const clients: Client[] = [];
-    const clientIds = new Set<string>();
-    
-    activeServices.forEach(service => {
-      service.clients.forEach(client => {
-        if (!clientIds.has(client.id)) {
-          clientIds.add(client.id);
-          clients.push(client);
-        }
-      });
-    });
-    
-    return clients;
-  }, [activeServices]);
+    return [...globalClients];
+  }, [dataVersion]);
 
   // Filtrar servicios (solo servicios activos, excluyendo "Próximamente")
   const filteredServices = useMemo(() => {
@@ -1328,7 +1326,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                             <p className="font-medium">{client.name}</p>
                             <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
                               {client.rut && <span>RUT: {client.rut}</span>}
-                              {client.email && <span>Email: {client.email}</span>}
                             </div>
                           </div>
                           <Badge variant="outline" className={cn(

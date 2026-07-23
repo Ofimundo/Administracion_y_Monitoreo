@@ -30,7 +30,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { clients, getClientServices, type Client, type Service } from "@/lib/services-data";
+import { clients, getClientServices, subscribeToData, type Client, type Service } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { cn } from "@/lib/utils";
@@ -64,8 +64,6 @@ const ACTIVE_CLIENT_ID = "cl_ofimundo";
 const EXPORT_FIELDS = [
   { id: "cliente", label: "Cliente", default: true },
   { id: "rut", label: "RUT", default: true },
-  { id: "email", label: "Email", default: true },
-  { id: "telefono", label: "Teléfono", default: false },
   { id: "errorPorcentaje", label: "Porcentaje de Error", default: true },
   { id: "estado", label: "Estado", default: true },
   { id: "serviciosContratados", label: "Servicios Contratados", default: true },
@@ -81,6 +79,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const [showDashboard, setShowDashboard] = useState(false);
   const [realData, setRealData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [dataVersion, setDataVersion] = useState(0);
   
   // Modal de exportación
   const [showExportModal, setShowExportModal] = useState(false);
@@ -88,10 +87,17 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     EXPORT_FIELDS.filter(f => f.default).map(f => f.id)
   );
 
-  // Filtrar solo el cliente activo
-  const activeClients = useMemo(() => {
-    return clients.filter(client => client.id === ACTIVE_CLIENT_ID);
+  // Suscribirse a cambios en los datos reales de la base de datos
+  useEffect(() => {
+    return subscribeToData(() => {
+      setDataVersion(v => v + 1);
+    });
   }, []);
+
+  // Mostrar todos los clientes de la base de datos
+  const activeClients = useMemo(() => {
+    return [...clients];
+  }, [dataVersion]);
 
   // Cargar datos reales de facturas para sincronizar solo con Ofimundo
   useEffect(() => {
@@ -131,14 +137,6 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
 
   // Obtener cliente con datos reales sincronizados
   const getClientWithRealData = (client: Client): Client => {
-    if (client.id === ACTIVE_CLIENT_ID && realData) {
-      const status = realData.errorRate > 0 ? (realData.errorRate > 40 ? "error" : "warning") : "success";
-      return {
-        ...client,
-        errorPercentage: realData.errorRate,
-        status: status as any,
-      };
-    }
     return client;
   };
 
@@ -210,8 +208,6 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     const fieldMap: Record<string, (client: any) => any> = {
       cliente: (c) => c.name,
       rut: (c) => c.rut || "-",
-      email: (c) => c.email || "-",
-      telefono: (c) => c.phone || "-",
       errorPorcentaje: (c) => `${c.errorPercentage}%`,
       estado: (c) => c.status === "success" ? "Excelente" : c.status === "warning" ? "Atención" : "Crítico",
       serviciosContratados: (c) => getClientServices(c.id).length,
@@ -390,13 +386,13 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
             const clientServices = getClientServices(client.id);
             const successRate = 100 - clientWithData.errorPercentage;
             const firstService = clientServices[0];
-            const isOfimundo = client.id === ACTIVE_CLIENT_ID;
+            const isOfimundo = true;
             
             return (
               <Card
                 key={client.id}
                 className={cn(
-                  "transition-all hover:shadow-lg",
+                  "transition-all hover:shadow-lg flex flex-col h-full justify-between",
                   getStatusColor(clientWithData.status)
                 )}
               >
@@ -404,16 +400,16 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
                       <div className={cn(
-                        "w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg",
+                        "w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shrink-0",
                         clientWithData.status === "success" ? "bg-emerald-500" :
                         clientWithData.status === "warning" ? "bg-amber-500" : "bg-red-500"
                       )}>
                         {client.name.charAt(0)}
                       </div>
                       <div>
-                        <CardTitle className="text-lg">{client.name}</CardTitle>
+                        <CardTitle className="text-lg leading-tight line-clamp-2">{client.name}</CardTitle>
                         {client.rut && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                             <Building className="h-3 w-3" />
                             {client.rut}
                           </p>
@@ -427,84 +423,71 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                     />
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Badge indicador para Ofimundo */}
-                  {isOfimundo && (
-                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                      📡 Datos en tiempo real
-                    </Badge>
-                  )}
-
-                  <div className="space-y-1">
-                    {client.email && (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {client.email}
-                      </p>
+                <CardContent className="flex-1 flex flex-col justify-between pt-0 pb-4">
+                  <div className="space-y-3 mt-1 flex-1">
+                    {/* Badge indicador para Ofimundo */}
+                    {isOfimundo && (
+                      <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 w-fit">
+                        📡 Datos en tiempo real
+                      </Badge>
                     )}
-                    {client.phone && (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Phone className="h-3 w-3" />
-                        {client.phone}
-                      </p>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div className="bg-muted/50 rounded-lg p-2 text-center">
+                        <p className="text-2xl font-bold">{clientServices.length}</p>
+                        <p className="text-xs text-muted-foreground">Servicios Activos</p>
+                      </div>
+                      <div className="bg-muted/50 rounded-lg p-2 text-center">
+                        <p className={cn(
+                          "text-2xl font-bold",
+                          clientWithData.errorPercentage === 0 ? "text-emerald-600" :
+                          clientWithData.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
+                        )}>
+                          {clientWithData.errorPercentage}%
+                        </p>
+                        <p className="text-xs text-muted-foreground">Error técnico</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Tasa de éxito</span>
+                        <span className="font-medium">{successRate}%</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                        <div 
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            successRate >= 90 ? "bg-emerald-500" :
+                            successRate >= 80 ? "bg-amber-500" : "bg-red-500"
+                          )}
+                          style={{ width: `${successRate}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Servicios contratados activos */}
+                    {clientServices.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1 max-h-[80px] overflow-y-auto">
+                        {clientServices.map(service => (
+                          <Badge 
+                            key={service.id} 
+                            variant="outline" 
+                            className="text-[10px] bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGoToServiceMonitoring(service.id, service.name);
+                            }}
+                          >
+                            <Briefcase className="h-2.5 w-2.5 mr-1 text-emerald-500" />
+                            {service.name}
+                          </Badge>
+                        ))}
+                      </div>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-2">
-                    <div className="bg-muted/50 rounded-lg p-2 text-center">
-                      <p className="text-2xl font-bold">{clientServices.length}</p>
-                      <p className="text-xs text-muted-foreground">Servicios Activos</p>
-                    </div>
-                    <div className="bg-muted/50 rounded-lg p-2 text-center">
-                      <p className={cn(
-                        "text-2xl font-bold",
-                        clientWithData.errorPercentage === 0 ? "text-emerald-600" :
-                        clientWithData.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
-                      )}>
-                        {clientWithData.errorPercentage}%
-                      </p>
-                      <p className="text-xs text-muted-foreground">Error técnico</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span>Tasa de éxito</span>
-                      <span className="font-medium">{successRate}%</span>
-                    </div>
-                    <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div 
-                        className={cn(
-                          "h-full rounded-full transition-all",
-                          successRate >= 90 ? "bg-emerald-500" :
-                          successRate >= 80 ? "bg-amber-500" : "bg-red-500"
-                        )}
-                        style={{ width: `${successRate}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Servicios contratados activos */}
-                  {clientServices.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {clientServices.map(service => (
-                        <Badge 
-                          key={service.id} 
-                          variant="outline" 
-                          className="text-[10px] bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleGoToServiceMonitoring(service.id, service.name);
-                          }}
-                        >
-                          <Briefcase className="h-2.5 w-2.5 mr-1 text-emerald-500" />
-                          {service.name}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-2 mt-4 pt-3 border-t">
                     <Button 
                       variant="outline"
                       size="sm" 
@@ -558,7 +541,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                         }}
                       >
                         <LayoutDashboard className="h-3 w-3" />
-                        Monitorear Servicio
+                        Monitorear
                         <ArrowRight className="h-3 w-3" />
                       </Button>
                     ) : null}

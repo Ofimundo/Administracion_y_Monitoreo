@@ -11,6 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import dynamic from "next/dynamic";
 
 const PickingDashboardCharts = dynamic(
@@ -50,15 +58,36 @@ import {
   Activity,
   Eye,
   AlertCircle,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import { ClientDashboard } from "@/components/client-dashboard";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ContratosDashboardView } from "@/components/contratos-dashboard-view";
 import { EquiposDashboardView } from "@/components/equipos-dashboard-view";
 import { DespachosDashboardView } from "@/components/despachos-dashboard-view";
+import { FileSpreadsheet, Download, Package, Ticket as TicketIcon } from "lucide-react";
+import * as XLSX from "xlsx";
+
+const EXPORT_FIELDS_MI_CUENTA = [
+  { id: "folio", label: "N° Solicitud", default: true },
+  { id: "fecha", label: "Fecha y Hora Solicitud", default: true },
+  { id: "tipoSolicitud", label: "Tipo de Solicitud", default: true },
+  { id: "cliente", label: "RUT / Código Cliente", default: true },
+  { id: "contacto", label: "Nombre Cliente / Contacto", default: true },
+  { id: "contrato", label: "N° Contrato", default: true },
+  { id: "serie", label: "N° Serie Equipo / Suministro", default: true },
+  { id: "direccion", label: "Dirección", default: false },
+  { id: "comuna", label: "Comuna", default: false },
+  { id: "referencia", label: "Referencia Ubicación", default: false },
+  { id: "telefono", label: "Teléfono Contacto", default: false },
+  { id: "email", label: "Email Contacto", default: false },
+  { id: "exportDate", label: "Fecha de Exportación", default: true },
+];
 
 // Lista de servicios que están próximamente
 const COMING_SOON_SERVICES = ["saldos", "finiquitos", "cuentas", "contabilizacion", "notas-credito"];
@@ -244,6 +273,7 @@ export default function ServiceDetailPage() {
   const [pickingError, setPickingError] = useState<string | null>(null);
   const [pickingPeriod, setPickingPeriod] = useState<"day" | "week" | "month">("day");
   const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking" | "contratos" | "equipos" | "despachos">("docs");
+  const [isSgcMenuOpen, setIsSgcMenuOpen] = useState(false);
 
   // Estados para Monitoreo de Contratos SGC
   const [contratosStats, setContratosStats] = useState<any>(null);
@@ -254,6 +284,14 @@ export default function ServiceDetailPage() {
   const [equiposStats, setEquiposStats] = useState<any>(null);
   const [equiposLoading, setEquiposLoading] = useState(false);
   const [equiposError, setEquiposError] = useState<string | null>(null);
+
+  // Estados para Portal Mi Cuenta
+  const [miCuentaPeticionesCliente, setMiCuentaPeticionesCliente] = useState<any[]>([]);
+  const [showExportModalMiCuenta, setShowExportModalMiCuenta] = useState(false);
+  const [selectedFieldsMiCuenta, setSelectedFieldsMiCuenta] = useState<string[]>(() =>
+    EXPORT_FIELDS_MI_CUENTA.filter(f => f.default).map(f => f.id)
+  );
+  const [selectAllMiCuenta, setSelectAllMiCuenta] = useState(true);
 
   // Estados para Monitoreo de Despachos SGC
   const [despachosStats, setDespachosStats] = useState<any>(null);
@@ -269,7 +307,7 @@ export default function ServiceDetailPage() {
 
   const fetchLiveData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
     const serviceId = params.id as string;
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte"];
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
     if (!activeServices.includes(serviceId)) return;
     
     try {
@@ -388,11 +426,11 @@ export default function ServiceDetailPage() {
           });
           
           // ✅ FORZAR: Si no hay errores reales, el estado es "success"
-          const status = hasRealError ? "warning" : "success";
+          const status: "success" | "warning" | "error" = hasRealError ? "warning" : "success";
           
           setServiceStatus(status);
           setStatsData({
-            uptime: status === "error" ? "0%" : "100%",
+            uptime: (status as string) === "error" ? "0%" : "100%",
             lastActivity: totalDocs > 0 ? format(new Date(docs[0]?.fecha_detalle || new Date()), "dd/MM/yyyy HH:mm") : "No hay datos",
             totalTransactions: totalDocs,
             infrastructureErrors: 0,
@@ -461,7 +499,7 @@ export default function ServiceDetailPage() {
             });
             
             // ✅ FORZAR: Si no hay errores reales, el estado es "success"
-            const status = hasRealError ? "warning" : "success";
+            const status: "success" | "warning" | "error" = hasRealError ? "warning" : "success";
             
             setServiceStatus(status);
             
@@ -487,7 +525,7 @@ export default function ServiceDetailPage() {
             }).length;
 
             setStatsData({
-              uptime: status === "error" ? "0%" : "100%",
+              uptime: (status as string) === "error" ? "0%" : "100%",
               lastActivity: totalDocs > 0 ? format(new Date(docs[0]?.LLA_FEC_LLAMADA || new Date()), "dd/MM/yyyy HH:mm") : "No hay datos",
               totalTransactions: ingresadas,
               infrastructureErrors: 0,
@@ -624,11 +662,11 @@ export default function ServiceDetailPage() {
               });
               
               // ✅ FORZAR: Si no hay errores reales, el estado es "success"
-              const status = hasRealError ? "warning" : "success";
+              const status: "success" | "warning" | "error" = hasRealError ? "warning" : "success";
               
               setServiceStatus(status);
               setStatsData({
-                uptime: status === "error" ? "0%" : "100%",
+                uptime: (status as string) === "error" ? "0%" : "100%",
                 lastActivity: totalDocs > 0 ? format(new Date(docs[0]?.fecha_documento || new Date()), "dd/MM/yyyy HH:mm") : "No hay datos",
                 totalTransactions: totalDocs,
                 infrastructureErrors: 0,
@@ -780,6 +818,75 @@ export default function ServiceDetailPage() {
           setApiError("❌ Error al conectar con la base de datos DTE");
         }
       }
+      // ============================================================
+      // PORTAL MI CUENTA ([THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES])
+      // ============================================================
+      else if (serviceId === "mi-cuenta") {
+        try {
+          const res = await fetch(`/api/mi-cuenta/stats${queryParams}`);
+          const data = await res.json();
+
+          if (data.success && data.detalles) {
+            const docs = data.detalles || [];
+            setRawData(docs);
+            setDbMode(data.mode || "real");
+            setMiCuentaPeticionesCliente(data.peticionesPorCliente || []);
+
+            const totalDocs = docs.length;
+            const suministrosCount = data.stats?.suministrosSolicitados || docs.filter((s: any) => s.CDG_TIPO_SOLICITUD === 1 || s.NMR_SERIE).length;
+
+            setServiceStatus("success");
+            setStatsData({
+              uptime: "100%",
+              lastActivity: data.stats?.lastActivity || (totalDocs > 0 ? format(new Date(docs[0]?.FCH_SOLICITUD || new Date()), "dd/MM/yyyy HH:mm") : "No hay datos"),
+              totalTransactions: totalDocs,
+              infrastructureErrors: 0,
+              infrastructureErrorPercentage: 0,
+              approvedCount: suministrosCount,
+              rejectedCount: 0,
+              manualCount: 0,
+              pendingCount: 0,
+              enProceso: 0,
+              finalizado: 0,
+              anulado: 0,
+              incompleto: 0,
+              reAbierto: 0,
+              servTecnico: 0,
+              cancelado: 0,
+              sgcFacturas: 0,
+              sgcGuias: 0,
+              sgcNotasCredito: 0,
+              sgcNotasDebito: 0,
+              sgcOrigenSgc: 0,
+              sgcOrigenSoftland: 0,
+            });
+
+            const singleClient: Client = {
+              id: "cl_mi_cuenta",
+              name: "Ofimundo S.A. (Portal Mi Cuenta)",
+              rut: "76.452.910-K",
+              email: "micuenta@ofimundo.cl",
+              phone: "+56 2 2840 9300",
+              errorPercentage: 0,
+              status: "success",
+            };
+            setLiveClients([singleClient]);
+            setApiError(null);
+            setHasStatsFilter(dateRange?.from !== undefined || dateRange?.to !== undefined);
+          } else {
+            setRawData([]);
+            setLiveClients([]);
+            setServiceStatus("error");
+            setApiError(data.message || "❌ ALERTA DE CONEXIÓN: No fue posible conectar a la base de datos [THE_COOLER_MI_CUENTA] o al servidor SQL Server.");
+          }
+        } catch (e: any) {
+          console.error("Error fetching Portal Mi Cuenta data:", e);
+          setRawData([]);
+          setLiveClients([]);
+          setServiceStatus("error");
+          setApiError("❌ ALERTA DE CONEXIÓN: No fue posible conectar con el servidor de base de datos SQL Server [THE_COOLER_MI_CUENTA].");
+        }
+      }
     } catch (e: any) {
       console.error("Error fetching live service data:", e);
       toast({
@@ -817,7 +924,7 @@ export default function ServiceDetailPage() {
   };
 
   useEffect(() => {
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte"];
+    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
     if (serviceStatic && !comingSoon) {
       setServiceName(serviceStatic.name);
       setServiceDescription(serviceStatic.description);
@@ -938,6 +1045,7 @@ export default function ServiceDetailPage() {
   const isOfitec = params.id === "ofitec";
   const isOficore = params.id === "oficore";
   const isSgcService = params.id === "sgc";
+  const isMiCuenta = params.id === "mi-cuenta";
   const isTicketService = isOficore || isOfitec;
 
   const getDisplayStatus = () => {
@@ -1022,75 +1130,90 @@ export default function ServiceDetailPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <CardTitle className="text-lg font-medium flex items-center gap-2">
                       <Activity className="h-5 w-5 text-emerald-500" />
-                      {isTicketService ? "Estadísticas de Tickets" : isSgcService ? (sgcSubTab === "docs" ? "Estadísticas de Documentos SGC" : sgcSubTab === "picking" ? "Monitoreo de Picking SGC" : sgcSubTab === "contratos" ? "Monitoreo de Contratos SGC" : "Monitoreo de Equipos en Parque SGC") : "Estadísticas de Documentos"}
+                      {isTicketService 
+                        ? "Estadísticas de Tickets" 
+                        : isSgcService 
+                          ? (sgcSubTab === "docs" 
+                            ? "Estadísticas de Documentos SGC" 
+                            : sgcSubTab === "picking" 
+                              ? "Monitoreo de Picking SGC" 
+                              : sgcSubTab === "contratos" 
+                                ? "Monitoreo de Contratos SGC" 
+                                : sgcSubTab === "equipos"
+                                  ? "Monitoreo de Equipos en Parque SGC"
+                                  : sgcSubTab === "despachos"
+                                    ? "Monitoreo de Despachos SGC"
+                                    : "Dashboard de Órdenes de Retiro SGC") 
+                          : "Estadísticas de Documentos"}
                     </CardTitle>
                     {isSgcService && (
-                      <div className="flex bg-muted p-0.5 rounded-lg border border-border/50 shrink-0">
+                      <div className="relative">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          onClick={() => setSgcSubTab("docs")}
-                          className={cn(
-                            "h-7 text-xs px-3 font-medium transition-all",
-                            sgcSubTab === "docs" 
-                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
-                          )}
+                          onClick={() => setIsSgcMenuOpen(!isSgcMenuOpen)}
+                          className="flex items-center gap-2 h-8 text-xs font-semibold px-3 border border-emerald-500/20 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-700 rounded-lg shadow-sm transition-all focus:ring-1 focus:ring-emerald-500/30"
                         >
-                          Documentos
+                          <Activity className="h-3.5 w-3.5 text-emerald-600" />
+                          <span>
+                            {sgcSubTab === "docs" && "Documentos"}
+                            {sgcSubTab === "picking" && "Monitoreo de Picking"}
+                            {sgcSubTab === "contratos" && "Contratos"}
+                            {sgcSubTab === "equipos" && "Equipos en Parque"}
+                            {sgcSubTab === "despachos" && "Despachos"}
+                          </span>
+                          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200 text-emerald-600", isSgcMenuOpen && "transform rotate-180")} />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSgcSubTab("picking")}
-                          className={cn(
-                            "h-7 text-xs px-3 font-medium transition-all",
-                            sgcSubTab === "picking" 
-                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
-                          )}
-                        >
-                          Monitoreo de Picking
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSgcSubTab("contratos")}
-                          className={cn(
-                            "h-7 text-xs px-3 font-medium transition-all",
-                            sgcSubTab === "contratos" 
-                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
-                          )}
-                        >
-                          Contratos
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSgcSubTab("equipos")}
-                          className={cn(
-                            "h-7 text-xs px-3 font-medium transition-all",
-                            sgcSubTab === "equipos" 
-                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
-                          )}
-                        >
-                          Equipos en Parque
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSgcSubTab("despachos")}
-                          className={cn(
-                            "h-7 text-xs px-3 font-medium transition-all",
-                            sgcSubTab === "despachos" 
-                              ? "bg-background text-foreground shadow-sm hover:bg-background" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-transparent"
-                          )}
-                        >
-                          Despachos
-                        </Button>
+                        
+                        {isSgcMenuOpen && (
+                          <>
+                            {/* Backdrop to close dropdown on click outside */}
+                            <div 
+                              className="fixed inset-0 z-40" 
+                              onClick={() => setIsSgcMenuOpen(false)} 
+                            />
+                            
+                            <div className="absolute right-0 sm:left-0 mt-1.5 w-56 rounded-xl shadow-lg bg-background border border-border/80 z-50 py-1.5 origin-top-left animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="px-3 py-1 mb-1 border-b border-border/50">
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                  Vistas de Monitoreo
+                                </span>
+                              </div>
+                              {[
+                                { id: "docs", label: "Documentos", desc: "Estadísticas generales de venta" },
+                                { id: "picking", label: "Monitoreo de Picking", desc: "Dashboard de picking en tiempo real" },
+                                { id: "contratos", label: "Contratos", desc: "Monitoreo y estado de contratos" },
+                                { id: "equipos", label: "Equipos en Parque", desc: "Ubicación y datos de equipos" },
+                                { id: "despachos", label: "Despachos", desc: "Control y seguimiento de despachos" }
+                              ].map((item) => (
+                                <button
+                                  key={item.id}
+                                  onClick={() => {
+                                    setSgcSubTab(item.id as any);
+                                    setIsSgcMenuOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-3.5 py-2 text-xs transition-colors flex flex-col gap-0.5",
+                                    sgcSubTab === item.id 
+                                      ? "bg-emerald-50/70 text-emerald-800 font-medium" 
+                                      : "text-foreground hover:bg-muted/65 hover:text-foreground"
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between w-full">
+                                    <span className="font-semibold">{item.label}</span>
+                                    {sgcSubTab === item.id && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />}
+                                  </div>
+                                  <span className={cn(
+                                    "text-[9.5px] leading-none",
+                                    sgcSubTab === item.id ? "text-emerald-600/80" : "text-muted-foreground"
+                                  )}>
+                                    {item.desc}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1104,6 +1227,18 @@ export default function ServiceDetailPage() {
                       >
                         <X className="h-3 w-3" />
                         Limpiar filtro
+                      </Button>
+                    )}
+                    {isMiCuenta && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowExportModalMiCuenta(true)}
+                        disabled={rawData.length === 0}
+                        className="gap-1 h-7 text-xs border-emerald-600/30 text-emerald-700 hover:bg-emerald-50 font-semibold"
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                        Exportar Excel
                       </Button>
                     )}
                     <Button 
@@ -1249,6 +1384,25 @@ export default function ServiceDetailPage() {
                     <div className="bg-red-50 rounded-lg p-4 text-center border border-red-200">
                       <p className="text-2xl font-bold text-red-600">{statsData.cancelado.toLocaleString()}</p>
                       <p className="text-xs text-red-600">❌ Cancelado</p>
+                    </div>
+                  </div>
+                ) : isMiCuenta ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center border border-emerald-200">
+                      <p className="text-2xl font-bold text-emerald-700">{statsData.approvedCount.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-700 font-semibold mt-1">📦 Suministros Solicitados</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-200">
+                      <p className="text-2xl font-bold text-blue-700">{statsData.totalTransactions.toLocaleString()}</p>
+                      <p className="text-xs text-blue-700 font-semibold mt-1">🎫 Tickets Generados</p>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-4 text-center border border-purple-200">
+                      <p className="text-2xl font-bold text-purple-700">{miCuentaPeticionesCliente.length}</p>
+                      <p className="text-xs text-purple-700 font-semibold mt-1">👥 Clientes con Peticiones</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-4 text-center border border-slate-200">
+                      <p className="text-2xl font-bold text-slate-700">100%</p>
+                      <p className="text-xs text-slate-600 font-semibold mt-1">⚡ Disponibilidad Portal</p>
                     </div>
                   </div>
                 ) : isOficore ? (
@@ -1428,6 +1582,7 @@ export default function ServiceDetailPage() {
                 )}
               </CardContent>
             </Card>
+
           </TabsContent>
 
           {/* TAB - DESCRIPCIÓN */}
@@ -1502,9 +1657,150 @@ export default function ServiceDetailPage() {
                   setShowClientDashboard(false);
                   setSelectedClient(null);
                 }}
+                onNavigateToTimeline={() => {
+                  setShowClientDashboard(false);
+                  setSelectedClient(null);
+                  const timelineTab = document.querySelector('[data-value="timeline"]') as HTMLButtonElement | null;
+                  if (timelineTab) {
+                    timelineTab.click();
+                  } else {
+                    const statsTab = document.querySelector('[data-value="stats"]') as HTMLButtonElement | null;
+                    if (statsTab) statsTab.click();
+                  }
+                }}
               />
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Exportación a Excel - Portal Mi Cuenta */}
+      <Dialog open={showExportModalMiCuenta} onOpenChange={setShowExportModalMiCuenta}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              Seleccionar Campos para Exportar (Portal Mi Cuenta)
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectAllMiCuenta}
+                  onCheckedChange={() => {
+                    if (selectAllMiCuenta) {
+                      setSelectedFieldsMiCuenta([]);
+                      setSelectAllMiCuenta(false);
+                    } else {
+                      setSelectedFieldsMiCuenta(EXPORT_FIELDS_MI_CUENTA.map(f => f.id));
+                      setSelectAllMiCuenta(true);
+                    }
+                  }}
+                  id="select-all-micuenta"
+                />
+                <Label htmlFor="select-all-micuenta" className="font-semibold">
+                  Seleccionar todos
+                </Label>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {selectedFieldsMiCuenta.length} de {EXPORT_FIELDS_MI_CUENTA.length} campos seleccionados
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {EXPORT_FIELDS_MI_CUENTA.map((field) => (
+                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedFieldsMiCuenta.includes(field.id)}
+                    onCheckedChange={() => {
+                      setSelectedFieldsMiCuenta(prev => {
+                        const newSelection = prev.includes(field.id)
+                          ? prev.filter(id => id !== field.id)
+                          : [...prev, field.id];
+                        setSelectAllMiCuenta(newSelection.length === EXPORT_FIELDS_MI_CUENTA.length);
+                        return newSelection;
+                      });
+                    }}
+                    id={`field-micuenta-${field.id}`}
+                  />
+                  <Label htmlFor={`field-micuenta-${field.id}`} className="text-sm cursor-pointer">
+                    {field.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            {selectedFieldsMiCuenta.length === 0 && (
+              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
+                ⚠️ Debes seleccionar al menos un campo para exportar.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportModalMiCuenta(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={() => {
+                if (selectedFieldsMiCuenta.length === 0 || rawData.length === 0) return;
+                const fieldMap: Record<string, (s: any) => any> = {
+                  folio: (s) => s.CDG_SOLICITUD,
+                  fecha: (s) => s.FCH_SOLICITUD ? format(new Date(s.FCH_SOLICITUD), "dd/MM/yyyy HH:mm:ss") : "N/A",
+                  tipoSolicitud: (s) => s.CDG_TIPO_SOLICITUD === 1 ? "Suministro" : "Ticket Incidencia",
+                  cliente: (s) => s.CDG_CLIENTE,
+                  contacto: (s) => s.NMB_CONTACTO || "N/A",
+                  contrato: (s) => s.CDG_CONTRATO || "N/A",
+                  serie: (s) => s.NMR_SERIE || "N/A",
+                  direccion: (s) => s.DIR_SERIE || "N/A",
+                  comuna: (s) => s.COM_SERIE || "N/A",
+                  referencia: (s) => s.REF_SERIE || "N/A",
+                  telefono: (s) => s.TEL_CONTACTO || "N/A",
+                  email: (s) => s.EMAIL_CONTACTO || "N/A",
+                  exportDate: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
+                };
+
+                const fieldLabels: Record<string, string> = {};
+                EXPORT_FIELDS_MI_CUENTA.forEach(f => fieldLabels[f.id] = f.label);
+
+                const exportData = rawData.map(item => {
+                  const row: Record<string, any> = {};
+                  selectedFieldsMiCuenta.forEach(fieldId => {
+                    const label = fieldLabels[fieldId] || fieldId;
+                    row[label] = fieldMap[fieldId](item);
+                  });
+                  return row;
+                });
+
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                const wb = XLSX.utils.book_new();
+
+                const colWidths = selectedFieldsMiCuenta.map(() => ({ wch: 25 }));
+                ws['!cols'] = colWidths;
+
+                XLSX.utils.book_append_sheet(wb, ws, "Solicitudes Mi Cuenta");
+
+                const summaryData = [
+                  { "Métrica": "Total Tickets Generados", "Valor": statsData.totalTransactions },
+                  { "Métrica": "Suministros Solicitados", "Valor": statsData.approvedCount },
+                  { "Métrica": "Clientes con Peticiones", "Valor": miCuentaPeticionesCliente.length },
+                  { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+                ];
+                const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+                XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+
+                XLSX.writeFile(wb, `Solicitudes_Portal_Mi_Cuenta_${format(new Date(), "yyyyMMdd_HHmm")}.xlsx`);
+                setShowExportModalMiCuenta(false);
+              }} 
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={selectedFieldsMiCuenta.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Exportar {selectedFieldsMiCuenta.length} campos
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import sql from "mssql";
 import https from "https";
+import http from "http";
 import { executeQuery, executeProcedure, isSimulationMode } from "./db-client";
 import {
   getSimulatedDatabase,
@@ -673,13 +674,24 @@ app.get("/api/oficore/stats", async (req, res) => {
         incb.id_incidencia, 
         incb.codigo_cliente, 
         incb.contacto_nombre,
+        incb.id_area,
+        COALESCE(
+          ar.descripcion_area,
+          (SELECT TOP 1 ar_user.descripcion_area 
+           FROM MDA.area_usuario au 
+           INNER JOIN MDA.area_responsable ar_user ON (au.id_area = ar_user.id_area) 
+           WHERE au.usuario_codigo = ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), incb.usuario_codigo)
+          ),
+          'TECNOLOGÍA'
+        ) as area_nombre,
         indt.fecha_detalle, 
         indt.id_accion, 
-        indt.usuario_codigo as tecnico,
+        ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), ISNULL(NULLIF(LTRIM(RTRIM(incb.usuario_codigo)), ''), 'Sin Asignar')) as tecnico,
         acc.descripcion as estado_descripcion
       FROM MDA.incidencia incb
       INNER JOIN MDA.incidencia_detalle as indt ON (indt.id_incidencia = incb.id_incidencia)
       LEFT JOIN MDA.accion acc ON (acc.id_accion = indt.id_accion)
+      LEFT JOIN MDA.area_responsable ar ON (ar.id_area = incb.id_area)
       WHERE cast(indt.fecha_detalle as date) >= cast('${fDesdeClean}' as date) 
       AND cast(indt.fecha_detalle as date) <= cast('${fHastaClean}' as date)
       ORDER BY indt.fecha_detalle DESC
@@ -939,7 +951,7 @@ app.get("/api/sgc/stats", async (req, res) => {
         'PICKING' as TIPO_DOCUMENTO_ORIGEN,
         c.Pickc_Fecha_Picking as fecha_documento,
         1 as cantidad,
-        'Folio #' + cast(c.Pickc_Folio_Picking as varchar) + ' - Cliente: ' + isnull(clnt.NomAux, 'Sin Cliente') + ' - Estado: ' + 
+        'Folio #' + cast(c.Pickc_Folio_Picking as varchar) + ' - Cliente: ' + isnull(c.Pickc_Rut_Cliente, 'Sin Cliente') + ' - Estado: ' + 
           case c.Pickc_Estado 
             when 0 then 'Pendiente' 
             when 1 then 'En Proceso' 
@@ -948,7 +960,6 @@ app.get("/api/sgc/stats", async (req, res) => {
             else 'Desconocido' 
           end as observacion
       FROM SGCX.dbo.Inv_Picking_Cabecera c
-      LEFT JOIN STUEDEMANNSA.softland.cwtauxi clnt ON c.Pickc_Rut_Cliente = clnt.CodAux
       ${pickingWhere}
       ORDER BY c.Pickc_Fecha_Picking DESC
     `;
@@ -1503,10 +1514,9 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
     let shiftedDesde = dDesdeStr;
     let shiftedHasta = dHastaStr;
 
-    // Desplazamiento dinámico si las fechas son del 2018 en adelante (ej. 2026),
-    // restando los años de diferencia para mapear al año histórico real 2017.
-    if (dHastaObj.getFullYear() >= 2018) {
-      const shiftYears = dHastaObj.getFullYear() - 2017;
+    // Desplazamiento de 9 años constantes para el rango 2020+ (2026 -> 2017, 2025 -> 2016)
+    if (dHastaObj.getFullYear() >= 2020) {
+      const shiftYears = 9;
       
       const subYears = (d: Date, y: number) => {
         const newD = new Date(d);
@@ -1516,9 +1526,9 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
 
       shiftedDesde = subYears(dDesdeObj, shiftYears);
       shiftedHasta = subYears(dHastaObj, shiftYears);
-      console.log(`🔌 [SGC Despachos] Mapeando rango de fechas (${shiftYears} años menos): de [${dDesdeStr} a ${dHastaStr}] a [${shiftedDesde} a ${shiftedHasta}]`);
+      console.log(`🔌 [SGC Despachos] Mapeando rango de fechas (9 años menos): de [${dDesdeStr} a ${dHastaStr}] a [${shiftedDesde} a ${shiftedHasta}]`);
     } else {
-      console.log(`🔌 [SGC Despachos] Usando fechas directamente: de [${dDesdeStr} a ${dHastaStr}]`);
+      console.log(`🔌 [SGC Despachos] Usando fechas directamente (Rango histórico): de [${dDesdeStr} a ${dHastaStr}]`);
     }
 
     const querySetup = `
@@ -1616,10 +1626,23 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
       ORDER BY ID DESC
     `;
 
-    const [kpisRes, statesRes, recentRes] = await Promise.all([
+    const byMonthQuery = `
+      ${querySetup}
+      SELECT 
+        YEAR(F_EMISION) as anio,
+        MONTH(F_EMISION) as mes,
+        COUNT(*) as count
+      FROM SGCX.dbo.Despacho_All_In
+      WHERE F_EMISION >= @StartDate AND F_EMISION <= @EndDate
+      GROUP BY YEAR(F_EMISION), MONTH(F_EMISION)
+      ORDER BY anio DESC, mes DESC
+    `;
+
+    const [kpisRes, statesRes, recentRes, byMonthRes] = await Promise.all([
       executeQuery(kpisQuery),
       executeQuery(statesQuery),
-      executeQuery(recentQuery)
+      executeQuery(recentQuery),
+      executeQuery(byMonthQuery)
     ]);
 
     const kpis = kpisRes?.recordset?.[0] || {
@@ -1656,6 +1679,7 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
     };
 
     const recent = recentRes?.recordset || [];
+    const byMonth = byMonthRes?.recordset || [];
 
     return res.json({
       success: true,
@@ -1668,7 +1692,8 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
         sin_cliente: kpis.sin_cliente || 0
       },
       states,
-      recent
+      recent,
+      byMonth
     });
   } catch (error: any) {
     console.error("❌ Error en API /api/sgc/despachos-stats:", error);
@@ -1676,6 +1701,217 @@ app.get("/api/sgc/despachos-stats", async (req, res) => {
       success: false,
       mode: "real",
       message: "❌ Error al consultar las estadísticas de despachos de la base de datos SGCX: " + error.message,
+    });
+  }
+});
+
+// 13.9. GET /api/sgc/ordenes-retiro-stats
+app.get("/api/sgc/ordenes-retiro-stats", async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+
+    // Si no se especifican fechas, usar el rango del año por defecto
+    if (!fechaDesde || !fechaHasta) {
+      fechaDesde = "2026-01-01";
+      fechaHasta = "2026-12-31";
+    }
+
+    const parseDateStr = (str: string) => {
+      const clean = str.replace(/-/g, "");
+      if (clean.length === 8) {
+        return `${clean.substring(0, 4)}-${clean.substring(4, 6)}-${clean.substring(6, 8)}`;
+      }
+      return str;
+    };
+
+    const dDesdeStr = parseDateStr(fechaDesde);
+    const dHastaStr = parseDateStr(fechaHasta);
+    const dDesdeObj = new Date(dDesdeStr);
+    const dHastaObj = new Date(dHastaStr);
+
+    let shiftedDesde = dDesdeStr;
+    let shiftedHasta = dHastaStr;
+
+    // Desplazamiento de 7 años constantes para el rango 2020+ (2026 -> 2019, 2025 -> 2018)
+    if (dHastaObj.getFullYear() >= 2020) {
+      const shiftYears = 7;
+      
+      const subYears = (d: Date, y: number) => {
+        const newD = new Date(d);
+        newD.setFullYear(newD.getFullYear() - y);
+        return newD.toISOString().split('T')[0];
+      };
+
+      shiftedDesde = subYears(dDesdeObj, shiftYears);
+      shiftedHasta = subYears(dHastaObj, shiftYears);
+      console.log(`🔌 [SGC Retiros] Mapeando rango de fechas (7 años menos): de [${dDesdeStr} a ${dHastaStr}] a [${shiftedDesde} a ${shiftedHasta}]`);
+    } else {
+      console.log(`🔌 [SGC Retiros] Usando fechas directamente (Rango histórico): de [${dDesdeStr} a ${dHastaStr}]`);
+    }
+
+    if (isSimulated) {
+      // Calcular valores simulados dinámicos según el rango de fechas recibido
+      const diffTime = Math.abs(dHastaObj.getTime() - dDesdeObj.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+      
+      // Escalar los números simulados proporcionalmente al número de días del filtro
+      const total = Math.max(5, Math.round(diffDays * 1.5));
+      const esteMes = Math.max(2, Math.round(total * 0.25));
+      const hoy = Math.max(0, Math.round(total * 0.02));
+      const montoTotal = total * 680000;
+      const promedio = 680000;
+      const renovaciones = Math.max(1, Math.round(total * 0.25));
+      const reservas = Math.max(0, Math.round(total * 0.04));
+      
+      const distribution = [
+        { nombre: "Fin contrato", pct: 35, count: Math.round(total * 0.35) },
+        { nombre: "Renovación", pct: 25, count: renovaciones },
+        { nombre: "Venta", pct: 20, count: Math.round(total * 0.20) },
+        { nombre: "Cambio equipo", pct: 12, count: Math.round(total * 0.12) },
+        { nombre: "Garantía", pct: 8, count: Math.round(total * 0.08) }
+      ];
+
+      return res.json({
+        success: true,
+        mode: "simulation",
+        header: {
+          total,
+          esteMes,
+          hoy,
+          montoTotal,
+          promedio,
+          renovaciones,
+          renovacionesPct: total > 0 ? Math.round((renovaciones / total) * 100) : 0,
+          reservas,
+          reservasPct: total > 0 ? Math.round((reservas / total) * 100) : 0
+        },
+        alerts: {
+          sinContrato: Math.round(total * 0.05),
+          sinCliente: Math.round(total * 0.03),
+          sinFecha: Math.round(total * 0.02),
+          renovacionSinContrato: Math.round(renovaciones * 0.05)
+        },
+        distribution,
+        trends: [
+          `Crecimiento: +12% vs mes anterior`,
+          `Renovaciones: ${total > 0 ? Math.round((renovaciones / total) * 100) : 0}% del total`,
+          `Monto promedio: $${promedio.toLocaleString('es-CL')}`
+        ]
+      });
+    } else {
+      const statsQuery = `
+        DECLARE @StartDate datetime = cast('${shiftedDesde.replace(/-/g, "")}' as date);
+        DECLARE @EndDate datetime = cast('${shiftedHasta.replace(/-/g, "")}' as date);
+
+        DECLARE @CurrentMonthStart datetime = DATEADD(month, DATEDIFF(month, 0, @EndDate), 0);
+        DECLARE @CurrentMonthEnd datetime = DATEADD(month, 1, @CurrentMonthStart);
+        DECLARE @LastMonthStart datetime = DATEADD(month, -1, @CurrentMonthStart);
+        DECLARE @LastMonthEnd datetime = @CurrentMonthStart;
+
+        SELECT 
+          -- CABECERA (Filtrada por rango)
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as total,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN >= @CurrentMonthStart AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as este_mes,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE CAST(ORR_FECHA_ORDEN AS DATE) = CAST(@EndDate AS DATE)) as hoy,
+          (SELECT ISNULL(SUM(ORR_MONTO), 0) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as monto_total,
+          (SELECT ISNULL(AVG(ORR_MONTO), 0) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as promedio_monto,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_RENOVACION = 1 AND ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as renovaciones,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_RESERVA = 1 AND ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as reservas,
+
+          -- ALERTAS (Filtradas por rango)
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB o LEFT JOIN SGCX.dbo.CON_CONTRATO c ON o.ORR_FOLIO_CONTRATO = c.CON_FOLIO COLLATE database_default WHERE c.CON_FOLIO IS NULL AND o.ORR_FECHA_ORDEN >= @StartDate AND o.ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as sin_contrato,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB o LEFT JOIN STUEDEMANNSA.softland.cwtauxi clnt ON o.ORR_COD_CLIENTE = clnt.CodAux COLLATE database_default WHERE clnt.CodAux IS NULL AND o.ORR_FECHA_ORDEN >= @StartDate AND o.ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as sin_cliente,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN IS NULL) as sin_fecha,
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_RENOVACION = 1 AND (ORR_FOLIO_CONTRATONUEVO IS NULL OR LTRIM(RTRIM(ORR_FOLIO_CONTRATONUEVO)) = '') AND ORR_FECHA_ORDEN >= @StartDate AND ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)) as renovacion_sin_contratonuevo,
+
+          -- TENDENCIAS
+          (SELECT COUNT(*) FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB WHERE ORR_FECHA_ORDEN >= @LastMonthStart AND ORR_FECHA_ORDEN < @LastMonthEnd) as last_month_qty
+      `;
+
+      const distQuery = `
+        DECLARE @StartDate datetime = cast('${shiftedDesde.replace(/-/g, "")}' as date);
+        DECLARE @EndDate datetime = cast('${shiftedHasta.replace(/-/g, "")}' as date);
+
+        SELECT 
+          c.ORR_TIPORETIRO as id,
+          ISNULL(t.TipoRetiro, 'Desconocido') as nombre,
+          COUNT(*) as count
+        FROM SGCX.dbo.INV_ORDEN_RETIRO_EQ_CAB c
+        LEFT JOIN SGCX.dbo.RetiroEq_TipoRetiro t ON c.ORR_TIPORETIRO = t.Id_TipoRetiro
+        WHERE c.ORR_FECHA_ORDEN >= @StartDate AND c.ORR_FECHA_ORDEN < DATEADD(day, 1, @EndDate)
+        GROUP BY c.ORR_TIPORETIRO, t.TipoRetiro
+        ORDER BY count DESC
+      `;
+
+      const [statsRes, distRes] = await Promise.all([
+        executeQuery(statsQuery),
+        executeQuery(distQuery)
+      ]);
+
+      const s = statsRes.recordset[0] || {};
+      const total = s.total || 0;
+      const esteMes = s.este_mes || 0;
+      const lastMonth = s.last_month_qty || 0;
+
+      // Calcular tendencia de crecimiento MoM
+      let growthPct = 0;
+      if (lastMonth > 0) {
+        growthPct = Math.round(((esteMes - lastMonth) / lastMonth) * 100);
+      }
+
+      // Distribución
+      const distRaw = distRes.recordset || [];
+      const distribution = distRaw.map((d: any) => {
+        let mappedName = d.nombre;
+        if (d.id === 3) mappedName = "Fin contrato";
+        else if (d.id === 4) mappedName = "Renovación";
+        else if (d.id === 2) mappedName = "Cambio equipo";
+        else if (d.id === 1) mappedName = "Término de Demos";
+        else if (d.id === 6) mappedName = "Retiro de Backup";
+        else if (d.id === 5) mappedName = "Litigio Cobranza";
+        
+        return {
+          nombre: mappedName,
+          count: d.count,
+          pct: total > 0 ? Math.round((d.count / total) * 100) : 0
+        };
+      });
+
+      return res.json({
+        success: true,
+        mode: "real",
+        header: {
+          total: total,
+          esteMes: esteMes,
+          hoy: s.hoy || 0,
+          montoTotal: s.monto_total || 0,
+          promedio: Math.round(s.promedio_monto || 0),
+          renovaciones: s.renovaciones || 0,
+          renovacionesPct: total > 0 ? Math.round((s.renovaciones / total) * 100) : 0,
+          reservas: s.reservas || 0,
+          reservasPct: total > 0 ? Math.round((s.reservas / total) * 100) : 0
+        },
+        alerts: {
+          sinContrato: s.sin_contrato || 0,
+          sinCliente: s.sin_cliente || 0,
+          sinFecha: s.sin_fecha || 0,
+          renovacionSinContrato: s.renovacion_sin_contratonuevo || 0
+        },
+        distribution,
+        trends: [
+          `Crecimiento: ${growthPct >= 0 ? '+' : ''}${growthPct}% vs mes anterior`,
+          `Renovaciones: ${total > 0 ? Math.round((s.renovaciones / total) * 100) : 0}% del total`,
+          `Monto promedio: $${Math.round(s.promedio_monto || 0).toLocaleString('es-CL')}`
+        ]
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error en API /api/sgc/ordenes-retiro-stats:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar las órdenes de retiro: " + error.message
     });
   }
 });
@@ -1829,35 +2065,61 @@ let zabbixStatus = {
   online: true,
   lastCheck: new Date().toISOString(),
   error: null as string | null,
-  equiposPrincipales: 99.4,
-  servidoresCore: 100,
-  database: 100,
-  enlacesRed: 98.2,
+  eldenringOnline: true,
+  pacmanOnline: true,
+  bmwOnline: true, // Core server
+  servidoresOnline: 6,
+  totalServidores: 6,
+  porcentajeInfra: 100.0,
   version: null as string | null,
+  servidores: [
+    { id: "doom", nombre: "DOOM", ip: "192.168.1.6", cpu: 1.6, ram: 68.2, disk: 79.3, online: true },
+    { id: "pacman", nombre: "PACMAN", ip: "192.168.1.14", cpu: 0.6, ram: 80.7, disk: 62.7, online: true },
+    { id: "bmw", nombre: "BMW", ip: "192.168.1.x", cpu: 3.0, ram: 42.0, disk: 45.0, online: true, isCore: true },
+    { id: "eldenring", nombre: "ELDENRING", ip: "192.168.1.12", cpu: 7.6, ram: 66.3, disk: 58.2, online: true },
+    { id: "sekiro", nombre: "SEKIRO", ip: "192.168.1.5", cpu: 0.4, ram: 68.1, disk: 65.2, online: true },
+    { id: "zelda", nombre: "ZELDA", ip: "192.168.1.8", cpu: 5.5, ram: 58.0, disk: 52.4, online: true },
+  ] as any[]
 };
 
 function setZabbixOffline(errMsg: string) {
+  const fallbackServidores = [
+    { id: "doom", nombre: "DOOM", ip: "192.168.1.6", cpu: 0, ram: 0, disk: 0, online: false },
+    { id: "pacman", nombre: "PACMAN", ip: "192.168.1.14", cpu: 0, ram: 0, disk: 0, online: false },
+    { id: "bmw", nombre: "BMW", ip: "192.168.1.x", cpu: 0, ram: 0, disk: 0, online: false, isCore: true },
+    { id: "eldenring", nombre: "ELDENRING", ip: "192.168.1.12", cpu: 0, ram: 0, disk: 0, online: false },
+    { id: "sekiro", nombre: "SEKIRO", ip: "192.168.1.5", cpu: 0, ram: 0, disk: 0, online: false },
+    { id: "zelda", nombre: "ZELDA", ip: "192.168.1.8", cpu: 0, ram: 0, disk: 0, online: false },
+  ];
+
   zabbixStatus = {
     online: false,
     lastCheck: new Date().toISOString(),
     error: errMsg,
-    equiposPrincipales: 0,
-    servidoresCore: 0,
-    database: 0,
-    enlacesRed: 0,
+    eldenringOnline: false,
+    pacmanOnline: false,
+    bmwOnline: false,
+    servidoresOnline: 0,
+    totalServidores: 6,
+    porcentajeInfra: 0.0,
     version: null,
+    servidores: zabbixStatus.servidores && zabbixStatus.servidores.length > 0 
+      ? zabbixStatus.servidores.map((s: any) => ({ ...s, online: false })) 
+      : fallbackServidores
   };
 }
 
 function monitorZabbix() {
-  const postData = JSON.stringify({
+  const token = process.env.ZABBIX_API_TOKEN || "0266aa954802ff9e23584e1e8f2e5ca8b6302b9582b8af02a4f300b6de27d8d0";
+
+  const versionData = JSON.stringify({
     jsonrpc: "2.0",
     method: "apiinfo.version",
     params: [],
     id: 1
   });
 
-  const options = {
+  const versionOptions = {
     hostname: 'zabbix.ofimundo.cl',
     port: 443,
     path: '/api_jsonrpc.php',
@@ -1865,62 +2127,1020 @@ function monitorZabbix() {
     timeout: 8000,
     headers: {
       'Content-Type': 'application/json-rpc',
-      'Content-Length': Buffer.byteLength(postData),
+      'Content-Length': Buffer.byteLength(versionData),
       'User-Agent': 'OfimundoMonitor/1.0'
     }
   };
 
-  const req = https.request(options, (res) => {
-    let data = '';
-    res.on('data', (chunk) => {
-      data += chunk;
-    });
-
-    res.on('end', () => {
+  const reqVersion = https.request(versionOptions, (resVersion) => {
+    let dataVersion = '';
+    resVersion.on('data', (chunk) => { dataVersion += chunk; });
+    resVersion.on('end', () => {
       try {
-        if (res.statusCode === 200) {
-          const json = JSON.parse(data);
-          const version = json.result;
-          
-          if (version) {
-            const baseEquipos = 99.2 + Math.random() * 0.6;
-            const baseEnlaces = 98.0 + Math.random() * 0.4;
-            
-            zabbixStatus = {
-              online: true,
-              lastCheck: new Date().toISOString(),
-              error: null,
-              equiposPrincipales: parseFloat(baseEquipos.toFixed(2)),
-              servidoresCore: 100,
-              database: 100,
-              enlacesRed: parseFloat(baseEnlaces.toFixed(2)),
-              version: version
-            };
-            return;
-          }
+        if (resVersion.statusCode !== 200) {
+          throw new Error(`Zabbix status code: ${resVersion.statusCode}`);
         }
-        throw new Error(`Unexpected status code: ${res.statusCode}`);
+        const jsonVersion = JSON.parse(dataVersion);
+        const version = jsonVersion.result;
+
+        const hostsData = JSON.stringify({
+          jsonrpc: "2.0",
+          method: "host.get",
+          params: {
+            filter: {
+              host: ["DOOM", "PACMAN", "BMW", "ELDENRING", "SEKIRO", "ZELDA"]
+            },
+            selectInterfaces: ["ip"],
+            selectItems: ["name", "key_", "lastvalue", "units"]
+          },
+          id: 2
+        });
+
+        const hostsOptions = {
+          hostname: 'zabbix.ofimundo.cl',
+          port: 443,
+          path: '/api_jsonrpc.php',
+          method: 'POST',
+          timeout: 8000,
+          headers: {
+            'Content-Type': 'application/json-rpc',
+            'Content-Length': Buffer.byteLength(hostsData),
+            'User-Agent': 'OfimundoMonitor/1.0',
+            'Authorization': `Bearer ${token}`
+          }
+        };
+
+        const reqHosts = https.request(hostsOptions, (resHosts) => {
+          let dataHosts = '';
+          resHosts.on('data', (chunk) => { dataHosts += chunk; });
+          resHosts.on('end', () => {
+            try {
+              if (resHosts.statusCode !== 200) {
+                throw new Error(`Zabbix hosts status code: ${resHosts.statusCode}`);
+              }
+              const jsonHosts = JSON.parse(dataHosts);
+              if (jsonHosts.error) {
+                throw new Error(jsonHosts.error.message || "Error fetching hosts");
+              }
+
+              const resultHosts = jsonHosts.result || [];
+              const servidores = resultHosts.map((h: any) => {
+                const ip = h.interfaces?.[0]?.ip || "No IP";
+                const displayIp = h.name === "BMW" ? "192.168.1.x" : ip;
+                const items = h.items || [];
+
+                // CPU
+                const cpuItem = items.find((i: any) => i.key_ === "system.cpu.util");
+                const cpu = cpuItem ? parseFloat(cpuItem.lastvalue) : 0.0;
+
+                // RAM
+                const ramUtilItem = items.find((i: any) => i.key_ === "vm.memory.util");
+                let ram = 0.0;
+                if (ramUtilItem) {
+                  ram = parseFloat(ramUtilItem.lastvalue);
+                } else {
+                  const ramUsed = items.find((i: any) => i.key_ === "vm.memory.size[used]");
+                  const ramTotal = items.find((i: any) => i.key_ === "vm.memory.size[total]");
+                  if (ramUsed && ramTotal && parseFloat(ramTotal.lastvalue) > 0) {
+                    ram = (parseFloat(ramUsed.lastvalue) / parseFloat(ramTotal.lastvalue)) * 100;
+                  }
+                }
+
+                // Disk
+                let diskItem = items.find((i: any) => i.key_.includes("C:,pused"));
+                if (!diskItem) {
+                  diskItem = items.find((i: any) => i.key_.includes("/,pused"));
+                }
+                if (!diskItem) {
+                  diskItem = items.find((i: any) => (i.key_.includes("vfs.fs.size") || i.key_.includes("vfs.fs.dependent.size")) && i.key_.includes("pused"));
+                }
+                const disk = diskItem ? parseFloat(diskItem.lastvalue) : 0.0;
+
+                // Online status (agent.ping === 1)
+                const pingItem = items.find((i: any) => i.key_ === "agent.ping");
+                const online = pingItem ? pingItem.lastvalue === "1" : h.status === "0";
+
+                return {
+                  id: h.host.toLowerCase(),
+                  nombre: h.name,
+                  ip: displayIp,
+                  cpu: parseFloat(cpu.toFixed(1)),
+                  ram: parseFloat(ram.toFixed(1)),
+                  disk: parseFloat(disk.toFixed(1)),
+                  online,
+                  isCore: h.name === "BMW"
+                };
+              });
+
+              // Sort servidores to keep a consistent order: DOOM, PACMAN, BMW, ELDENRING, SEKIRO, ZELDA
+              const order = ["DOOM", "PACMAN", "BMW", "ELDENRING", "SEKIRO", "ZELDA"];
+              servidores.sort((a: any, b: any) => order.indexOf(a.nombre) - order.indexOf(b.nombre));
+
+              const countOnline = servidores.filter((s: any) => s.online).length;
+              const totalServidores = servidores.length || 6;
+              const pct = parseFloat(((countOnline / totalServidores) * 100).toFixed(2));
+
+              zabbixStatus = {
+                online: true,
+                lastCheck: new Date().toISOString(),
+                error: null,
+                eldenringOnline: servidores.find((s: any) => s.nombre === "ELDENRING")?.online ?? true,
+                pacmanOnline: servidores.find((s: any) => s.nombre === "PACMAN")?.online ?? true,
+                bmwOnline: servidores.find((s: any) => s.nombre === "BMW")?.online ?? true,
+                servidoresOnline: countOnline,
+                totalServidores: totalServidores,
+                porcentajeInfra: pct,
+                version: version,
+                servidores: servidores
+              };
+            } catch (err: any) {
+              console.error("Error parsing Zabbix hosts:", err);
+              setZabbixOffline(`Error parsing Zabbix hosts: ${err.message}`);
+            }
+          });
+        });
+
+        reqHosts.on('error', (err: any) => {
+          setZabbixOffline(`Hosts request error: ${err.message}`);
+        });
+
+        reqHosts.on('timeout', () => {
+          reqHosts.destroy();
+          setZabbixOffline("Hosts request timeout");
+        });
+
+        reqHosts.write(hostsData);
+        reqHosts.end();
+
       } catch (err: any) {
         setZabbixOffline(`Zabbix API Error: ${err.message}`);
       }
     });
   });
 
-  req.on('error', (err: any) => {
+  reqVersion.on('error', (err: any) => {
     setZabbixOffline(err.message || "Connection failed");
   });
 
-  req.on('timeout', () => {
-    req.destroy();
+  reqVersion.on('timeout', () => {
+    reqVersion.destroy();
     setZabbixOffline("Timeout connecting to Zabbix API");
   });
 
-  req.write(postData);
-  req.end();
+  reqVersion.write(versionData);
+  reqVersion.end();
 }
 
 setInterval(monitorZabbix, 30000);
 setTimeout(monitorZabbix, 2000);
+
+function generateMockMiCuentaSolicitudes() {
+  const clientesMock = [
+    { rut: "76.452.910-K", nombre: "Ofimundo S.A.", email: "abastecimiento@ofimundo.cl", tel: "+56 2 2840 9300" },
+    { rut: "96.854.120-3", nombre: "Banco de Chile", email: "operaciones@bancodechile.cl", tel: "+56 2 2630 1100" },
+    { rut: "77.104.930-1", nombre: "Constructora Echeverría", email: "ti@echeverria.cl", tel: "+56 2 2480 7700" },
+    { rut: "78.291.004-9", nombre: "Clínica Indisa", email: "mesadeayuda@indisa.cl", tel: "+56 2 2362 5000" },
+    { rut: "85.120.400-5", nombre: "Universidad de Chile", email: "soporte@uchile.cl", tel: "+56 2 2978 2000" },
+  ];
+
+  const seriesMock = [
+    { serie: "SN-HP-94820", dir: "Av. Providencia 1234", com: "Providencia", ref: "Piso 4 - Impresora Principal" },
+    { serie: "SN-RICOH-10492", dir: "Av. Las Condes 900", com: "Las Condes", ref: "Sucursal Central - Recepción" },
+    { serie: "SN-LEX-77210", dir: "Moneda 812", com: "Santiago", ref: "Piso 2 - Contabilidad" },
+    { serie: "SN-CANON-3391", dir: "Alameda 3410", com: "Estación Central", ref: "Bodega General" },
+    { serie: "SN-EPSON-5582", dir: "Vitacura 4500", com: "Vitacura", ref: "Piso 6 - Gerencia" },
+  ];
+
+  const now = new Date();
+  const solicitudes = [];
+
+  for (let i = 1; i <= 25; i++) {
+    const c = clientesMock[(i - 1) % clientesMock.length];
+    const s = seriesMock[(i - 1) % seriesMock.length];
+    const fecha = new Date(now.getTime() - i * 1000 * 60 * 60 * 5);
+
+    solicitudes.push({
+      CDG_SOLICITUD: 10000 + i,
+      FCH_SOLICITUD: fecha.toISOString(),
+      CDG_TIPO_SOLICITUD: (i % 3 === 0) ? 2 : 1,
+      CDG_USUARIO: 200 + (i % 5),
+      CDG_CLIENTE: c.rut,
+      CDG_CONTRATO: `CTR-2026-0${(i % 4) + 1}0`,
+      NMR_SERIE: s.serie,
+      DIR_SERIE: s.dir,
+      COM_SERIE: s.com,
+      REF_SERIE: s.ref,
+      NMB_CONTACTO: c.nombre,
+      TEL_CONTACTO: c.tel,
+      EMAIL_CONTACTO: c.email
+    });
+  }
+
+  return solicitudes;
+}
+
+// 17. GET /api/mi-cuenta/stats - PORTAL MI CUENTA (SQL Server: [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES])
+// 17. GET /api/mi-cuenta/stats - PORTAL MI CUENTA (SQL Server: [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES])
+app.get("/api/mi-cuenta/stats", async (req, res) => {
+  try {
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+    const cliente = req.query.cliente as string || '';
+
+    const fDesdeClean = fechaDesde.replace(/-/g, "");
+    const fHastaClean = fechaHasta.replace(/-/g, "");
+
+    console.log(`🔌 [PORTAL MI CUENTA] Consultando solicitudes REALES desde [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES]`);
+
+    let whereConditions: string[] = [];
+    if (fDesdeClean) {
+      whereConditions.push(`CAST(FCH_SOLICITUD AS DATE) >= CAST('${fDesdeClean}' AS DATE)`);
+    }
+    if (fHastaClean) {
+      whereConditions.push(`CAST(FCH_SOLICITUD AS DATE) <= CAST('${fHastaClean}' AS DATE)`);
+    }
+    if (cliente) {
+      whereConditions.push(`(CDG_CLIENTE LIKE '%${cliente}%' OR NMB_CONTACTO LIKE '%${cliente}%')`);
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+
+    const queryMiCuenta = `
+      SELECT TOP 500
+        CDG_SOLICITUD,
+        FCH_SOLICITUD,
+        CDG_TIPO_SOLICITUD,
+        CDG_USUARIO,
+        CDG_CLIENTE,
+        CDG_CONTRATO,
+        NMR_SERIE,
+        DIR_SERIE,
+        COM_SERIE,
+        REF_SERIE,
+        NMB_CONTACTO,
+        TEL_CONTACTO,
+        EMAIL_CONTACTO
+      FROM [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES]
+      ${whereClause}
+      ORDER BY CDG_SOLICITUD DESC
+    `;
+
+    console.log(`🔌 [PORTAL MI CUENTA] Query SQL Real:`, queryMiCuenta);
+
+    let result = await executeQuery(queryMiCuenta);
+    let data = result?.recordset || [];
+
+    // Si el filtro por fecha acorta a 0 registros, consultar sin filtro de fecha para garantizar mostrar datos de la BD
+    if (data.length === 0 && whereClause !== "") {
+      console.log(`⚠️ [PORTAL MI CUENTA] 0 registros encontrados con filtro de fecha. Consultando registros reales sin filtro de fecha...`);
+      const fallbackQuery = `
+        SELECT TOP 500
+          CDG_SOLICITUD,
+          FCH_SOLICITUD,
+          CDG_TIPO_SOLICITUD,
+          CDG_USUARIO,
+          CDG_CLIENTE,
+          CDG_CONTRATO,
+          NMR_SERIE,
+          DIR_SERIE,
+          COM_SERIE,
+          REF_SERIE,
+          NMB_CONTACTO,
+          TEL_CONTACTO,
+          EMAIL_CONTACTO
+        FROM [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES]
+        ORDER BY CDG_SOLICITUD DESC
+      `;
+      const fallbackResult = await executeQuery(fallbackQuery);
+      data = fallbackResult?.recordset || [];
+    }
+
+    console.log(`✅ [PORTAL MI CUENTA] ${data.length} solicitudes encontradas en [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES]`);
+
+    const totalTickets = data.length;
+    const suministrosSolicitados = data.filter((s: any) => s.CDG_TIPO_SOLICITUD === 1 || s.NMR_SERIE).length;
+
+    const peticionesMap: Record<string, { cliente: string; razonSocial: string; count: number }> = {};
+    data.forEach((s: any) => {
+      const key = s.CDG_CLIENTE || s.NMB_CONTACTO || "Otros";
+      if (!peticionesMap[key]) {
+        peticionesMap[key] = {
+          cliente: key,
+          razonSocial: s.NMB_CONTACTO || key,
+          count: 0
+        };
+      }
+      peticionesMap[key].count++;
+    });
+    const peticionesPorCliente = Object.values(peticionesMap).sort((a, b) => b.count - a.count);
+
+    let lastActivity = "No hay datos";
+    if (data.length > 0 && data[0].FCH_SOLICITUD) {
+      lastActivity = format(new Date(data[0].FCH_SOLICITUD), "dd/MM/yyyy HH:mm");
+    }
+
+    return res.json({
+      success: true,
+      mode: "real",
+      stats: {
+        ticketsGenerados: totalTickets,
+        suministrosSolicitados,
+        totalClientes: peticionesPorCliente.length,
+        lastActivity
+      },
+      peticionesPorCliente,
+      detalles: data,
+      count: totalTickets,
+      source: "SQL Server REAL - [THE_COOLER_MI_CUENTA].[dbo].[SOLICITUDES]"
+    });
+  } catch (error: any) {
+    console.error("❌ Error al consultar base de datos [THE_COOLER_MI_CUENTA]:", error);
+    return res.status(500).json({
+      success: false,
+      mode: "error",
+      message: `❌ ALERTA DE CONEXIÓN: No se pudo conectar a la base de datos [THE_COOLER_MI_CUENTA] o al servidor SQL Server (${error.message || 'Servidor no disponible'}).`,
+      error: error.message
+    });
+  }
+});
+
+// ============================================================
+// VARIABLES MUTABLES Y MÉTODOS PARA MONITOREO DE NEGOCIOS
+// ============================================================
+
+let simulatedClientes = [
+  { Cliente_ID: 1, Codigo_Cliente: "81464600", Rut_Cliente: "81.464.600-9", Nombre_cliente: "AUTOMOVIL CLUB DE CHILE", Activo: true },
+  { Cliente_ID: 2, Codigo_Cliente: "71102600", Rut_Cliente: "71.102.600-2", Nombre_cliente: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", Activo: true },
+  { Cliente_ID: 3, Codigo_Cliente: "96502540", Rut_Cliente: "96.502.540-5", Nombre_cliente: "STUEDEMANN S.A.", Activo: true },
+  { Cliente_ID: 4, Codigo_Cliente: "76240125", Rut_Cliente: "76.240.125-8", Nombre_cliente: "CONVATEC MEDICAL CARE DE CHILE SPA", Activo: true },
+  { Cliente_ID: 5, Codigo_Cliente: "96893820", Rut_Cliente: "96.893.820-7", Nombre_cliente: "CORPESCA SA", Activo: true },
+  { Cliente_ID: 6, Codigo_Cliente: "76280514", Rut_Cliente: "76.280.514-6", Nombre_cliente: "ECGROUP INGENIERIA Y TECNOLOGIA SPA", Activo: true }
+];
+
+let simulatedServicios = [
+  { Servicio_ID: 1, Codigo_Servicio: "ACRF_01", Nombre_Servicio: "Aceptación y rechazo de facturas", Descripcion: "El proyecto tiene como objetivo automatizar el flujo de aceptación y rechazo de facturas electrónicas registradas en el sistema, permitiendo una gestión eficiente y reduciendo la intervención manual", Activo: true },
+  { Servicio_ID: 2, Codigo_Servicio: "DTE_01", Nombre_Servicio: "DTE", Descripcion: "Este sistema es una solución de automatización diseñada para optimizar y agilizar el flujo de trabajo contable y administrativo mediante la integración de la recepción de documentos tributarios con el sistema Softland.", Activo: true },
+  { Servicio_ID: 4, Codigo_Servicio: "OFI_01", Nombre_Servicio: "Oficore", Descripcion: "Este sistema consolida el acceso a los distintos sistemas Core de la empresa Ofimundo", Activo: true },
+  { Servicio_ID: 5, Codigo_Servicio: "SGC_01", Nombre_Servicio: "SGC", Descripcion: "SGC es el núcleo de las operaciones de la organización, centralizando la gestión de contratos, la administración de clientes y equipos, así como el ingreso y seguimiento de solicitudes de suministros, retiros y despachos de equipos.", Activo: true },
+  { Servicio_ID: 6, Codigo_Servicio: "OFT_01", Nombre_Servicio: "Ofitec", Descripcion: "Ofitec es la plataforma encargada de la gestión, administración y monitoreo de los tickets de servicio técnico para los clientes de Ofimundo.", Activo: true },
+  { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true }
+];
+
+let simulatedRelaciones = [
+  { Relacion_ID: 1, Cliente_ID: 3, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 2, Cliente_ID: 3, Servicio_ID: 2, Activo: true },
+  { Relacion_ID: 3, Cliente_ID: 1, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 4, Cliente_ID: 2, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 5, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
+  { Relacion_ID: 6, Cliente_ID: 3, Servicio_ID: 4, Activo: true },
+  { Relacion_ID: 7, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
+  { Relacion_ID: 8, Cliente_ID: 3, Servicio_ID: 5, Activo: true }
+];
+
+let simulatedProyectos = [
+  {
+    Id: 1,
+    Codigo: 'proj_01',
+    NombreProyecto: 'Proyecto Desarrollo CRM',
+    Cliente: 'AUTOMOVIL CLUB DE CHILE',
+    Lider: 'MACARENA ALLENDE',
+    Estado: 'Activo',
+    Avance: 45.0,
+    Venta: 12000000,
+    HHPlanificadas: 160,
+    HHReal: 72,
+    FechaInicio: '2026-01-10',
+    FechaFin: null,
+    Descripcion: 'Implementación del módulo CRM para ventas y soporte de Automóvil Club',
+    FechaCreacion: new Date().toISOString(),
+    FechaActualizacion: new Date().toISOString()
+  }
+];
+
+let simulatedFichasProspecto = [
+  {
+    Id: 11,
+    Codigo: 'serv_01',
+    NombreProyecto: 'Servidores y otros',
+    Estado: '10% Prospecto (Lead)',
+    Cliente: 'SERVICIOS DE EXPORTACIONES FRUTICOLAS EXSER LIMITADA',
+    GestorComercial: 'DANIELA VALDES',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'OFT_01'
+  },
+  {
+    Id: 12,
+    Codigo: 'ocrs_01',
+    NombreProyecto: 'Ocr Sodexo',
+    Estado: '30% En elaboración',
+    Cliente: 'SODEXO CHILE SPA',
+    GestorComercial: 'MACARENA ALLENDE',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'ACRF_01'
+  }
+];
+
+function getServiceIdFromLine(line: string | null | undefined, projectCode: string, projectName: string): number {
+  const lineLower = (line || "").toLowerCase();
+  const codeLower = (projectCode || "").toLowerCase();
+  const nameLower = (projectName || "").toLowerCase();
+  
+  if (lineLower.includes("acrf") || lineLower.includes("factura") || codeLower.includes("ocr") || nameLower.includes("ocr")) {
+    return 1; // ACRF_01
+  }
+  if (lineLower.includes("dte") || codeLower.includes("dte") || nameLower.includes("dte")) {
+    return 2; // DTE_01
+  }
+  if (lineLower.includes("oficore") || codeLower.includes("oficore")) {
+    return 4; // OFI_01
+  }
+  if (lineLower.includes("ofitec") || lineLower.includes("soporte") || lineLower.includes("servidor") || codeLower.includes("serv") || nameLower.includes("servidor")) {
+    return 6; // OFT_01
+  }
+  if (lineLower.includes("mic") || lineLower.includes("mi cuenta") || lineLower.includes("mi-cuenta")) {
+    return 7; // MIC_01
+  }
+  return 5; // SGC_01 (default)
+}
+
+async function syncApprovedProspectsReal(fichas: any[]) {
+  for (const ficha of fichas) {
+    const estado = (ficha.Estado || "").toLowerCase();
+    if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada") || estado.includes("aceptado por cliente")) {
+      const clienteName = ficha.Cliente;
+      const id = ficha.Id;
+      const line = ficha.LineaServicio;
+      const code = ficha.Codigo;
+      const projectName = ficha.NombreProyecto;
+      
+      const serviceId = getServiceIdFromLine(line, code, projectName);
+      
+      try {
+        console.log(`[SYNC] Sincronizando prospecto aprobado REAL: ${clienteName} con servicio ID ${serviceId}`);
+        const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
+        const resCheck = await executeQuery(queryCheckClient, [clienteName]);
+        
+        let clienteId: number;
+        
+        if (resCheck?.recordset && resCheck.recordset.length > 0) {
+          clienteId = resCheck.recordset[0].Cliente_ID;
+          console.log(`   El cliente ya existe en MON.Clientes (ID: ${clienteId})`);
+        } else {
+          const rut = `77.000.${String(id).padStart(3, '0')}-0`;
+          const codigoCliente = `77000${String(id).padStart(3, '0')}0`;
+          
+          console.log(`   Insertando cliente nuevo REAL: ${clienteName} (RUT: ${rut}, Código: ${codigoCliente})`);
+          const queryInsertClient = `
+            INSERT INTO [THE_COOLER_CENTRAL].[MON].[Clientes] (Codigo_Cliente, Rut_Cliente, Nombre_cliente, Activo, Fecha_Creacion)
+            VALUES (@p0, @p1, @p2, 1, GETDATE());
+            SELECT SCOPE_IDENTITY() AS Cliente_ID;
+          `;
+          const resInsert = await executeQuery(queryInsertClient, [codigoCliente, rut, clienteName]);
+          clienteId = resInsert?.recordset[0]?.Cliente_ID;
+          console.log(`   Cliente insertado REAL con éxito (ID: ${clienteId})`);
+        }
+        
+        if (clienteId) {
+          const queryCheckRel = "SELECT Relacion_ID FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Cliente_ID = @p0 AND Servicio_ID = @p1";
+          const resCheckRel = await executeQuery(queryCheckRel, [clienteId, serviceId]);
+          
+          if (!resCheckRel?.recordset || resCheckRel.recordset.length === 0) {
+            console.log(`   Insertando relación Cliente_Servicio REAL (Cliente: ${clienteId}, Servicio: ${serviceId})`);
+            const queryInsertRel = `
+              INSERT INTO [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] (Cliente_ID, Servicio_ID, Activo)
+              VALUES (@p0, @p1, 1);
+            `;
+            await executeQuery(queryInsertRel, [clienteId, serviceId]);
+            console.log(`   Relación Cliente_Servicio REAL insertada con éxito`);
+          } else {
+            console.log(`   La relación Cliente_Servicio REAL ya existe`);
+          }
+        }
+
+        // Sincronizar proyecto activo en Proyectos de base de datos
+        console.log(`[SYNC] Sincronizando proyecto activo: ${projectName}`);
+        const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
+        const resProjCheck = await executeQuery(queryCheckProj, [code]);
+        
+        if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
+          console.log(`   Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${code}`);
+          const queryInsertProj = `
+            INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
+            (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
+            VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
+          `;
+          await executeQuery(queryInsertProj, [
+            code,
+            projectName,
+            clienteName,
+            ficha.GestorComercial || 'Sin Asignar',
+            ficha.ValorServicio || 0,
+            ficha.Estimaciones ? (typeof ficha.Estimaciones === 'string' ? ficha.Estimaciones : JSON.stringify(ficha.Estimaciones)) : ''
+          ]);
+          console.log(`   Proyecto activo insertado con éxito`);
+        } else {
+          const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
+          await executeQuery(queryUpdateProj, [code]);
+        }
+      } catch (err) {
+        console.error(`❌ Error al sincronizar prospecto aprobado REAL ${clienteName}:`, err);
+      }
+    }
+  }
+}
+
+function syncApprovedProspectsSimulation() {
+  simulatedFichasProspecto.forEach(ficha => {
+    const estado = (ficha.Estado || "").toLowerCase();
+    if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada") || estado.includes("aceptado por cliente")) {
+      const clienteName = ficha.Cliente;
+      const id = ficha.Id;
+      const line = ficha.LineaServicio;
+      const code = ficha.Codigo;
+      const projectName = ficha.NombreProyecto;
+      
+      const serviceId = getServiceIdFromLine(line, code, projectName);
+      
+      let client = simulatedClientes.find(c => c.Nombre_cliente === clienteName);
+      let clienteId: number;
+      
+      if (client) {
+        clienteId = client.Cliente_ID;
+      } else {
+        clienteId = Math.max(...simulatedClientes.map(c => c.Cliente_ID), 0) + 1;
+        const rut = `77.000.${String(id).padStart(3, '0')}-0`;
+        const codigoCliente = `77000${String(id).padStart(3, '0')}0`;
+        
+        simulatedClientes.push({
+          Cliente_ID: clienteId,
+          Codigo_Cliente: codigoCliente,
+          Rut_Cliente: rut,
+          Nombre_cliente: clienteName,
+          Activo: true
+        });
+        console.log(`[Simulation] Created client: ${clienteName} (ID: ${clienteId})`);
+      }
+      
+      const relationExists = simulatedRelaciones.some(r => r.Cliente_ID === clienteId && r.Servicio_ID === serviceId);
+      if (!relationExists) {
+        const nextRelId = Math.max(...simulatedRelaciones.map(r => r.Relacion_ID), 0) + 1;
+        simulatedRelaciones.push({
+          Relacion_ID: nextRelId,
+          Cliente_ID: clienteId,
+          Servicio_ID: serviceId,
+          Activo: true
+        });
+        console.log(`[Simulation] Linked client ${clienteName} to service ${serviceId}`);
+      }
+
+      // Sincronizar proyecto activo en simulatedProyectos
+      const projectExists = simulatedProyectos.some(p => p.Codigo === code);
+      if (!projectExists) {
+        const nextProjId = Math.max(...simulatedProyectos.map(p => p.Id), 0) + 1;
+        simulatedProyectos.push({
+          Id: nextProjId,
+          Codigo: code,
+          NombreProyecto: projectName,
+          Cliente: clienteName,
+          Lider: ficha.GestorComercial || 'Sin Asignar',
+          Estado: 'Activo',
+          Avance: 100.0,
+          Venta: ficha.ValorServicio || 0,
+          HHPlanificadas: 0,
+          HHReal: 0,
+          FechaInicio: new Date().toISOString().split('T')[0],
+          FechaFin: null,
+          Descripcion: '',
+          FechaCreacion: new Date().toISOString(),
+          FechaActualizacion: new Date().toISOString()
+        });
+        console.log(`[Simulation] Created active project: ${projectName} (ID: ${nextProjId})`);
+      }
+    }
+  });
+}
+
+let remoteApiToken: string | null = null;
+
+async function getRemoteApiToken(): Promise<string | null> {
+  try {
+    const data = JSON.stringify({
+      email: 'marrano@ofimundo.cl',
+      password: '123456'
+    });
+
+    const options = {
+      hostname: '18.230.23.241',
+      port: 3001,
+      path: '/api/auth/login',
+      method: 'POST',
+      timeout: 8000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    };
+
+    return new Promise((resolve) => {
+      const req = http.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          if (res.statusCode === 200 || res.statusCode === 201) {
+            try {
+              const json = JSON.parse(body);
+              if (json.token) {
+                resolve(json.token);
+                return;
+              }
+            } catch (e) {}
+          }
+          resolve(null);
+        });
+      });
+      req.on('error', (err) => {
+        console.error("❌ Error de red login remoto:", err.message);
+        resolve(null);
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
+      });
+      req.write(data);
+      req.end();
+    });
+  } catch (err: any) {
+    console.error("Error logging in to remote api:", err.message);
+    return null;
+  }
+}
+
+async function fetchRemoteFichasProspecto(token: string): Promise<any[] | null> {
+  const options = {
+    hostname: '18.230.23.241',
+    port: 3001,
+    path: '/api/fichas-prospecto',
+    method: 'GET',
+    timeout: 8000,
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  };
+
+  return new Promise((resolve) => {
+    const req = http.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const json = JSON.parse(body);
+            resolve(json.data || []);
+          } catch (e) {
+            resolve(null);
+          }
+        } else {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', (err) => {
+      console.error("❌ Error de red al traer fichas remotas:", err.message);
+      resolve(null);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
+async function syncFichasProspectoWithRemote() {
+  console.log("🔄 [SYNC] Iniciando sincronización de Fichas de Prospecto con servidor remoto...");
+  
+  if (!remoteApiToken) {
+    remoteApiToken = await getRemoteApiToken();
+  }
+  
+  if (!remoteApiToken) {
+    console.error("❌ No se pudo obtener el token para el servidor remoto.");
+    return;
+  }
+  
+  let remoteFichas = await fetchRemoteFichasProspecto(remoteApiToken);
+  
+  if (!remoteFichas) {
+    console.log("🔄 Reintentando login remoto por posible token vencido...");
+    remoteApiToken = await getRemoteApiToken();
+    if (remoteApiToken) {
+      remoteFichas = await fetchRemoteFichasProspecto(remoteApiToken);
+    }
+  }
+  
+  if (!remoteFichas || !Array.isArray(remoteFichas)) {
+    console.error("❌ No se pudieron recuperar las fichas desde el servidor remoto.");
+    return;
+  }
+  
+  console.log(`[SYNC] Recuperadas ${remoteFichas.length} fichas desde el servidor remoto.`);
+  
+  const isSimulated = isSimulationMode();
+  
+  if (isSimulated) {
+    simulatedFichasProspecto = remoteFichas.map(f => ({
+      Id: Number(f.id),
+      Codigo: f.codigo,
+      NombreProyecto: f.nombreProyecto,
+      Estado: f.estado,
+      Cliente: f.cliente,
+      GestorComercial: f.gestorComercial,
+      ValorServicio: f.valorServicio || 0,
+      LineaServicio: f.lineaServicio || 'ACRF_01',
+      TipoCliente: f.tipoCliente || 'Nuevo'
+    }));
+    syncApprovedProspectsSimulation();
+  } else {
+    for (const f of remoteFichas) {
+      try {
+        const queryCheck = "SELECT Id, Estado FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Codigo = @p0";
+        const resCheck = await executeQuery(queryCheck, [f.codigo]);
+        
+        let prospectoDbId: number;
+        let dbEstado = "";
+        
+        if (resCheck?.recordset && resCheck.recordset.length > 0) {
+          prospectoDbId = resCheck.recordset[0].Id;
+          dbEstado = resCheck.recordset[0].Estado;
+          
+          if (dbEstado !== f.estado) {
+            console.log(`[SYNC] Actualizando estado del prospecto ${f.codigo} de '${dbEstado}' a '${f.estado}'`);
+            const queryUpdate = "UPDATE [GESTION_PROYECTOS].[dbo].[FichasProspecto] SET Estado = @p0, FechaActualizacion = GETDATE() WHERE Id = @p1";
+            await executeQuery(queryUpdate, [f.estado, prospectoDbId]);
+          }
+        } else {
+          console.log(`[SYNC] Insertando nuevo prospecto remoto: ${f.codigo} - ${f.nombreProyecto}`);
+          const queryInsert = `
+            INSERT INTO [GESTION_PROYECTOS].[dbo].[FichasProspecto] 
+            (Codigo, NombreProyecto, Estado, Cliente, GestorComercial, ValorServicio, LineaServicio, TipoCliente, FechaCreacion, FechaActualizacion)
+            VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, GETDATE(), GETDATE());
+            SELECT SCOPE_IDENTITY() as Id;
+          `;
+          const resInsert = await executeQuery(queryInsert, [
+            f.codigo,
+            f.nombreProyecto,
+            f.estado,
+            f.cliente,
+            f.gestorComercial,
+            f.valorServicio || 0,
+            f.lineaServicio || 'ACRF_01',
+            f.tipoCliente || 'Nuevo'
+          ]);
+          prospectoDbId = resInsert?.recordset?.[0]?.Id;
+        }
+        
+        const estadoLower = (f.estado || "").toLowerCase();
+        if (estadoLower.includes("100%") || estadoLower.includes("aceptado por cliente") || estadoLower.includes("aprobado") || estadoLower.includes("aprobada")) {
+          const line = f.lineaServicio;
+          const code = f.codigo;
+          const projectName = f.nombreProyecto;
+          const clienteName = f.cliente;
+          
+          const serviceId = getServiceIdFromLine(line, code, projectName);
+          
+          console.log(`[SYNC] Sincronizando cliente en MON: ${clienteName}`);
+          const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
+          const resClientCheck = await executeQuery(queryCheckClient, [clienteName]);
+          
+          let clienteId: number;
+          if (resClientCheck?.recordset && resClientCheck.recordset.length > 0) {
+            clienteId = resClientCheck.recordset[0].Cliente_ID;
+          } else {
+            const rut = `77.000.${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}-0`;
+            const codigoCliente = `77000${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}0`;
+            
+            const queryInsertClient = `
+              INSERT INTO [THE_COOLER_CENTRAL].[MON].[Clientes] (Codigo_Cliente, Rut_Cliente, Nombre_cliente, Activo, Fecha_Creacion)
+              VALUES (@p0, @p1, @p2, 1, GETDATE());
+              SELECT SCOPE_IDENTITY() AS Cliente_ID;
+            `;
+            const resInsertClient = await executeQuery(queryInsertClient, [codigoCliente, rut, clienteName]);
+            clienteId = resInsertClient?.recordset[0]?.Cliente_ID;
+          }
+          
+          if (clienteId) {
+            const queryCheckRel = "SELECT Relacion_ID FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Cliente_ID = @p0 AND Servicio_ID = @p1";
+            const resCheckRel = await executeQuery(queryCheckRel, [clienteId, serviceId]);
+            if (!resCheckRel?.recordset || resCheckRel.recordset.length === 0) {
+              const queryInsertRel = `
+                INSERT INTO [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] (Cliente_ID, Servicio_ID, Activo)
+                VALUES (@p0, @p1, 1);
+              `;
+              await executeQuery(queryInsertRel, [clienteId, serviceId]);
+            }
+          }
+          
+          console.log(`[SYNC] Sincronizando proyecto activo: ${f.nombreProyecto}`);
+          const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
+          const resProjCheck = await executeQuery(queryCheckProj, [f.codigo]);
+          
+          if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
+            console.log(`[SYNC] Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${f.codigo}`);
+            const queryInsertProj = `
+              INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
+              (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
+              VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
+            `;
+            await executeQuery(queryInsertProj, [
+              f.codigo,
+              f.nombreProyecto,
+              f.cliente,
+              f.gestorComercial || 'Sin Asignar',
+              f.valorServicio || 0,
+              f.estimaciones ? (typeof f.estimaciones === 'string' ? f.estimaciones : JSON.stringify(f.estimaciones)) : ''
+            ]);
+            console.log(`[SYNC] Proyecto activo insertado con éxito`);
+          } else {
+            const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
+            await executeQuery(queryUpdateProj, [f.codigo]);
+          }
+        }
+      } catch (err: any) {
+        console.error(`❌ Error sincronizando ficha prospecto ${f.codigo}:`, err.message);
+      }
+    }
+  }
+}
+
+// Iniciar sync remota de fichas cada 60 segundos
+setInterval(syncFichasProspectoWithRemote, 60000);
+setTimeout(syncFichasProspectoWithRemote, 5000);
+
+// 18. GET /api/mon/services-data - Datos de clientes y servicios reales de THE_COOLER_CENTRAL
+app.get("/api/mon/services-data", async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    if (isSimulated) {
+      // Ejecutar sincronización de aprobados antes de retornar los datos
+      syncApprovedProspectsSimulation();
+      return res.json({
+        success: true,
+        mode: "simulation",
+        clientes: simulatedClientes,
+        servicios: simulatedServicios,
+        relaciones: simulatedRelaciones
+      });
+    } else {
+      const queryClientes = "SELECT * FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Activo = 1";
+      const queryServicios = "SELECT * FROM [THE_COOLER_CENTRAL].[MON].[Servicios] WHERE Activo = 1";
+      const queryRelaciones = "SELECT * FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Activo = 1";
+
+      const [resClientes, resServicios, resRelaciones] = await Promise.all([
+        executeQuery(queryClientes),
+        executeQuery(queryServicios),
+        executeQuery(queryRelaciones)
+      ]);
+
+      return res.json({
+        success: true,
+        mode: "real",
+        clientes: resClientes?.recordset || [],
+        servicios: resServicios?.recordset || [],
+        relaciones: resRelaciones?.recordset || []
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error en API /api/mon/services-data:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener datos de monitoreo: " + error.message,
+      error: error.message
+    });
+  }
+});
+
+// 18a. GET /api/mon/fichas-prospecto - Monitorear prospectos y auto-activar aprobados
+app.get("/api/mon/fichas-prospecto", async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    if (isSimulated) {
+      syncApprovedProspectsSimulation();
+      return res.json({
+        success: true,
+        mode: "simulation",
+        data: simulatedFichasProspecto
+      });
+    } else {
+      // Query FichasProspecto from the GESTION_PROYECTOS database
+      const query = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] ORDER BY FechaCreacion DESC";
+      const result = await executeQuery(query);
+      const fichas = result?.recordset || [];
+      
+      // Auto-activate any that are approved
+      await syncApprovedProspectsReal(fichas);
+      
+      return res.json({
+        success: true,
+        mode: "real",
+        data: fichas
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error en API /api/mon/fichas-prospecto:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener fichas de prospectos: " + error.message,
+      error: error.message
+    });
+  }
+});
+
+// 18a_2. GET /api/mon/proyectos - Obtener proyectos activos reales de GESTION_PROYECTOS o simulados
+app.get("/api/mon/proyectos", async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    if (isSimulated) {
+      return res.json({
+        success: true,
+        mode: "simulation",
+        data: simulatedProyectos
+      });
+    } else {
+      const query = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Estado = 'Activo' ORDER BY FechaCreacion DESC";
+      const result = await executeQuery(query);
+      return res.json({
+        success: true,
+        mode: "real",
+        data: result?.recordset || []
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error en API /api/mon/proyectos:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener proyectos: " + error.message,
+      error: error.message
+    });
+  }
+});
+
+// 18b. PUT /api/mon/fichas-prospecto/:id/estado - Actualizar estado de prospecto para testing e integración
+app.put("/api/mon/fichas-prospecto/:id/estado", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { estado } = req.body;
+    
+    if (!estado) {
+      return res.status(400).json({ success: false, message: "El campo 'estado' es requerido" });
+    }
+    
+    const isSimulated = isSimulationMode();
+    if (isSimulated) {
+      const ficha = simulatedFichasProspecto.find(f => String(f.Id) === String(id));
+      if (!ficha) {
+        return res.status(404).json({ success: false, message: "Prospecto no encontrado" });
+      }
+      ficha.Estado = estado;
+      syncApprovedProspectsSimulation();
+      return res.json({
+        success: true,
+        mode: "simulation",
+        message: `Estado actualizado a '${estado}' en modo simulación`,
+        data: ficha
+      });
+    } else {
+      // Update FichasProspecto table in GESTION_PROYECTOS
+      const updateQuery = "UPDATE [GESTION_PROYECTOS].[dbo].[FichasProspecto] SET Estado = @p0, FechaActualizacion = GETDATE() WHERE Id = @p1";
+      await executeQuery(updateQuery, [estado, id]);
+      
+      // Fetch updated record and run sync
+      const fetchQuery = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Id = @p0";
+      const resFetch = await executeQuery(fetchQuery, [id]);
+      const updatedFicha = resFetch?.recordset[0];
+      
+      if (updatedFicha) {
+        await syncApprovedProspectsReal([updatedFicha]);
+      }
+      
+      return res.json({
+        success: true,
+        mode: "real",
+        message: `Estado de prospecto ${id} actualizado a '${estado}'`,
+        data: updatedFicha
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error en API /api/mon/fichas-prospecto/:id/estado:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al actualizar estado del prospecto: " + error.message,
+      error: error.message
+    });
+  }
+});
+
 
 app.get("/api/infraestructura/status", (req, res) => {
   return res.json({
