@@ -2487,14 +2487,41 @@ let simulatedServicios = [
 ];
 
 let simulatedRelaciones = [
-  { Relacion_ID: 1, Cliente_ID: 3, Servicio_ID: 1, Activo: true },
-  { Relacion_ID: 2, Cliente_ID: 3, Servicio_ID: 2, Activo: true },
-  { Relacion_ID: 3, Cliente_ID: 1, Servicio_ID: 1, Activo: true },
-  { Relacion_ID: 4, Cliente_ID: 2, Servicio_ID: 1, Activo: true },
-  { Relacion_ID: 5, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
-  { Relacion_ID: 6, Cliente_ID: 3, Servicio_ID: 4, Activo: true },
-  { Relacion_ID: 7, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
-  { Relacion_ID: 8, Cliente_ID: 3, Servicio_ID: 5, Activo: true }
+  // Servicio 1: Aceptación y rechazo de facturas (ACRF_01)
+  { Relacion_ID: 1, Cliente_ID: 1, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 2, Cliente_ID: 2, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 3, Cliente_ID: 3, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 4, Cliente_ID: 4, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 5, Cliente_ID: 5, Servicio_ID: 1, Activo: true },
+  { Relacion_ID: 6, Cliente_ID: 6, Servicio_ID: 1, Activo: true },
+
+  // Servicio 2: DTE (DTE_01)
+  { Relacion_ID: 8, Cliente_ID: 1, Servicio_ID: 2, Activo: true },
+  { Relacion_ID: 9, Cliente_ID: 3, Servicio_ID: 2, Activo: true },
+  { Relacion_ID: 10, Cliente_ID: 4, Servicio_ID: 2, Activo: true },
+  { Relacion_ID: 11, Cliente_ID: 5, Servicio_ID: 2, Activo: true },
+
+  // Servicio 4: Oficore (OFI_01)
+  { Relacion_ID: 13, Cliente_ID: 1, Servicio_ID: 4, Activo: true },
+  { Relacion_ID: 14, Cliente_ID: 2, Servicio_ID: 4, Activo: true },
+  { Relacion_ID: 15, Cliente_ID: 3, Servicio_ID: 4, Activo: true },
+
+  // Servicio 5: SGC (SGC_01)
+  { Relacion_ID: 17, Cliente_ID: 1, Servicio_ID: 5, Activo: true },
+  { Relacion_ID: 18, Cliente_ID: 3, Servicio_ID: 5, Activo: true },
+  { Relacion_ID: 19, Cliente_ID: 4, Servicio_ID: 5, Activo: true },
+  { Relacion_ID: 20, Cliente_ID: 6, Servicio_ID: 5, Activo: true },
+
+  // Servicio 6: Ofitec (OFT_01)
+  { Relacion_ID: 22, Cliente_ID: 1, Servicio_ID: 6, Activo: true },
+  { Relacion_ID: 23, Cliente_ID: 2, Servicio_ID: 6, Activo: true },
+  { Relacion_ID: 24, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
+  { Relacion_ID: 25, Cliente_ID: 6, Servicio_ID: 6, Activo: true },
+
+  // Servicio 7: Mi cuenta (MIC_01)
+  { Relacion_ID: 27, Cliente_ID: 1, Servicio_ID: 7, Activo: true },
+  { Relacion_ID: 28, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
+  { Relacion_ID: 29, Cliente_ID: 5, Servicio_ID: 7, Activo: true }
 ];
 
 let simulatedProyectos = [

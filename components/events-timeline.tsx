@@ -200,6 +200,15 @@ const NO_INFRAESTRUCTURA = [
   "incompleto por repuesto",
   "confirmacion de equipo",
   
+  // ✅ Palabras relacionadas con Portal Mi Cuenta (son solicitudes de usuarios)
+  "mi cuenta",
+  "portal mi cuenta",
+  "suministro",
+  "insumo",
+  "solicitud",
+  "incidencia técnica",
+  "serie",
+  
   // Palabras generales que indican que es un estado normal
   "manual",
   "pendiente",
@@ -295,6 +304,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     ofitec: [],
     sgc: [],
     dte: [],
+    "mi-cuenta": [],
   });
   const [loading, setLoading] = useState(true);
 
@@ -306,13 +316,13 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   ];
 
   const generateMockOficoreLogs = (): LogEntry[] => [
-    { id: "mock_oc1", message: "Incidencia aprobada y cerrada", details: "Incidencia #872 · Cliente: Ofimundo S.A. · Técnico: Juan Perez", timestamp: new Date(Date.now() - 3600000 * 3).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_oc1", message: "Incidencia aprobada y cerrada", details: "Incidencia #872 · Cliente: STUEDEMANN S.A. · Técnico: Juan Perez", timestamp: new Date(Date.now() - 3600000 * 3).toISOString(), type: "success", estado: "Aprobado" },
     { id: "mock_oc2", message: "Incidencia en revisión técnica", details: "Incidencia #871 · Cliente: Distribuidora Santiago · Técnico: Ana Soto", timestamp: new Date(Date.now() - 3600000 * 6).toISOString(), type: "warning", estado: "Pendiente" }
   ];
 
   const generateMockOfitecLogs = (): LogEntry[] => [
-    { id: "mock_ot1", message: "Llamada finalizada y resuelta", details: "Llamada #12093 · Contacto: Pedro Ramirez · Cliente: Soporte Ofimundo", timestamp: new Date(Date.now() - 3600000 * 1).toISOString(), type: "success", estado: "Aprobado" },
-    { id: "mock_ot2", message: "Llamada en progreso con operador", details: "Llamada #12092 · Contacto: Luis Rojas · Cliente: Ofimundo Soporte", timestamp: new Date(Date.now() - 3600000 * 4).toISOString(), type: "warning", estado: "Manual" }
+    { id: "mock_ot1", message: "Llamada finalizada y resuelta", details: "Llamada #12093 · Contacto: Pedro Ramirez · Cliente: STUEDEMANN S.A.", timestamp: new Date(Date.now() - 3600000 * 1).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_ot2", message: "Llamada en progreso con operador", details: "Llamada #12092 · Contacto: Luis Rojas · Cliente: Soporte Técnico", timestamp: new Date(Date.now() - 3600000 * 4).toISOString(), type: "warning", estado: "Manual" }
   ];
 
   const generateMockSgcLogs = (): LogEntry[] => [
@@ -323,6 +333,11 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   const generateMockDteLogs = (): LogEntry[] => [
     { id: "mock_dte1", message: "Ejecución de DTE exitosa", details: "ID Log: #6 · Softland y SII actualizados", timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(), type: "success", estado: "Aprobado" },
     { id: "mock_dte2", message: "Ejecución de DTE exitosa", details: "ID Log: #5 · Softland y SII actualizados", timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(), type: "success", estado: "Aprobado" }
+  ];
+
+  const generateMockMiCuentaLogs = (): LogEntry[] => [
+    { id: "mock_mc1", message: "📱 Portal Mi Cuenta: Solicitud de Suministro/Insumo", details: "Solicitud #1042 · Contacto: Carlos Mendoza · RUT/Cliente: 96.502.540-5", timestamp: new Date(Date.now() - 3600000 * 1).toISOString(), type: "success", estado: "Aprobado" },
+    { id: "mock_mc2", message: "📱 Portal Mi Cuenta: Solicitud de Incidencia Técnica", details: "Solicitud #1041 · Contacto: Ana Gutierrez · Serie: MXP884210", timestamp: new Date(Date.now() - 3600000 * 5).toISOString(), type: "info", estado: "Pendiente" }
   ];
 
   // Función para obtener el tipo de log
@@ -347,6 +362,11 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
       if (motivoLower.includes("finalizado") || motivoLower.includes("terminado")) {
         return "success";
       }
+      return "info";
+    }
+    
+    // ✅ Para Portal Mi Cuenta, las solicitudes registradas son peticiones normales
+    if (servicioId === "mi-cuenta") {
       return "info";
     }
     
@@ -386,6 +406,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
         ofitec: [],
         sgc: [],
         dte: [],
+        "mi-cuenta": [],
       };
 
       try {
@@ -695,6 +716,31 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           console.error("Error fetching DTE logs:", e);
         }
 
+        // 6. Fetch Mi Cuenta
+        try {
+          const res = await fetch(`/api/mi-cuenta/stats${queryParams}`);
+          const data = await res.json();
+          if (data.success && data.detalles) {
+            newLogs["mi-cuenta"] = data.detalles.slice(0, 200).map((entry: any, index: number) => {
+              const isIncidencia = entry.CDG_TIPO_SOLICITUD !== 1;
+              const isApproved = entry.CDG_TIPO_SOLICITUD === 1 || !!entry.NMR_SERIE;
+              const details = `Solicitud #${entry.CDG_SOLICITUD || index + 1} · Contacto: ${entry.NMB_CONTACTO || 'N/A'} · RUT/Cliente: ${entry.CDG_CLIENTE || 'N/A'}${entry.NMR_SERIE ? ` · Serie: ${entry.NMR_SERIE}` : ''}`;
+              
+              return {
+                id: `micuenta_${entry.CDG_SOLICITUD || index}_${index}`,
+                message: `📱 Portal Mi Cuenta: Solicitud de ${isIncidencia ? "Incidencia Técnica" : "Suministro/Insumo"}`,
+                details: details,
+                timestamp: entry.FCH_SOLICITUD || new Date().toISOString(),
+                type: isApproved ? "success" : "info",
+                estado: isApproved ? "Aprobado" : "Pendiente",
+                isInfraestructura: false,
+              };
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching Mi Cuenta logs:", e);
+        }
+
         // Si todos los logs reales están vacíos, cargamos simulación
         const totalLogsCount = Object.values(newLogs).reduce((acc, arr) => acc + arr.length, 0);
         if (totalLogsCount === 0) {
@@ -703,6 +749,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           newLogs.ofitec = generateMockOfitecLogs();
           newLogs.sgc = generateMockSgcLogs();
           newLogs.dte = generateMockDteLogs();
+          newLogs["mi-cuenta"] = generateMockMiCuentaLogs();
         }
 
         setRealLogs(newLogs);

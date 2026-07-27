@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
@@ -10,30 +10,34 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
-import { services, type Service } from "@/lib/services-data"
+import { Badge } from "@/components/ui/badge"
+import { services, subscribeToData, initializeDatabaseData, type Service } from "@/lib/services-data"
 import { cn } from "@/lib/utils"
-import { Users, TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { Users, TrendingUp, TrendingDown, Minus, CheckCircle } from "lucide-react"
 
 export function ClientComparison() {
-  const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0].id)
+  const [selectedServiceId, setSelectedServiceId] = useState<string>("facturas")
+  const [dataVersion, setDataVersion] = useState(0)
+
+  useEffect(() => {
+    initializeDatabaseData()
+    return subscribeToData(() => {
+      setDataVersion((v) => v + 1)
+    })
+  }, [])
 
   const selectedService = services.find((s) => s.id === selectedServiceId) || services[0]
 
-  // Sort clients by error percentage (worst first for highlighting issues)
-  const sortedClients = [...selectedService.clients].sort(
+  // Ordenar clientes por porcentaje de error (o de manera ordenada)
+  const sortedClients = [...(selectedService?.clients || [])].sort(
     (a, b) => b.errorPercentage - a.errorPercentage
   )
 
-  // Calculate average error for comparison
-  const avgError =
-    selectedService.clients.reduce((sum, c) => sum + c.errorPercentage, 0) /
-    selectedService.clients.length
-
-  const getStatusColor = (errorPercentage: number) => {
-    if (errorPercentage === 0) return "bg-emerald-500"
-    if (errorPercentage <= 10) return "bg-amber-500"
-    return "bg-red-500"
-  }
+  // Calcular promedio de errores del servicio
+  const totalClientsCount = selectedService?.clients?.length || 0
+  const avgError = totalClientsCount > 0
+    ? selectedService.clients.reduce((sum, c) => sum + (c.errorPercentage || 0), 0) / totalClientsCount
+    : 0
 
   const getComparisonIcon = (errorPercentage: number) => {
     if (errorPercentage < avgError) {
@@ -56,11 +60,11 @@ export function ClientComparison() {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Users className="h-5 w-5" />
+          <Users className="h-5 w-5 text-emerald-600" />
           Comparador de Clientes
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Compara el rendimiento entre clientes de un mismo servicio
+          Compara el rendimiento y los errores entre clientes contratantes de un mismo servicio
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -71,7 +75,7 @@ export function ClientComparison() {
           <SelectContent>
             {services.map((service) => (
               <SelectItem key={service.id} value={service.id}>
-                {service.name}
+                {service.name} {service.isComingSoon ? "🚀 (Próximamente)" : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -79,61 +83,79 @@ export function ClientComparison() {
 
         <div className="rounded-lg bg-muted/50 p-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Promedio de errores:</span>
-            <span className="font-semibold">{avgError.toFixed(1)}%</span>
+            <span className="text-muted-foreground">Promedio de errores técnicos:</span>
+            <span className="font-semibold text-emerald-600">{avgError.toFixed(1)}%</span>
           </div>
         </div>
 
-        <div className="space-y-3">
-          {sortedClients.map((client) => (
-            <div
-              key={client.id}
-              className={cn(
-                "rounded-lg border p-3 transition-all",
-                client.errorPercentage > avgError && client.errorPercentage > 5
-                  ? "border-red-200 bg-red-50/50"
-                  : "border-border"
-              )}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-sm">{client.name}</span>
-                <div className="flex items-center gap-1.5 text-xs">
-                  {getComparisonIcon(client.errorPercentage)}
-                  <span className="text-muted-foreground">
-                    {getComparisonText(client.errorPercentage)}
+        <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+          {sortedClients.map((client) => {
+            const err = client.errorPercentage || 0
+            const successRate = 100 - err
+
+            return (
+              <div
+                key={client.id}
+                className={cn(
+                  "rounded-lg border p-3 transition-all",
+                  err > avgError && err > 5
+                    ? "border-red-200 bg-red-50/50"
+                    : "border-border bg-card"
+                )}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm text-foreground">{client.name}</span>
+                    {client.rut && (
+                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {client.rut}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs">
+                    {getComparisonIcon(err)}
+                    <span className="text-muted-foreground">
+                      {getComparisonText(err)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Progress
+                    value={successRate}
+                    className="h-2 flex-1"
+                  />
+                  <span
+                    className={cn(
+                      "text-xs font-semibold min-w-[50px] text-right",
+                      err === 0
+                        ? "text-emerald-600"
+                        : err <= 10
+                        ? "text-amber-600"
+                        : "text-red-600"
+                    )}
+                  >
+                    {err}% err
                   </span>
                 </div>
+                {err === 0 && (
+                  <p className="mt-1.5 text-[11px] text-emerald-600 flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Excelente rendimiento (100% de operaciones exitosas)
+                  </p>
+                )}
+                {err > avgError && err > 5 && (
+                  <p className="mt-1.5 text-[11px] text-red-600">
+                    ⚠️ Este cliente presenta una tasa de error superior al promedio
+                  </p>
+                )}
               </div>
-              <div className="flex items-center gap-3">
-                <Progress
-                  value={100 - client.errorPercentage}
-                  className="h-2 flex-1"
-                />
-                <span
-                  className={cn(
-                    "text-xs font-semibold min-w-[40px] text-right",
-                    client.errorPercentage === 0
-                      ? "text-emerald-600"
-                      : client.errorPercentage <= 10
-                      ? "text-amber-600"
-                      : "text-red-600"
-                  )}
-                >
-                  {client.errorPercentage}% err
-                </span>
-              </div>
-              {client.errorPercentage > avgError && client.errorPercentage > 5 && (
-                <p className="mt-2 text-xs text-red-600">
-                  Este cliente tiene una configuración problemática
-                </p>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
 
-        {selectedService.clients.length === 0 && (
-          <p className="text-center text-sm text-muted-foreground py-4">
-            No hay clientes registrados para este servicio
+        {sortedClients.length === 0 && (
+          <p className="text-center text-sm text-muted-foreground py-6">
+            No hay clientes asociados a este servicio actualmente
           </p>
         )}
       </CardContent>

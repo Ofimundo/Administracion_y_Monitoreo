@@ -30,7 +30,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { clients, getClientServices, subscribeToData, type Client, type Service } from "@/lib/services-data";
+import { clients, getClientServices, subscribeToData, initializeDatabaseData, type Client, type Service } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { cn } from "@/lib/utils";
@@ -89,6 +89,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
 
   // Suscribirse a cambios en los datos reales de la base de datos
   useEffect(() => {
+    initializeDatabaseData();
     return subscribeToData(() => {
       setDataVersion(v => v + 1);
     });
@@ -382,11 +383,24 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
         {/* Lista de clientes - Solo Ofimundo */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredClients.map((client) => {
-            const clientWithData = getClientWithRealData(client);
+            const hasTelemetryData = 
+              client.id === "cl_ofimundo" || 
+              client.id === "cl_stuedemann" || 
+              client.name.toLowerCase().includes("ofimundo") || 
+              client.name.toLowerCase().includes("stuedemann") || 
+              (client.rut || "").includes("76.452.910") || 
+              (client.rut || "").includes("96.502.540");
+            
+            const rawClientWithData = getClientWithRealData(client);
+            const clientWithData = hasTelemetryData ? rawClientWithData : {
+              ...rawClientWithData,
+              status: "success" as const,
+              errorPercentage: 0
+            };
+
             const clientServices = getClientServices(client.id);
             const successRate = 100 - clientWithData.errorPercentage;
             const firstService = clientServices[0];
-            const isOfimundo = true;
             
             return (
               <Card
@@ -425,10 +439,14 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col justify-between pt-0 pb-4">
                   <div className="space-y-3 mt-1 flex-1">
-                    {/* Badge indicador para Ofimundo */}
-                    {isOfimundo && (
+                    {/* Badge indicador de datos */}
+                    {hasTelemetryData ? (
                       <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 w-fit">
                         📡 Datos en tiempo real
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 w-fit">
+                        ✅ Servicios Activos
                       </Badge>
                     )}
 
@@ -473,10 +491,17 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                           <Badge 
                             key={service.id} 
                             variant="outline" 
-                            className="text-[10px] bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
+                            className={cn(
+                              "text-[10px] transition-colors",
+                              hasTelemetryData 
+                                ? "bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-default"
+                            )}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleGoToServiceMonitoring(service.id, service.name);
+                              if (hasTelemetryData) {
+                                handleGoToServiceMonitoring(service.id, service.name);
+                              }
                             }}
                           >
                             <Briefcase className="h-2.5 w-2.5 mr-1 text-emerald-500" />
@@ -491,60 +516,75 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                     <Button 
                       variant="outline"
                       size="sm" 
-                      className="flex-1 gap-1"
+                      className={cn("flex-1 gap-1", !hasTelemetryData && "opacity-50 cursor-not-allowed")}
+                      disabled={!hasTelemetryData}
+                      title={hasTelemetryData ? "Ver Dashboard del Cliente" : "Sin telemetría de monitoreo disponible para este cliente"}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleOpenDashboard(clientWithData);
+                        if (hasTelemetryData) handleOpenDashboard(clientWithData);
                       }}
                     >
                       <Eye className="h-3 w-3" />
                       Dashboard
                     </Button>
                     
-                    {clientServices.length > 1 ? (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button 
-                            variant="default"
-                            size="sm" 
-                            className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <LayoutDashboard className="h-3 w-3" />
-                            Monitorear...
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          {clientServices.map(service => (
-                            <DropdownMenuItem
-                              key={service.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleGoToServiceMonitoring(service.id, service.name);
-                              }}
-                              className="cursor-pointer"
+                    {hasTelemetryData ? (
+                      clientServices.length > 1 ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button 
+                              variant="default"
+                              size="sm" 
+                              className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <Briefcase className="h-3.5 w-3.5 mr-2 text-emerald-500" />
-                              <span>{service.name}</span>
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : firstService ? (
+                              <LayoutDashboard className="h-3 w-3" />
+                              Monitorear...
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            {clientServices.map(service => (
+                              <DropdownMenuItem
+                                key={service.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleGoToServiceMonitoring(service.id, service.name);
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <Briefcase className="h-3.5 w-3.5 mr-2 text-emerald-500" />
+                                <span>{service.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : firstService ? (
+                        <Button 
+                          variant="default"
+                          size="sm" 
+                          className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGoToServiceMonitoring(firstService.id, firstService.name);
+                          }}
+                        >
+                          <LayoutDashboard className="h-3 w-3" />
+                          Monitorear
+                          <ArrowRight className="h-3 w-3" />
+                        </Button>
+                      ) : null
+                    ) : (
                       <Button 
-                        variant="default"
+                        variant="secondary"
                         size="sm" 
-                        className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGoToServiceMonitoring(firstService.id, firstService.name);
-                        }}
+                        className="flex-1 gap-1 opacity-50 cursor-not-allowed"
+                        disabled
+                        title="Próximamente disponible - Sin datos de monitoreo en vivo"
                       >
                         <LayoutDashboard className="h-3 w-3" />
-                        Monitorear
-                        <ArrowRight className="h-3 w-3" />
+                        Próximamente
                       </Button>
-                    ) : null}
+                    )}
                   </div>
                 </CardContent>
               </Card>

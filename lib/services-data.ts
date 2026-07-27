@@ -48,7 +48,7 @@ export interface MetricDataPoint {
 
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
-  { id: "cl_ofimundo", name: "Ofimundo S.A.", rut: "76.452.910-K", email: "contacto@ofimundo.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"] },
+  { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"] },
 ];
 
 // Servicios que están próximamente (muestran mensaje especial)
@@ -69,7 +69,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [
       { id: "1", message: "Servicio inicializado correctamente", timestamp: new Date().toISOString(), type: "success" },
@@ -461,11 +461,29 @@ export async function initializeDatabaseData(): Promise<boolean> {
               service.clients.push({
                 id: client.id,
                 name: client.name,
+                rut: client.rut,
+                email: client.email,
+                phone: client.phone,
                 errorPercentage: 0,
                 status: "success"
               });
             }
           }
+        }
+      });
+
+      // Si algún servicio no tiene clientes asociados por relaciones pero hay clientes en DB, asociar los clientes relevantes
+      dbServices.forEach(service => {
+        if (!service.clients || service.clients.length === 0) {
+          service.clients = dbClients.map(c => ({
+            id: c.id,
+            name: c.name,
+            rut: c.rut,
+            email: c.email,
+            phone: c.phone,
+            errorPercentage: 0,
+            status: "success"
+          }));
         }
       });
 

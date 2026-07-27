@@ -38,7 +38,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { services, type Client, type LogEntry } from "@/lib/services-data";
+import { services, getServiceById, initializeDatabaseData, subscribeToData, type Client, type LogEntry } from "@/lib/services-data";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -925,29 +925,51 @@ export default function ServiceDetailPage() {
 
   useEffect(() => {
     const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
-    if (serviceStatic && !comingSoon) {
-      setServiceName(serviceStatic.name);
-      setServiceDescription(serviceStatic.description);
-      setServiceClients(serviceStatic.clients);
-      
-      if (activeServices.includes(serviceStatic.id)) {
-        const currentYear = new Date().getFullYear();
-        const defaultRange = {
-          from: new Date(currentYear, 0, 1),
-          to: new Date(currentYear, 11, 31)
-        };
-        setStatsDateRange(defaultRange);
-        fetchLiveData(defaultRange);
+    const serviceId = params.id as string;
+
+    const loadData = async () => {
+      const currentService = getServiceById(serviceId) || services.find(s => s.id === serviceId);
+      if (currentService) {
+        setServiceName(currentService.name);
+        setServiceDescription(currentService.description);
+        setServiceClients(currentService.clients || []);
       }
+      await initializeDatabaseData();
+    };
+    loadData();
+
+    const unsubscribe = subscribeToData(() => {
+      const currentService = getServiceById(serviceId) || services.find(s => s.id === serviceId);
+      if (currentService) {
+        setServiceName(currentService.name);
+        setServiceDescription(currentService.description);
+        setServiceClients(currentService.clients || []);
+      }
+    });
+
+    if (activeServices.includes(serviceId)) {
+      const currentYear = new Date().getFullYear();
+      const defaultRange = {
+        from: new Date(currentYear, 0, 1),
+        to: new Date(currentYear, 11, 31)
+      };
+      setStatsDateRange(defaultRange);
+      fetchLiveData(defaultRange);
     }
-  }, [params.id, serviceStatic, comingSoon]);
+
+    return () => unsubscribe();
+  }, [params.id]);
 
   const handleOpenClientDashboard = (client: Client) => {
     setSelectedClient(client);
     setShowClientDashboard(true);
   };
 
-  const displayClients = params.id === "facturas" ? liveClients : serviceClients;
+  const displayClients = useMemo(() => {
+    if (serviceClients.length > 0) return serviceClients;
+    const currentService = getServiceById(params.id as string) || services.find(s => s.id === params.id);
+    return currentService?.clients || [];
+  }, [serviceClients, params.id]);
 
   // Mostrar pantalla de "Próximamente" para servicios en desarrollo
   if (comingSoon && params.id !== "facturas") {
@@ -1606,20 +1628,58 @@ export default function ServiceDetailPage() {
               <CardContent>
                 <ScrollArea className="h-[400px] pr-4">
                   <div className="space-y-3">
-                    {displayClients.map((client) => (
-                      <div key={client.id} className={cn("p-4 rounded-lg border transition-all cursor-pointer hover:shadow-md", selectedClient?.id === client.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/50")} onClick={() => handleOpenClientDashboard(client)}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-bold text-white", "bg-emerald-500")}>{client.name.charAt(0)}</div>
-                            <div><p className="font-semibold text-foreground">{client.name}</p><p className="text-sm text-muted-foreground">{client.errorPercentage}% errores infraestructura</p></div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <StatusIndicator status={client.status || "success"} percentage={client.errorPercentage || 0} />
-                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenClientDashboard(client); }}><Eye className="h-4 w-4" /></Button>
+                    {displayClients.map((client) => {
+                      const nameLower = client.name.toLowerCase();
+                      const hasTelemetryData = 
+                        client.id === "cl_ofimundo" || 
+                        client.id === "cl_stuedemann" || 
+                        nameLower.includes("ofimundo") || 
+                        nameLower.includes("stuedemann") || 
+                        (client.rut || "").includes("76.452.910") || 
+                        (client.rut || "").includes("96.502.540");
+                      const isNoMonitoringClient = !hasTelemetryData;
+
+                      const displayStatus = isNoMonitoringClient ? "success" : (client.status || "success");
+                      const displayErr = isNoMonitoringClient ? 0 : (client.errorPercentage || 0);
+
+                      return (
+                        <div 
+                          key={client.id} 
+                          className={cn(
+                            "p-4 rounded-lg border transition-all",
+                            isNoMonitoringClient ? "border-border bg-card cursor-default" : "cursor-pointer hover:shadow-md border-border hover:border-primary/50",
+                            selectedClient?.id === client.id && !isNoMonitoringClient && "border-primary bg-primary/5"
+                          )} 
+                          onClick={() => !isNoMonitoringClient && handleOpenClientDashboard(client)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white bg-emerald-500">
+                                {client.name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-foreground">{client.name}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {isNoMonitoringClient ? "0% errores infraestructura" : `${displayErr}% errores infraestructura`}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <StatusIndicator status={displayStatus} percentage={displayErr} />
+                              {!isNoMonitoringClient ? (
+                                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenClientDashboard(client); }}>
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              ) : (
+                                <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+                                  ✅ Activo
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               </CardContent>

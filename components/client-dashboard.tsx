@@ -549,7 +549,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
             } else if (selectedServiceId === "dte") {
               estado = item.Estado === "EXITOSO" ? "Aprobado" : "Rechazado";
             } else if (selectedServiceId === "mi-cuenta") {
-              estado = item.CDG_TIPO_SOLICITUD === 1 || item.NMR_SERIE ? "Aprobado" : "Rechazado";
+              estado = item.CDG_TIPO_SOLICITUD === 1 ? "Aprobado" : "Aprobado";
             }
             
             return {

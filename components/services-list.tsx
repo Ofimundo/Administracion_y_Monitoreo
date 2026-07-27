@@ -36,7 +36,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { services, clients, getClientById, getClientServices, subscribeToData, type Service, type Client } from "@/lib/services-data";
+import { services, clients, getClientById, getClientServices, subscribeToData, initializeDatabaseData, type Service, type Client } from "@/lib/services-data";
 import { StatusIndicator } from "@/components/status-indicator";
 import { ClientDashboard } from "@/components/client-dashboard";
 import { cn } from "@/lib/utils";
@@ -160,6 +160,7 @@ export function ServicesList() {
 
   // Suscribirse a cambios en los datos reales de la base de datos
   useEffect(() => {
+    initializeDatabaseData();
     return subscribeToData(() => {
       setDataVersion(v => v + 1);
     });

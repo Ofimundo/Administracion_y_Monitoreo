@@ -174,15 +174,19 @@ interface InvoiceData {
 }
 
 const EXPORT_FIELDS = [
-  { id: "fecha", label: "Fecha", default: true },
+  { id: "fecha", label: "Fecha / Período", default: true },
   { id: "servicio", label: "Servicio", default: true },
+  { id: "endpoint", label: "Endpoint / Ruta API", default: true },
   { id: "exitosas", label: "Peticiones Exitosas", default: true },
   { id: "erroresInfraestructura", label: "Errores Infraestructura", default: true },
   { id: "reglasNegocio", label: "Reglas de Negocio", default: true },
   { id: "totalPeticiones", label: "Total Peticiones", default: true },
-  { id: "tasaExito", label: "Tasa de Éxito (%)", default: false },
-  { id: "tasaErrorInfra", label: "Tasa Error Infraestructura (%)", default: false },
+  { id: "tasaExito", label: "Tasa de Éxito (%)", default: true },
+  { id: "tasaErrorInfra", label: "Tasa Error Infraestructura (%)", default: true },
+  { id: "disponibilidad", label: "Disponibilidad (%)", default: true },
   { id: "tiempoRespuesta", label: "Tiempo Respuesta Promedio (ms)", default: false },
+  { id: "throughput", label: "Rendimiento (Req/h)", default: false },
+  { id: "fechaExportacion", label: "Fecha de Exportación", default: false },
 ];
 
 export function DashboardMetrics({
@@ -1271,19 +1275,27 @@ export function DashboardMetrics({
         }
       },
       servicio: (item) => item.serviceName || "Todos los servicios",
+      endpoint: (item) => item.endpoint || "/api/v1/metrics",
       exitosas: (item) => item.successCount || 0,
       erroresInfraestructura: (item) => item.errorCount || 0,
       reglasNegocio: (item) => item.reglaNegocioCount || 0,
       totalPeticiones: (item) => (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0),
       tasaExito: (item) => {
         const total = (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0);
-        return total > 0 ? ((item.successCount / total) * 100).toFixed(1) : "0";
+        return total > 0 ? `${((item.successCount / total) * 100).toFixed(1)}%` : "0%";
       },
       tasaErrorInfra: (item) => {
         const total = (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0);
-        return total > 0 ? ((item.errorCount / total) * 100).toFixed(1) : "0";
+        return total > 0 ? `${((item.errorCount / total) * 100).toFixed(1)}%` : "0%";
       },
-      tiempoRespuesta: (item) => item.responseTime || "N/A",
+      disponibilidad: (item) => {
+        const total = (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0);
+        const errorInfra = item.errorCount || 0;
+        return total > 0 ? `${(100 - (errorInfra / total) * 100).toFixed(1)}%` : "100%";
+      },
+      tiempoRespuesta: (item) => item.responseTime ? `${item.responseTime} ms` : "N/A",
+      throughput: (item) => item.throughput !== undefined ? `${item.throughput} req/h` : "N/A",
+      fechaExportacion: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
     };
 
     const fieldLabels: Record<string, string> = {};
@@ -1295,7 +1307,11 @@ export function DashboardMetrics({
       const row: Record<string, any> = {};
       selectedFields.forEach(fieldId => {
         const label = fieldLabels[fieldId] || fieldId;
-        row[label] = fieldMap[fieldId](item);
+        if (fieldMap[fieldId]) {
+          row[label] = fieldMap[fieldId](item);
+        } else {
+          row[label] = "N/A";
+        }
       });
       return row;
     });
@@ -1306,19 +1322,38 @@ export function DashboardMetrics({
     const colWidths = selectedFields.map(() => ({ wch: 25 }));
     ws['!cols'] = colWidths;
     
-    XLSX.utils.book_append_sheet(wb, ws, "Dashboard Metrics");
+    XLSX.utils.book_append_sheet(wb, ws, "Métricas de Servicios");
+
+    // Si hay registros de facturas filtrados, incluirlos en una hoja de detalle operacional
+    if (filteredInvoices && filteredInvoices.length > 0) {
+      const invoiceDataToExport = filteredInvoices.map((f: any) => ({
+        "Fecha Proceso": f.fecha_proceso ? format(new Date(f.fecha_proceso), "dd/MM/yyyy HH:mm:ss") : "N/A",
+        "Estado": f.estado || "N/A",
+        "Tipo Documento": f.tipo_documento || "N/A",
+        "Folio": f.folio_documento || "N/A",
+        "RUT Proveedor": f.rut_proveedor || "N/A",
+        "Razón Social": f.razon_social || "N/A",
+        "Motivo / Detalle": f.motivo || "—",
+      }));
+      const wsInvoices = XLSX.utils.json_to_sheet(invoiceDataToExport);
+      wsInvoices['!cols'] = [
+        { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 30 }, { wch: 40 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsInvoices, "Detalle Operacional Facturas");
+    }
     
     const summaryData = [
-      { "Métrica": "Tasa Éxito General", "Valor": `${globalStats.successRate}%` },
+      { "Métrica": "Disponibilidad Global Operacional", "Valor": `${operacionStats.disponibilidadGlobal}%` },
+      { "Métrica": "Tasa Éxito General de Servicios", "Valor": `${globalStats.successRate}%` },
       { "Métrica": "Total Peticiones Exitosas", "Valor": globalStats.totalSuccess.toLocaleString() },
       { "Métrica": "Total Errores Infraestructura", "Valor": globalStats.totalInfraErrors.toLocaleString() },
-      { "Métrica": "Tasa Error Infraestructura", "Valor": `${globalStats.errorRate}%` },
-      { "Métrica": "Sistemas Internos", "Valor": globalStats.sistemasInternos },
-      { "Métrica": "Sistemas Externos", "Valor": globalStats.sistemasExternos },
+      { "Métrica": "Incidentes Abiertos", "Valor": operacionStats.incidentesAbiertos },
+      { "Métrica": "Servidores Online (Zabbix)", "Valor": `${infraStats.servidoresOnline}/${infraStats.totalServidores} (${porcentajeInfra}%)` },
       { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
     ];
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen");
+    wsSummary['!cols'] = [{ wch: 35 }, { wch: 25 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen Ejecutivo");
     
     XLSX.writeFile(wb, `dashboard_metrics_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
     
