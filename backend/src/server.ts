@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import sql from "mssql";
+import fs from "fs";
 import https from "https";
 import http from "http";
 import { executeQuery, executeProcedure, isSimulationMode } from "./db-client";
@@ -883,6 +884,116 @@ app.get("/api/ofitec/stats", async (req, res) => {
       message: "❌ Error al consultar la base de datos OFITEC: " + error.message,
       detalles: [],
       count: 0
+    });
+  }
+});
+
+// 12.8. GET /api/monitor/ofitec
+app.get("/api/monitor/ofitec", async (req, res) => {
+  const dbs = ["SGCX", "OFITEC", "OFI_WEB", "STUEDEMANNSA", "STUDEMANNSA"];
+  const isSimulated = isSimulationMode();
+
+  const dbStatus: Record<string, boolean> = {
+    SGCX: false,
+    OFITEC: false,
+    OFI_WEB: false,
+    STUEDEMANNSA: false,
+    STUDEMANNSA: false
+  };
+
+  if (isSimulated) {
+    dbStatus.SGCX = true;
+    dbStatus.OFITEC = true;
+    dbStatus.OFI_WEB = true;
+    dbStatus.STUEDEMANNSA = true;
+    dbStatus.STUDEMANNSA = true;
+  } else {
+    try {
+      // Consultamos sys.databases globalmente para evitar lanzar errores de objeto no encontrado (Error 208)
+      const result = await executeQuery(`SELECT name, HAS_DBACCESS(name) as has_access FROM sys.databases`);
+      const existingDbs = result?.recordset || [];
+
+      for (const dbKey of dbs) {
+        // Coincidencia flexible si existe el nombre exacto, con prefijo THE_COOLER_, o variante de ortografía STUEDEMANNSA/STUDEMANNSA
+        const match = existingDbs.find((row: any) => {
+          const dbNameUpper = (row.name || "").toUpperCase();
+          const keyUpper = dbKey.toUpperCase();
+          
+          const isMatch = 
+            dbNameUpper === keyUpper || 
+            dbNameUpper === `THE_COOLER_${keyUpper}` ||
+            dbNameUpper.includes(keyUpper) ||
+            (keyUpper.includes("STUDEMAN") && dbNameUpper.includes("STUDEMAN"));
+
+          return isMatch && row.has_access === 1;
+        });
+
+        dbStatus[dbKey] = !!match;
+      }
+
+      // Si STUEDEMANNSA o STUDEMANNSA es accesible, marcar ambas como true para mantener compatibilidad
+      if (dbStatus.STUEDEMANNSA || dbStatus.STUDEMANNSA) {
+        dbStatus.STUEDEMANNSA = true;
+        dbStatus.STUDEMANNSA = true;
+      }
+    } catch (err: any) {
+      console.error("❌ Error al verificar disponibilidad de bases de datos OFITEC:", err?.message || err);
+      for (const dbKey of dbs) {
+        dbStatus[dbKey] = false;
+      }
+    }
+  }
+
+  // OFITEC se considera disponible si al menos una de las bases principales (OFITEC, SGCX o STUEDEMANNSA) está disponible
+  const disponible = dbStatus.OFITEC === true || dbStatus.SGCX === true || dbStatus.STUEDEMANNSA === true || dbStatus.STUDEMANNSA === true;
+
+  return res.json({
+    servicio: "OFITEC",
+    disponible: disponible,
+    basesDatos: dbStatus
+  });
+});
+
+// 12.9. GET /api/sgc/ping
+app.get("/api/sgc/ping", async (req, res) => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch("https://omitec.cl/ping", { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    const isPong = response.ok && text.toLowerCase().includes("pong");
+
+    if (isPong) {
+      return res.json({
+        success: true,
+        status: "online",
+        isAvailable: true,
+        pong: true,
+        message: text.trim(),
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      return res.json({
+        success: false,
+        status: "offline",
+        isAvailable: false,
+        pong: false,
+        message: text.trim() || `HTTP status ${response.status}`,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error al realizar ping a https://omitec.cl/ping:", error?.message || error);
+    return res.json({
+      success: false,
+      status: "offline",
+      isAvailable: false,
+      pong: false,
+      message: error?.message || "Error al conectar con https://omitec.cl/ping",
+      timestamp: new Date().toISOString()
     });
   }
 });

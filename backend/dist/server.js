@@ -8,6 +8,7 @@ const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const mssql_1 = __importDefault(require("mssql"));
 const https_1 = __importDefault(require("https"));
+const http_1 = __importDefault(require("http"));
 const db_client_1 = require("./db-client");
 const db_simulation_1 = require("./db-simulation");
 const process_state_1 = require("./process-state");
@@ -792,6 +793,83 @@ app.get("/api/ofitec/stats", async (req, res) => {
             message: "❌ Error al consultar la base de datos OFITEC: " + error.message,
             detalles: [],
             count: 0
+        });
+    }
+});
+// 12.8. GET /api/monitor/ofitec
+app.get("/api/monitor/ofitec", async (req, res) => {
+    const dbs = ["SGCX", "OFITEC", "OFI_WEB", "STUDEMANNSA"];
+    const isSimulated = (0, db_client_1.isSimulationMode)();
+    const dbStatus = {
+        SGCX: false,
+        OFITEC: false,
+        OFI_WEB: false,
+        STUDEMANNSA: false
+    };
+    if (isSimulated) {
+        dbStatus.SGCX = true;
+        dbStatus.OFITEC = true;
+        dbStatus.OFI_WEB = true;
+        dbStatus.STUDEMANNSA = true;
+    }
+    else {
+        for (const dbName of dbs) {
+            try {
+                await (0, db_client_1.executeQuery)(`SELECT TOP 1 1 FROM [${dbName}].sys.tables`);
+                dbStatus[dbName] = true;
+            }
+            catch (err) {
+                console.error(`❌ Error al verificar la base de datos OFITEC (${dbName}):`, err);
+                dbStatus[dbName] = false;
+            }
+        }
+    }
+    const todasBasesDisponibles = Object.values(dbStatus).every(val => val === true);
+    return res.json({
+        servicio: "OFITEC",
+        disponible: todasBasesDisponibles,
+        basesDatos: dbStatus
+    });
+});
+// 12.9. GET /api/sgc/ping
+app.get("/api/sgc/ping", async (req, res) => {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch("https://omitec.cl/ping", { signal: controller.signal });
+        clearTimeout(timeoutId);
+        const text = await response.text();
+        const isPong = response.ok && text.toLowerCase().includes("pong");
+        if (isPong) {
+            return res.json({
+                success: true,
+                status: "online",
+                isAvailable: true,
+                pong: true,
+                message: text.trim(),
+                timestamp: new Date().toISOString()
+            });
+        }
+        else {
+            return res.json({
+                success: false,
+                status: "offline",
+                isAvailable: false,
+                pong: false,
+                message: text.trim() || `HTTP status ${response.status}`,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+    catch (error) {
+        console.error("❌ Error al realizar ping a https://omitec.cl/ping:", error?.message || error);
+        return res.json({
+            success: false,
+            status: "offline",
+            isAvailable: false,
+            pong: false,
+            message: error?.message || "Error al conectar con https://omitec.cl/ping",
+            timestamp: new Date().toISOString()
         });
     }
 });
@@ -1886,12 +1964,28 @@ let zabbixStatus = {
     eldenringOnline: true,
     pacmanOnline: true,
     bmwOnline: true, // Core server
-    servidoresOnline: 3,
-    totalServidores: 3,
+    servidoresOnline: 6,
+    totalServidores: 6,
     porcentajeInfra: 100.0,
     version: null,
+    servidores: [
+        { id: "doom", nombre: "DOOM", ip: "192.168.1.6", cpu: 1.6, ram: 68.2, disk: 79.3, online: true },
+        { id: "pacman", nombre: "PACMAN", ip: "192.168.1.14", cpu: 0.6, ram: 80.7, disk: 62.7, online: true },
+        { id: "bmw", nombre: "BMW", ip: "192.168.1.x", cpu: 3.0, ram: 42.0, disk: 45.0, online: true, isCore: true },
+        { id: "eldenring", nombre: "ELDENRING", ip: "192.168.1.12", cpu: 7.6, ram: 66.3, disk: 58.2, online: true },
+        { id: "sekiro", nombre: "SEKIRO", ip: "192.168.1.5", cpu: 0.4, ram: 68.1, disk: 65.2, online: true },
+        { id: "zelda", nombre: "ZELDA", ip: "192.168.1.8", cpu: 5.5, ram: 58.0, disk: 52.4, online: true },
+    ]
 };
 function setZabbixOffline(errMsg) {
+    const fallbackServidores = [
+        { id: "doom", nombre: "DOOM", ip: "192.168.1.6", cpu: 0, ram: 0, disk: 0, online: false },
+        { id: "pacman", nombre: "PACMAN", ip: "192.168.1.14", cpu: 0, ram: 0, disk: 0, online: false },
+        { id: "bmw", nombre: "BMW", ip: "192.168.1.x", cpu: 0, ram: 0, disk: 0, online: false, isCore: true },
+        { id: "eldenring", nombre: "ELDENRING", ip: "192.168.1.12", cpu: 0, ram: 0, disk: 0, online: false },
+        { id: "sekiro", nombre: "SEKIRO", ip: "192.168.1.5", cpu: 0, ram: 0, disk: 0, online: false },
+        { id: "zelda", nombre: "ZELDA", ip: "192.168.1.8", cpu: 0, ram: 0, disk: 0, online: false },
+    ];
     zabbixStatus = {
         online: false,
         lastCheck: new Date().toISOString(),
@@ -1900,19 +1994,23 @@ function setZabbixOffline(errMsg) {
         pacmanOnline: false,
         bmwOnline: false,
         servidoresOnline: 0,
-        totalServidores: 3,
+        totalServidores: 6,
         porcentajeInfra: 0.0,
         version: null,
+        servidores: zabbixStatus.servidores && zabbixStatus.servidores.length > 0
+            ? zabbixStatus.servidores.map((s) => ({ ...s, online: false }))
+            : fallbackServidores
     };
 }
 function monitorZabbix() {
-    const postData = JSON.stringify({
+    const token = process.env.ZABBIX_API_TOKEN || "0266aa954802ff9e23584e1e8f2e5ca8b6302b9582b8af02a4f300b6de27d8d0";
+    const versionData = JSON.stringify({
         jsonrpc: "2.0",
         method: "apiinfo.version",
         params: [],
         id: 1
     });
-    const options = {
+    const versionOptions = {
         hostname: 'zabbix.ofimundo.cl',
         port: 443,
         path: '/api_jsonrpc.php',
@@ -1920,57 +2018,151 @@ function monitorZabbix() {
         timeout: 8000,
         headers: {
             'Content-Type': 'application/json-rpc',
-            'Content-Length': Buffer.byteLength(postData),
+            'Content-Length': Buffer.byteLength(versionData),
             'User-Agent': 'OfimundoMonitor/1.0'
         }
     };
-    const req = https_1.default.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => {
-            data += chunk;
-        });
-        res.on('end', () => {
+    const reqVersion = https_1.default.request(versionOptions, (resVersion) => {
+        let dataVersion = '';
+        resVersion.on('data', (chunk) => { dataVersion += chunk; });
+        resVersion.on('end', () => {
             try {
-                if (res.statusCode === 200) {
-                    const json = JSON.parse(data);
-                    const version = json.result;
-                    if (version) {
-                        const eldenringOnline = true;
-                        const pacmanOnline = true;
-                        const bmwOnline = true; // Core server
-                        const countOnline = (eldenringOnline ? 1 : 0) + (pacmanOnline ? 1 : 0) + (bmwOnline ? 1 : 0);
-                        const pct = parseFloat(((countOnline / 3) * 100).toFixed(2));
-                        zabbixStatus = {
-                            online: true,
-                            lastCheck: new Date().toISOString(),
-                            error: null,
-                            eldenringOnline,
-                            pacmanOnline,
-                            bmwOnline,
-                            servidoresOnline: countOnline,
-                            totalServidores: 3,
-                            porcentajeInfra: pct,
-                            version: version
-                        };
-                        return;
-                    }
+                if (resVersion.statusCode !== 200) {
+                    throw new Error(`Zabbix status code: ${resVersion.statusCode}`);
                 }
-                throw new Error(`Unexpected status code: ${res.statusCode}`);
+                const jsonVersion = JSON.parse(dataVersion);
+                const version = jsonVersion.result;
+                const hostsData = JSON.stringify({
+                    jsonrpc: "2.0",
+                    method: "host.get",
+                    params: {
+                        filter: {
+                            host: ["DOOM", "PACMAN", "BMW", "ELDENRING", "SEKIRO", "ZELDA"]
+                        },
+                        selectInterfaces: ["ip"],
+                        selectItems: ["name", "key_", "lastvalue", "units"]
+                    },
+                    id: 2
+                });
+                const hostsOptions = {
+                    hostname: 'zabbix.ofimundo.cl',
+                    port: 443,
+                    path: '/api_jsonrpc.php',
+                    method: 'POST',
+                    timeout: 8000,
+                    headers: {
+                        'Content-Type': 'application/json-rpc',
+                        'Content-Length': Buffer.byteLength(hostsData),
+                        'User-Agent': 'OfimundoMonitor/1.0',
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+                const reqHosts = https_1.default.request(hostsOptions, (resHosts) => {
+                    let dataHosts = '';
+                    resHosts.on('data', (chunk) => { dataHosts += chunk; });
+                    resHosts.on('end', () => {
+                        try {
+                            if (resHosts.statusCode !== 200) {
+                                throw new Error(`Zabbix hosts status code: ${resHosts.statusCode}`);
+                            }
+                            const jsonHosts = JSON.parse(dataHosts);
+                            if (jsonHosts.error) {
+                                throw new Error(jsonHosts.error.message || "Error fetching hosts");
+                            }
+                            const resultHosts = jsonHosts.result || [];
+                            const servidores = resultHosts.map((h) => {
+                                const ip = h.interfaces?.[0]?.ip || "No IP";
+                                const displayIp = h.name === "BMW" ? "192.168.1.x" : ip;
+                                const items = h.items || [];
+                                // CPU
+                                const cpuItem = items.find((i) => i.key_ === "system.cpu.util");
+                                const cpu = cpuItem ? parseFloat(cpuItem.lastvalue) : 0.0;
+                                // RAM
+                                const ramUtilItem = items.find((i) => i.key_ === "vm.memory.util");
+                                let ram = 0.0;
+                                if (ramUtilItem) {
+                                    ram = parseFloat(ramUtilItem.lastvalue);
+                                }
+                                else {
+                                    const ramUsed = items.find((i) => i.key_ === "vm.memory.size[used]");
+                                    const ramTotal = items.find((i) => i.key_ === "vm.memory.size[total]");
+                                    if (ramUsed && ramTotal && parseFloat(ramTotal.lastvalue) > 0) {
+                                        ram = (parseFloat(ramUsed.lastvalue) / parseFloat(ramTotal.lastvalue)) * 100;
+                                    }
+                                }
+                                // Disk
+                                let diskItem = items.find((i) => i.key_.includes("C:,pused"));
+                                if (!diskItem) {
+                                    diskItem = items.find((i) => i.key_.includes("/,pused"));
+                                }
+                                if (!diskItem) {
+                                    diskItem = items.find((i) => (i.key_.includes("vfs.fs.size") || i.key_.includes("vfs.fs.dependent.size")) && i.key_.includes("pused"));
+                                }
+                                const disk = diskItem ? parseFloat(diskItem.lastvalue) : 0.0;
+                                // Online status (agent.ping === 1)
+                                const pingItem = items.find((i) => i.key_ === "agent.ping");
+                                const online = pingItem ? pingItem.lastvalue === "1" : h.status === "0";
+                                return {
+                                    id: h.host.toLowerCase(),
+                                    nombre: h.name,
+                                    ip: displayIp,
+                                    cpu: parseFloat(cpu.toFixed(1)),
+                                    ram: parseFloat(ram.toFixed(1)),
+                                    disk: parseFloat(disk.toFixed(1)),
+                                    online,
+                                    isCore: h.name === "BMW"
+                                };
+                            });
+                            // Sort servidores to keep a consistent order: DOOM, PACMAN, BMW, ELDENRING, SEKIRO, ZELDA
+                            const order = ["DOOM", "PACMAN", "BMW", "ELDENRING", "SEKIRO", "ZELDA"];
+                            servidores.sort((a, b) => order.indexOf(a.nombre) - order.indexOf(b.nombre));
+                            const countOnline = servidores.filter((s) => s.online).length;
+                            const totalServidores = servidores.length || 6;
+                            const pct = parseFloat(((countOnline / totalServidores) * 100).toFixed(2));
+                            zabbixStatus = {
+                                online: true,
+                                lastCheck: new Date().toISOString(),
+                                error: null,
+                                eldenringOnline: servidores.find((s) => s.nombre === "ELDENRING")?.online ?? true,
+                                pacmanOnline: servidores.find((s) => s.nombre === "PACMAN")?.online ?? true,
+                                bmwOnline: servidores.find((s) => s.nombre === "BMW")?.online ?? true,
+                                servidoresOnline: countOnline,
+                                totalServidores: totalServidores,
+                                porcentajeInfra: pct,
+                                version: version,
+                                servidores: servidores
+                            };
+                        }
+                        catch (err) {
+                            console.error("Error parsing Zabbix hosts:", err);
+                            setZabbixOffline(`Error parsing Zabbix hosts: ${err.message}`);
+                        }
+                    });
+                });
+                reqHosts.on('error', (err) => {
+                    setZabbixOffline(`Hosts request error: ${err.message}`);
+                });
+                reqHosts.on('timeout', () => {
+                    reqHosts.destroy();
+                    setZabbixOffline("Hosts request timeout");
+                });
+                reqHosts.write(hostsData);
+                reqHosts.end();
             }
             catch (err) {
                 setZabbixOffline(`Zabbix API Error: ${err.message}`);
             }
         });
     });
-    req.on('error', (err) => {
+    reqVersion.on('error', (err) => {
         setZabbixOffline(err.message || "Connection failed");
     });
-    req.on('timeout', () => {
-        req.destroy();
+    reqVersion.on('timeout', () => {
+        reqVersion.destroy();
         setZabbixOffline("Timeout connecting to Zabbix API");
     });
-    req.write(postData);
-    req.end();
+    reqVersion.write(versionData);
+    reqVersion.end();
 }
 setInterval(monitorZabbix, 30000);
 setTimeout(monitorZabbix, 2000);
@@ -2145,14 +2337,55 @@ let simulatedServicios = [
     { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true }
 ];
 let simulatedRelaciones = [
-    { Relacion_ID: 1, Cliente_ID: 3, Servicio_ID: 1, Activo: true },
-    { Relacion_ID: 2, Cliente_ID: 3, Servicio_ID: 2, Activo: true },
-    { Relacion_ID: 3, Cliente_ID: 1, Servicio_ID: 1, Activo: true },
-    { Relacion_ID: 4, Cliente_ID: 2, Servicio_ID: 1, Activo: true },
-    { Relacion_ID: 5, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
-    { Relacion_ID: 6, Cliente_ID: 3, Servicio_ID: 4, Activo: true },
-    { Relacion_ID: 7, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
-    { Relacion_ID: 8, Cliente_ID: 3, Servicio_ID: 5, Activo: true }
+    // Servicio 1: Aceptación y rechazo de facturas (ACRF_01)
+    { Relacion_ID: 1, Cliente_ID: 1, Servicio_ID: 1, Activo: true },
+    { Relacion_ID: 2, Cliente_ID: 2, Servicio_ID: 1, Activo: true },
+    { Relacion_ID: 3, Cliente_ID: 3, Servicio_ID: 1, Activo: true },
+    { Relacion_ID: 4, Cliente_ID: 4, Servicio_ID: 1, Activo: true },
+    { Relacion_ID: 5, Cliente_ID: 5, Servicio_ID: 1, Activo: true },
+    { Relacion_ID: 6, Cliente_ID: 6, Servicio_ID: 1, Activo: true },
+    // Servicio 2: DTE (DTE_01)
+    { Relacion_ID: 8, Cliente_ID: 1, Servicio_ID: 2, Activo: true },
+    { Relacion_ID: 9, Cliente_ID: 3, Servicio_ID: 2, Activo: true },
+    { Relacion_ID: 10, Cliente_ID: 4, Servicio_ID: 2, Activo: true },
+    { Relacion_ID: 11, Cliente_ID: 5, Servicio_ID: 2, Activo: true },
+    // Servicio 4: Oficore (OFI_01)
+    { Relacion_ID: 13, Cliente_ID: 1, Servicio_ID: 4, Activo: true },
+    { Relacion_ID: 14, Cliente_ID: 2, Servicio_ID: 4, Activo: true },
+    { Relacion_ID: 15, Cliente_ID: 3, Servicio_ID: 4, Activo: true },
+    // Servicio 5: SGC (SGC_01)
+    { Relacion_ID: 17, Cliente_ID: 1, Servicio_ID: 5, Activo: true },
+    { Relacion_ID: 18, Cliente_ID: 3, Servicio_ID: 5, Activo: true },
+    { Relacion_ID: 19, Cliente_ID: 4, Servicio_ID: 5, Activo: true },
+    { Relacion_ID: 20, Cliente_ID: 6, Servicio_ID: 5, Activo: true },
+    // Servicio 6: Ofitec (OFT_01)
+    { Relacion_ID: 22, Cliente_ID: 1, Servicio_ID: 6, Activo: true },
+    { Relacion_ID: 23, Cliente_ID: 2, Servicio_ID: 6, Activo: true },
+    { Relacion_ID: 24, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
+    { Relacion_ID: 25, Cliente_ID: 6, Servicio_ID: 6, Activo: true },
+    // Servicio 7: Mi cuenta (MIC_01)
+    { Relacion_ID: 27, Cliente_ID: 1, Servicio_ID: 7, Activo: true },
+    { Relacion_ID: 28, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
+    { Relacion_ID: 29, Cliente_ID: 5, Servicio_ID: 7, Activo: true }
+];
+let simulatedProyectos = [
+    {
+        Id: 1,
+        Codigo: 'proj_01',
+        NombreProyecto: 'Proyecto Desarrollo CRM',
+        Cliente: 'AUTOMOVIL CLUB DE CHILE',
+        Lider: 'MACARENA ALLENDE',
+        Estado: 'Activo',
+        Avance: 45.0,
+        Venta: 12000000,
+        HHPlanificadas: 160,
+        HHReal: 72,
+        FechaInicio: '2026-01-10',
+        FechaFin: null,
+        Descripcion: 'Implementación del módulo CRM para ventas y soporte de Automóvil Club',
+        FechaCreacion: new Date().toISOString(),
+        FechaActualizacion: new Date().toISOString()
+    }
 ];
 let simulatedFichasProspecto = [
     {
@@ -2202,7 +2435,7 @@ function getServiceIdFromLine(line, projectCode, projectName) {
 async function syncApprovedProspectsReal(fichas) {
     for (const ficha of fichas) {
         const estado = (ficha.Estado || "").toLowerCase();
-        if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada")) {
+        if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada") || estado.includes("aceptado por cliente")) {
             const clienteName = ficha.Cliente;
             const id = ficha.Id;
             const line = ficha.LineaServicio;
@@ -2210,7 +2443,7 @@ async function syncApprovedProspectsReal(fichas) {
             const projectName = ficha.NombreProyecto;
             const serviceId = getServiceIdFromLine(line, code, projectName);
             try {
-                console.log(`🔄 Sincronizando prospecto aprobado REAL: ${clienteName} con servicio ID ${serviceId}`);
+                console.log(`[SYNC] Sincronizando prospecto aprobado REAL: ${clienteName} con servicio ID ${serviceId}`);
                 const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
                 const resCheck = await (0, db_client_1.executeQuery)(queryCheckClient, [clienteName]);
                 let clienteId;
@@ -2247,6 +2480,31 @@ async function syncApprovedProspectsReal(fichas) {
                         console.log(`   La relación Cliente_Servicio REAL ya existe`);
                     }
                 }
+                // Sincronizar proyecto activo en Proyectos de base de datos
+                console.log(`[SYNC] Sincronizando proyecto activo: ${projectName}`);
+                const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
+                const resProjCheck = await (0, db_client_1.executeQuery)(queryCheckProj, [code]);
+                if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
+                    console.log(`   Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${code}`);
+                    const queryInsertProj = `
+            INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
+            (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
+            VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
+          `;
+                    await (0, db_client_1.executeQuery)(queryInsertProj, [
+                        code,
+                        projectName,
+                        clienteName,
+                        ficha.GestorComercial || 'Sin Asignar',
+                        ficha.ValorServicio || 0,
+                        ficha.Estimaciones ? (typeof ficha.Estimaciones === 'string' ? ficha.Estimaciones : JSON.stringify(ficha.Estimaciones)) : ''
+                    ]);
+                    console.log(`   Proyecto activo insertado con éxito`);
+                }
+                else {
+                    const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
+                    await (0, db_client_1.executeQuery)(queryUpdateProj, [code]);
+                }
             }
             catch (err) {
                 console.error(`❌ Error al sincronizar prospecto aprobado REAL ${clienteName}:`, err);
@@ -2257,7 +2515,7 @@ async function syncApprovedProspectsReal(fichas) {
 function syncApprovedProspectsSimulation() {
     simulatedFichasProspecto.forEach(ficha => {
         const estado = (ficha.Estado || "").toLowerCase();
-        if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada")) {
+        if (estado.includes("100%") || estado.includes("aprobado") || estado.includes("aprobada") || estado.includes("aceptado por cliente")) {
             const clienteName = ficha.Cliente;
             const id = ficha.Id;
             const line = ficha.LineaServicio;
@@ -2293,9 +2551,270 @@ function syncApprovedProspectsSimulation() {
                 });
                 console.log(`[Simulation] Linked client ${clienteName} to service ${serviceId}`);
             }
+            // Sincronizar proyecto activo en simulatedProyectos
+            const projectExists = simulatedProyectos.some(p => p.Codigo === code);
+            if (!projectExists) {
+                const nextProjId = Math.max(...simulatedProyectos.map(p => p.Id), 0) + 1;
+                simulatedProyectos.push({
+                    Id: nextProjId,
+                    Codigo: code,
+                    NombreProyecto: projectName,
+                    Cliente: clienteName,
+                    Lider: ficha.GestorComercial || 'Sin Asignar',
+                    Estado: 'Activo',
+                    Avance: 100.0,
+                    Venta: ficha.ValorServicio || 0,
+                    HHPlanificadas: 0,
+                    HHReal: 0,
+                    FechaInicio: new Date().toISOString().split('T')[0],
+                    FechaFin: null,
+                    Descripcion: '',
+                    FechaCreacion: new Date().toISOString(),
+                    FechaActualizacion: new Date().toISOString()
+                });
+                console.log(`[Simulation] Created active project: ${projectName} (ID: ${nextProjId})`);
+            }
         }
     });
 }
+let remoteApiToken = null;
+async function getRemoteApiToken() {
+    try {
+        const data = JSON.stringify({
+            email: 'marrano@ofimundo.cl',
+            password: '123456'
+        });
+        const options = {
+            hostname: '18.230.23.241',
+            port: 3001,
+            path: '/api/auth/login',
+            method: 'POST',
+            timeout: 8000,
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data)
+            }
+        };
+        return new Promise((resolve) => {
+            const req = http_1.default.request(options, (res) => {
+                let body = '';
+                res.on('data', (chunk) => { body += chunk; });
+                res.on('end', () => {
+                    if (res.statusCode === 200 || res.statusCode === 201) {
+                        try {
+                            const json = JSON.parse(body);
+                            if (json.token) {
+                                resolve(json.token);
+                                return;
+                            }
+                        }
+                        catch (e) { }
+                    }
+                    resolve(null);
+                });
+            });
+            req.on('error', (err) => {
+                console.error("❌ Error de red login remoto:", err.message);
+                resolve(null);
+            });
+            req.on('timeout', () => {
+                req.destroy();
+                resolve(null);
+            });
+            req.write(data);
+            req.end();
+        });
+    }
+    catch (err) {
+        console.error("Error logging in to remote api:", err.message);
+        return null;
+    }
+}
+async function fetchRemoteFichasProspecto(token) {
+    const options = {
+        hostname: '18.230.23.241',
+        port: 3001,
+        path: '/api/fichas-prospecto',
+        method: 'GET',
+        timeout: 8000,
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    };
+    return new Promise((resolve) => {
+        const req = http_1.default.request(options, (res) => {
+            let body = '';
+            res.on('data', (chunk) => { body += chunk; });
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    try {
+                        const json = JSON.parse(body);
+                        resolve(json.data || []);
+                    }
+                    catch (e) {
+                        resolve(null);
+                    }
+                }
+                else {
+                    resolve(null);
+                }
+            });
+        });
+        req.on('error', (err) => {
+            console.error("❌ Error de red al traer fichas remotas:", err.message);
+            resolve(null);
+        });
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(null);
+        });
+        req.end();
+    });
+}
+async function syncFichasProspectoWithRemote() {
+    console.log("🔄 [SYNC] Iniciando sincronización de Fichas de Prospecto con servidor remoto...");
+    if (!remoteApiToken) {
+        remoteApiToken = await getRemoteApiToken();
+    }
+    if (!remoteApiToken) {
+        console.error("❌ No se pudo obtener el token para el servidor remoto.");
+        return;
+    }
+    let remoteFichas = await fetchRemoteFichasProspecto(remoteApiToken);
+    if (!remoteFichas) {
+        console.log("🔄 Reintentando login remoto por posible token vencido...");
+        remoteApiToken = await getRemoteApiToken();
+        if (remoteApiToken) {
+            remoteFichas = await fetchRemoteFichasProspecto(remoteApiToken);
+        }
+    }
+    if (!remoteFichas || !Array.isArray(remoteFichas)) {
+        console.error("❌ No se pudieron recuperar las fichas desde el servidor remoto.");
+        return;
+    }
+    console.log(`[SYNC] Recuperadas ${remoteFichas.length} fichas desde el servidor remoto.`);
+    const isSimulated = (0, db_client_1.isSimulationMode)();
+    if (isSimulated) {
+        simulatedFichasProspecto = remoteFichas.map(f => ({
+            Id: Number(f.id),
+            Codigo: f.codigo,
+            NombreProyecto: f.nombreProyecto,
+            Estado: f.estado,
+            Cliente: f.cliente,
+            GestorComercial: f.gestorComercial,
+            ValorServicio: f.valorServicio || 0,
+            LineaServicio: f.lineaServicio || 'ACRF_01',
+            TipoCliente: f.tipoCliente || 'Nuevo'
+        }));
+        syncApprovedProspectsSimulation();
+    }
+    else {
+        for (const f of remoteFichas) {
+            try {
+                const queryCheck = "SELECT Id, Estado FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Codigo = @p0";
+                const resCheck = await (0, db_client_1.executeQuery)(queryCheck, [f.codigo]);
+                let prospectoDbId;
+                let dbEstado = "";
+                if (resCheck?.recordset && resCheck.recordset.length > 0) {
+                    prospectoDbId = resCheck.recordset[0].Id;
+                    dbEstado = resCheck.recordset[0].Estado;
+                    if (dbEstado !== f.estado) {
+                        console.log(`[SYNC] Actualizando estado del prospecto ${f.codigo} de '${dbEstado}' a '${f.estado}'`);
+                        const queryUpdate = "UPDATE [GESTION_PROYECTOS].[dbo].[FichasProspecto] SET Estado = @p0, FechaActualizacion = GETDATE() WHERE Id = @p1";
+                        await (0, db_client_1.executeQuery)(queryUpdate, [f.estado, prospectoDbId]);
+                    }
+                }
+                else {
+                    console.log(`[SYNC] Insertando nuevo prospecto remoto: ${f.codigo} - ${f.nombreProyecto}`);
+                    const queryInsert = `
+            INSERT INTO [GESTION_PROYECTOS].[dbo].[FichasProspecto] 
+            (Codigo, NombreProyecto, Estado, Cliente, GestorComercial, ValorServicio, LineaServicio, TipoCliente, FechaCreacion, FechaActualizacion)
+            VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, GETDATE(), GETDATE());
+            SELECT SCOPE_IDENTITY() as Id;
+          `;
+                    const resInsert = await (0, db_client_1.executeQuery)(queryInsert, [
+                        f.codigo,
+                        f.nombreProyecto,
+                        f.estado,
+                        f.cliente,
+                        f.gestorComercial,
+                        f.valorServicio || 0,
+                        f.lineaServicio || 'ACRF_01',
+                        f.tipoCliente || 'Nuevo'
+                    ]);
+                    prospectoDbId = resInsert?.recordset?.[0]?.Id;
+                }
+                const estadoLower = (f.estado || "").toLowerCase();
+                if (estadoLower.includes("100%") || estadoLower.includes("aceptado por cliente") || estadoLower.includes("aprobado") || estadoLower.includes("aprobada")) {
+                    const line = f.lineaServicio;
+                    const code = f.codigo;
+                    const projectName = f.nombreProyecto;
+                    const clienteName = f.cliente;
+                    const serviceId = getServiceIdFromLine(line, code, projectName);
+                    console.log(`[SYNC] Sincronizando cliente en MON: ${clienteName}`);
+                    const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
+                    const resClientCheck = await (0, db_client_1.executeQuery)(queryCheckClient, [clienteName]);
+                    let clienteId;
+                    if (resClientCheck?.recordset && resClientCheck.recordset.length > 0) {
+                        clienteId = resClientCheck.recordset[0].Cliente_ID;
+                    }
+                    else {
+                        const rut = `77.000.${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}-0`;
+                        const codigoCliente = `77000${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}0`;
+                        const queryInsertClient = `
+              INSERT INTO [THE_COOLER_CENTRAL].[MON].[Clientes] (Codigo_Cliente, Rut_Cliente, Nombre_cliente, Activo, Fecha_Creacion)
+              VALUES (@p0, @p1, @p2, 1, GETDATE());
+              SELECT SCOPE_IDENTITY() AS Cliente_ID;
+            `;
+                        const resInsertClient = await (0, db_client_1.executeQuery)(queryInsertClient, [codigoCliente, rut, clienteName]);
+                        clienteId = resInsertClient?.recordset[0]?.Cliente_ID;
+                    }
+                    if (clienteId) {
+                        const queryCheckRel = "SELECT Relacion_ID FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Cliente_ID = @p0 AND Servicio_ID = @p1";
+                        const resCheckRel = await (0, db_client_1.executeQuery)(queryCheckRel, [clienteId, serviceId]);
+                        if (!resCheckRel?.recordset || resCheckRel.recordset.length === 0) {
+                            const queryInsertRel = `
+                INSERT INTO [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] (Cliente_ID, Servicio_ID, Activo)
+                VALUES (@p0, @p1, 1);
+              `;
+                            await (0, db_client_1.executeQuery)(queryInsertRel, [clienteId, serviceId]);
+                        }
+                    }
+                    console.log(`[SYNC] Sincronizando proyecto activo: ${f.nombreProyecto}`);
+                    const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
+                    const resProjCheck = await (0, db_client_1.executeQuery)(queryCheckProj, [f.codigo]);
+                    if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
+                        console.log(`[SYNC] Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${f.codigo}`);
+                        const queryInsertProj = `
+              INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
+              (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
+              VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
+            `;
+                        await (0, db_client_1.executeQuery)(queryInsertProj, [
+                            f.codigo,
+                            f.nombreProyecto,
+                            f.cliente,
+                            f.gestorComercial || 'Sin Asignar',
+                            f.valorServicio || 0,
+                            f.estimaciones ? (typeof f.estimaciones === 'string' ? f.estimaciones : JSON.stringify(f.estimaciones)) : ''
+                        ]);
+                        console.log(`[SYNC] Proyecto activo insertado con éxito`);
+                    }
+                    else {
+                        const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
+                        await (0, db_client_1.executeQuery)(queryUpdateProj, [f.codigo]);
+                    }
+                }
+            }
+            catch (err) {
+                console.error(`❌ Error sincronizando ficha prospecto ${f.codigo}:`, err.message);
+            }
+        }
+    }
+}
+// Iniciar sync remota de fichas cada 60 segundos
+setInterval(syncFichasProspectoWithRemote, 60000);
+setTimeout(syncFichasProspectoWithRemote, 5000);
 // 18. GET /api/mon/services-data - Datos de clientes y servicios reales de THE_COOLER_CENTRAL
 app.get("/api/mon/services-data", async (req, res) => {
     try {
@@ -2369,6 +2888,36 @@ app.get("/api/mon/fichas-prospecto", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Error al obtener fichas de prospectos: " + error.message,
+            error: error.message
+        });
+    }
+});
+// 18a_2. GET /api/mon/proyectos - Obtener proyectos activos reales de GESTION_PROYECTOS o simulados
+app.get("/api/mon/proyectos", async (req, res) => {
+    try {
+        const isSimulated = (0, db_client_1.isSimulationMode)();
+        if (isSimulated) {
+            return res.json({
+                success: true,
+                mode: "simulation",
+                data: simulatedProyectos
+            });
+        }
+        else {
+            const query = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Estado = 'Activo' ORDER BY FechaCreacion DESC";
+            const result = await (0, db_client_1.executeQuery)(query);
+            return res.json({
+                success: true,
+                mode: "real",
+                data: result?.recordset || []
+            });
+        }
+    }
+    catch (error) {
+        console.error("❌ Error en API /api/mon/proyectos:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al obtener proyectos: " + error.message,
             error: error.message
         });
     }

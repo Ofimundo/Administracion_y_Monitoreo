@@ -136,8 +136,120 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     fetchData();
   }, []);
 
+  const [sgcPingOk, setSgcPingOk] = useState<boolean>(true);
+  const [ofitecStatus, setOfitecStatus] = useState<{ disponible: boolean }>({ disponible: true });
+
+  const [facturasBitacora, setFacturasBitacora] = useState<any[]>([]);
+  const [dteLogs, setDteLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchMonitors = async () => {
+      try {
+        const [sgcRes, ofitecRes, factRes, dteRes] = await Promise.all([
+          fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
+          fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
+          fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
+          fetch("/api/dte/stats").then(r => r.json()).catch(() => null),
+        ]);
+        if (sgcRes) setSgcPingOk(sgcRes.pong === true || sgcRes.isAvailable === true);
+        if (ofitecRes) setOfitecStatus({ disponible: ofitecRes.disponible === true });
+        if (factRes && factRes.data) setFacturasBitacora(factRes.data);
+        if (dteRes && (dteRes.data || dteRes.detalles)) setDteLogs(dteRes.data || dteRes.detalles);
+      } catch (e) {
+        console.error("Error fetching monitors in ClientsList:", e);
+      }
+    };
+    fetchMonitors();
+    const interval = setInterval(fetchMonitors, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isFacturasScheduleMissing = useMemo(() => {
+    const now = new Date();
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+    const target1400InMinutes = 14 * 60;
+    const target2330InMinutes = 23 * 60 + 30;
+    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
+    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const facturasHoy = (facturasBitacora || []).filter((f: any) => {
+      if (!f.fecha_proceso) return false;
+      const fDate = new Date(f.fecha_proceso);
+      if (isNaN(fDate.getTime())) return false;
+      return format(fDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejec1400 = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const mins = fDate.getHours() * 60 + fDate.getMinutes();
+      return mins >= target1400InMinutes && mins < target2330InMinutes;
+    });
+
+    const ejec2330 = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const mins = fDate.getHours() * 60 + fDate.getMinutes();
+      return mins >= target2330InMinutes;
+    });
+
+    const falta1400 = esHora1400Pasada && !ejec1400;
+    const falta2330 = esHora2330Pasada && !ejec2330;
+
+    return falta1400 || falta2330;
+  }, [facturasBitacora]);
+
+  const isDteScheduleMissing = useMemo(() => {
+    const now = new Date();
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+    const target1330InMinutes = 13 * 60 + 30; // 13:30
+    const target2300InMinutes = 23 * 60;      // 23:00
+    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
+    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const dteHoy = (dteLogs || []).filter((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      if (!fecha) return false;
+      const dDate = new Date(fecha);
+      if (isNaN(dDate.getTime())) return false;
+      return format(dDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejec1330 = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const mins = dDate.getHours() * 60 + dDate.getMinutes();
+      return mins >= target1330InMinutes && mins < target2300InMinutes;
+    });
+
+    const ejec2300 = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const mins = dDate.getHours() * 60 + dDate.getMinutes();
+      return mins >= target2300InMinutes;
+    });
+
+    const falta1330 = esHora1330Pasada && !ejec1330;
+    const falta2300 = esHora2300Pasada && !ejec2300;
+
+    return falta1330 || falta2300;
+  }, [dteLogs]);
+
   // Obtener cliente con datos reales sincronizados
   const getClientWithRealData = (client: Client): Client => {
+    const isSgcDown = client.services?.includes("sgc") && !sgcPingOk;
+    const isOfitecDown = client.services?.includes("ofitec") && !ofitecStatus.disponible;
+    const isFacturasDown = client.services?.includes("facturas") && isFacturasScheduleMissing;
+    const isDteDown = client.services?.includes("dte") && isDteScheduleMissing;
+
+    if (isSgcDown || isOfitecDown || isFacturasDown || isDteDown) {
+      return {
+        ...client,
+        status: "error",
+        errorPercentage: 100
+      };
+    }
+
     return client;
   };
 

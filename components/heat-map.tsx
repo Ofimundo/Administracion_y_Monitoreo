@@ -93,9 +93,9 @@ const isServiceComingSoon = (serviceId: string): boolean => {
 
 // Función para obtener datos reales de todos los servicios activos
 const fetchAllRealData = async () => {
-  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null, "mi-cuenta": null };
+  const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null, "mi-cuenta": null, sgcPing: null, ofitecMonitor: null };
   try {
-    const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes, miCuentaRes] = await Promise.all([
+    const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes, miCuentaRes, sgcPingRes, ofitecMonitorRes] = await Promise.all([
       fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
       fetch("/api/oficore/stats").then(r => r.json()).catch(() => null),
       fetch("/api/ofitec/stats").then(r => r.json()).catch(() => null),
@@ -103,6 +103,8 @@ const fetchAllRealData = async () => {
       fetch("/api/sgc/contratos-stats").then(r => r.json()).catch(() => null),
       fetch("/api/sgc/equipos-stats").then(r => r.json()).catch(() => null),
       fetch("/api/mi-cuenta/stats").then(r => r.json()).catch(() => null),
+      fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
+      fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
     ]);
 
     if (factRes && factRes.success) results.facturas = factRes;
@@ -112,6 +114,8 @@ const fetchAllRealData = async () => {
     if (contratosRes && contratosRes.success) results.contratos = contratosRes;
     if (equiposRes && equiposRes.success) results.equipos = equiposRes;
     if (miCuentaRes && miCuentaRes.success) results["mi-cuenta"] = miCuentaRes;
+    if (sgcPingRes) results.sgcPing = sgcPingRes;
+    if (ofitecMonitorRes) results.ofitecMonitor = ofitecMonitorRes;
   } catch (error) {
     console.error("Error fetching all services data for HeatMap:", error);
   }
@@ -247,8 +251,46 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               if (hasTextError) return true;
               return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
             }).length;
-            errorPercentage = totalRequests > 0 ? Math.round((errorDocs / totalRequests) * 100) : 0;
-            status = errorPercentage === 100 ? "error" : (errorPercentage > 40 ? "error" : errorPercentage > 0 ? "warning" : "success");
+
+            // Validación de horarios (14:00 y 23:30)
+            const now = new Date();
+            const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+            const target1400InMinutes = 14 * 60;
+            const target2330InMinutes = 23 * 60 + 30;
+            const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
+            const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+            const hoyStr = format(now, "yyyy-MM-dd");
+
+            const facturasHoy = data.filter((f: any) => {
+              if (!f.fecha_proceso) return false;
+              const fDate = new Date(f.fecha_proceso);
+              if (isNaN(fDate.getTime())) return false;
+              return format(fDate, "yyyy-MM-dd") === hoyStr;
+            });
+
+            const ejec1400 = facturasHoy.some((f: any) => {
+              const fDate = new Date(f.fecha_proceso);
+              const mins = fDate.getHours() * 60 + fDate.getMinutes();
+              return mins >= target1400InMinutes && mins < target2330InMinutes;
+            });
+
+            const ejec2330 = facturasHoy.some((f: any) => {
+              const fDate = new Date(f.fecha_proceso);
+              const mins = fDate.getHours() * 60 + fDate.getMinutes();
+              return mins >= target2330InMinutes;
+            });
+
+            const falta1400 = esHora1400Pasada && !ejec1400;
+            const falta2330 = esHora2330Pasada && !ejec2330;
+            const faltaSchedule = falta1400 || falta2330;
+
+            if (faltaSchedule) {
+              errorPercentage = 100;
+              status = "error";
+            } else {
+              errorPercentage = totalRequests > 0 ? Math.round((errorDocs / totalRequests) * 100) : 0;
+              status = errorPercentage === 100 ? "error" : (errorPercentage > 40 ? "error" : errorPercentage > 0 ? "warning" : "success");
+            }
           } 
           else if (service.id === "oficore" && allData.oficore?.detalles) {
             const details = allData.oficore.detalles;
@@ -257,22 +299,68 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             errorPercentage = 0;
             status = "success";
           }
-          else if (service.id === "ofitec" && allData.ofitec?.detalles) {
-            const details = allData.ofitec.detalles;
+          else if (service.id === "ofitec") {
+            const details = allData.ofitec?.detalles || [];
             const ingresadas = details.filter((d: any) => d.LLA_CORRELATIVO === "1" || d.LLA_CORRELATIVO === 1).length || 0;
             totalRequests = ingresadas;
-            errorDocs = 0;
-            errorPercentage = 0;
-            status = "success";
+            const ofitecOk = allData.ofitecMonitor ? (allData.ofitecMonitor.disponible === true) : true;
+            errorPercentage = ofitecOk ? 0 : 100;
+            status = ofitecOk ? "success" : "error";
           }
           else if (service.id === "sgc") {
             const docs = allData.sgc?.data || [];
             const contratosCount = allData.contratos?.stats?.total || 0;
             const equiposCount = allData.equipos?.summary?.total || 0;
             totalRequests = docs.length + contratosCount + equiposCount;
-            errorDocs = 0;
-            errorPercentage = 0;
-            status = "success";
+            const sgcOk = allData.sgcPing ? (allData.sgcPing.pong === true || allData.sgcPing.isAvailable === true) : true;
+            errorPercentage = sgcOk ? 0 : 100;
+            status = sgcOk ? "success" : "error";
+          }
+          else if (service.id === "dte") {
+            const data = allData.dte?.detalles || allData.dte?.data || [];
+            totalRequests = data.length;
+            
+            const now = new Date();
+            const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+            const target1330InMinutes = 13 * 60 + 30; // 13:30
+            const target2300InMinutes = 23 * 60;      // 23:00
+            const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
+            const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+            const hoyStr = format(now, "yyyy-MM-dd");
+
+            const dteHoy = data.filter((d: any) => {
+              const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+              if (!fecha) return false;
+              const dDate = new Date(fecha);
+              if (isNaN(dDate.getTime())) return false;
+              return format(dDate, "yyyy-MM-dd") === hoyStr;
+            });
+
+            const ejec1330 = dteHoy.some((d: any) => {
+              const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+              const dDate = new Date(fecha);
+              const mins = dDate.getHours() * 60 + dDate.getMinutes();
+              return mins >= target1330InMinutes && mins < target2300InMinutes;
+            });
+
+            const ejec2300 = dteHoy.some((d: any) => {
+              const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+              const dDate = new Date(fecha);
+              const mins = dDate.getHours() * 60 + dDate.getMinutes();
+              return mins >= target2300InMinutes;
+            });
+
+            const falta1330 = esHora1330Pasada && !ejec1330;
+            const falta2300 = esHora2300Pasada && !ejec2300;
+            const faltaSchedule = falta1330 || falta2300;
+
+            if (faltaSchedule) {
+              errorPercentage = 100;
+              status = "error";
+            } else {
+              errorPercentage = 0;
+              status = "success";
+            }
           }
           else {
             // Fallback en caso de fallo de API

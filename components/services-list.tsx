@@ -158,6 +158,118 @@ export function ServicesList() {
   );
   const [selectAll, setSelectAll] = useState(true);
 
+  const [sgcPingOk, setSgcPingOk] = useState<boolean>(true);
+  const [ofitecStatus, setOfitecStatus] = useState<{ disponible: boolean }>({ disponible: true });
+  const [facturasBitacora, setFacturasBitacora] = useState<any[]>([]);
+  const [dteLogs, setDteLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchMonitors = async () => {
+      try {
+        const [sgcRes, ofitecRes, factRes, dteRes] = await Promise.all([
+          fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
+          fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
+          fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
+          fetch("/api/dte/stats").then(r => r.json()).catch(() => null),
+        ]);
+        if (isMounted) {
+          if (sgcRes) setSgcPingOk(sgcRes.pong === true || sgcRes.isAvailable === true);
+          if (ofitecRes) setOfitecStatus({ disponible: ofitecRes.disponible === true });
+          if (factRes && factRes.data) setFacturasBitacora(factRes.data);
+          if (dteRes && (dteRes.data || dteRes.detalles)) setDteLogs(dteRes.data || dteRes.detalles);
+        }
+      } catch (e) {
+        console.error("Error fetching monitors in ServicesList:", e);
+      }
+    };
+    fetchMonitors();
+    const interval = setInterval(fetchMonitors, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Verificar si falta ejecución de 14:00 o 23:30 para Facturas
+  const isFacturasScheduleMissing = useMemo(() => {
+    const now = new Date();
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const target1400InMinutes = 14 * 60; // 14:00
+    const target2330InMinutes = 23 * 60 + 30; // 23:30
+
+    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
+    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const facturasHoy = (facturasBitacora || []).filter((f: any) => {
+      if (!f.fecha_proceso) return false;
+      const fDate = new Date(f.fecha_proceso);
+      if (isNaN(fDate.getTime())) return false;
+      return format(fDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejecucion1400Registrada = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+      return minutes >= target1400InMinutes && minutes < target2330InMinutes;
+    });
+
+    const ejecucion2330Registrada = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+      return minutes >= target2330InMinutes;
+    });
+
+    const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
+    const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
+
+    return falta1400 || falta2330;
+  }, [facturasBitacora]);
+
+  // Verificar si falta ejecución de 13:30 o 23:00 para DTE
+  const isDteScheduleMissing = useMemo(() => {
+    const now = new Date();
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const target1330InMinutes = 13 * 60 + 30; // 13:30 (810 mins)
+    const target2300InMinutes = 23 * 60;      // 23:00 (1380 mins)
+
+    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
+    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const dteHoy = (dteLogs || []).filter((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      if (!fecha) return false;
+      const dDate = new Date(fecha);
+      if (isNaN(dDate.getTime())) return false;
+      return format(dDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejecucion1330Registrada = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
+      return minutes >= target1330InMinutes && minutes < target2300InMinutes;
+    });
+
+    const ejecucion2300Registrada = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
+      return minutes >= target2300InMinutes;
+    });
+
+    const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;
+    const falta2300 = esHora2300Pasada && !ejecucion2300Registrada;
+
+    return falta1330 || falta2300;
+  }, [dteLogs]);
+
   // Suscribirse a cambios en los datos reales de la base de datos
   useEffect(() => {
     initializeDatabaseData();
@@ -173,26 +285,37 @@ export function ServicesList() {
 
   // ✅ Función para obtener el estado real de un servicio
   const getRealServiceStatus = (service: Service): "success" | "warning" | "error" => {
-    // Si es un servicio "Próximamente", retornar success (pero se maneja con el flag)
     if (isComingSoon(service.id)) {
       return "success";
     }
     
-    // Para facturas, recalcular basado en errores reales de infraestructura
+    if (service.id === "sgc") {
+      return sgcPingOk ? "success" : "error";
+    }
+
+    if (service.id === "ofitec") {
+      return ofitecStatus.disponible ? "success" : "error";
+    }
+
+    if (service.id === "dte") {
+      if (isDteScheduleMissing) return "error";
+      return service.status || "success";
+    }
+
+    // Para facturas, recalcular basado en errores reales de infraestructura u horarios omitidos
     if (service.id === "facturas") {
-      // Verificar si hay errores reales de infraestructura en los logs
+      if (isFacturasScheduleMissing) return "error";
+
       const hasRealInfraError = service.logs?.some((log: any) => 
         isInfraestructuraError(log.message) || 
         isInfraestructuraError(log.details) ||
         isInfraestructuraError(log.estado || "")
       );
       
-      // Si no hay errores reales de infraestructura, es success
       if (!hasRealInfraError) {
         return "success";
       }
       
-      // Si hay errores reales, usar el status actual
       return service.status || "success";
     }
     
@@ -205,8 +328,22 @@ export function ServicesList() {
       return 0;
     }
     
-    // Para facturas, el porcentaje de error real es 0 si no hay errores de infraestructura
+    if (service.id === "sgc") {
+      return sgcPingOk ? 0 : 100;
+    }
+
+    if (service.id === "ofitec") {
+      return ofitecStatus.disponible ? 0 : 100;
+    }
+
+    if (service.id === "dte") {
+      if (isDteScheduleMissing) return 100;
+      return service.errorPercentage || 0;
+    }
+
     if (service.id === "facturas") {
+      if (isFacturasScheduleMissing) return 100;
+
       const hasRealInfraError = service.logs?.some((log: any) => 
         isInfraestructuraError(log.message) || 
         isInfraestructuraError(log.details) ||

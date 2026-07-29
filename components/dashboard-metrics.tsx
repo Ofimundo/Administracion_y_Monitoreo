@@ -232,6 +232,7 @@ export function DashboardMetrics({
   
   const [oficoreData, setOficoreData] = useState<any[]>([]);
   const [ofitecData, setOfitecData] = useState<any[]>([]);
+  const [dteData, setDteData] = useState<any[]>([]);
   const [sgcData, setSgcData] = useState<any[]>([]);
   const [serviciosData, setServiciosData] = useState<any[]>([]);
   const [contratosStats, setContratosStats] = useState<any>(null);
@@ -325,6 +326,61 @@ export function DashboardMetrics({
     error: null as string | null,
     servidores: [] as any[]
   });
+
+  const [sgcPingOk, setSgcPingOk] = useState<boolean>(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkSgcPing = async () => {
+      try {
+        const res = await fetch("/api/sgc/ping");
+        const data = await res.json();
+        if (isMounted) {
+          setSgcPingOk(data.pong === true || data.isAvailable === true);
+        }
+      } catch (err) {
+        console.error("Error fetching SGC ping:", err);
+        if (isMounted) setSgcPingOk(false);
+      }
+    };
+
+    checkSgcPing();
+    const interval = setInterval(checkSgcPing, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const [ofitecStatus, setOfitecStatus] = useState<{ disponible: boolean; basesDatos?: Record<string, boolean> }>({
+    disponible: true
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkOfitecStatus = async () => {
+      try {
+        const res = await fetch("/api/monitor/ofitec");
+        const data = await res.json();
+        if (isMounted) {
+          setOfitecStatus({
+            disponible: data.disponible === true,
+            basesDatos: data.basesDatos
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching OFITEC monitor status:", err);
+        if (isMounted) setOfitecStatus({ disponible: false });
+      }
+    };
+
+    checkOfitecStatus();
+    const interval = setInterval(checkOfitecStatus, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -461,6 +517,7 @@ export function DashboardMetrics({
   const calculateAllMetrics = (servicesData: any, facturasData: any[]) => {
     setOficoreData(servicesData.oficore?.detalles || []);
     setOfitecData(servicesData.ofitec?.detalles || []);
+    setDteData(servicesData.dte?.detalles || servicesData.dte?.data || []);
 
     const isFiltered = filters.dateRange.from !== undefined;
     const limitDate = new Date("2026-07-09T00:00:00");
@@ -512,10 +569,10 @@ export function DashboardMetrics({
       { 
         id: "facturas", 
         nombre: "Aceptación y Rechazo", 
-        valor: facturasTotal > 0 ? (100 - Math.round((facturasErrorInfra / facturasTotal) * 100)) : 100,
+        valor: facturasScheduleStatus.scheduleOk ? 100 : 0,
         total: facturasTotal,
-        errorDocs: facturasErrorInfra,
-        estado: facturasErrorInfra === 0 ? "Disponible" : "Atención"
+        errorDocs: facturasScheduleStatus.scheduleOk ? 0 : 1,
+        estado: facturasScheduleStatus.scheduleOk ? "Disponible" : "Sin Ejecución"
       },
       { 
         id: "oficore", 
@@ -528,18 +585,18 @@ export function DashboardMetrics({
       { 
         id: "ofitec", 
         nombre: "OFITEC", 
-        valor: ofitecIngresadas > 0 ? Math.round((ofitecResueltas / ofitecIngresadas) * 100) : 100,
+        valor: ofitecStatus.disponible ? 100 : 0,
         total: ofitecIngresadas,
-        errorDocs: 0,
-        estado: ofitecResueltas > ofitecIngresadas * 0.8 ? "Disponible" : "Atención"
+        errorDocs: ofitecStatus.disponible ? 0 : ofitecIngresadas,
+        estado: ofitecStatus.disponible ? "Disponible" : "Caído"
       },
       { 
         id: "sgc", 
         nombre: "SGC", 
-        valor: sgcTotal > 0 ? Math.round(((sgcPicking + sgcOd) / sgcTotal) * 100) : 100,
+        valor: sgcPingOk ? 100 : 0,
         total: sgcTotal,
-        errorDocs: 0,
-        estado: (sgcPicking + sgcOd) > sgcTotal * 0.8 ? "Disponible" : "Atención"
+        errorDocs: sgcPingOk ? 0 : sgcTotal,
+        estado: sgcPingOk ? "Disponible" : "Caído"
       },
     ]);
 
@@ -561,6 +618,22 @@ export function DashboardMetrics({
         estado: "Crítico",
         descripcion: "Errores técnicos (conexión, timeout, servidor caído)"
       },
+      ...(facturasScheduleStatus.falta1400 ? [{
+        id: "errorSchedule1400",
+        nombre: "Ejecución 14:00 No Reportada",
+        valor: 1,
+        servicio: "Facturas",
+        estado: "Crítico",
+        descripcion: "El proceso de Aceptación y Rechazo de Facturas programado a las 14:00 no registra ejecuciones hoy"
+      }] : []),
+      ...(facturasScheduleStatus.falta2330 ? [{
+        id: "errorSchedule2330",
+        nombre: "Ejecución 23:30 No Reportada",
+        valor: 1,
+        servicio: "Facturas",
+        estado: "Crítico",
+        descripcion: "El proceso de Aceptación y Rechazo de Facturas programado a las 23:30 no registra ejecuciones hoy"
+      }] : []),
     ].filter(i => i.valor > 0);
     
     setDetalleAlertas(alertasCriticas);
@@ -917,6 +990,95 @@ export function DashboardMetrics({
     });
   }, [realInvoiceData, filters.dateRange]);
 
+  const facturasScheduleStatus = useMemo(() => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+    const target1400InMinutes = 14 * 60; // 14:00 (840 mins)
+    const target2330InMinutes = 23 * 60 + 30; // 23:30 (1410 mins)
+
+    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
+    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const facturasHoy = realInvoiceData.filter((f: any) => {
+      if (!f.fecha_proceso) return false;
+      const fDate = new Date(f.fecha_proceso);
+      if (isNaN(fDate.getTime())) return false;
+      return format(fDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejecucion1400Registrada = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+      return minutes >= target1400InMinutes && minutes < target2330InMinutes;
+    });
+
+    const ejecucion2330Registrada = facturasHoy.some((f: any) => {
+      const fDate = new Date(f.fecha_proceso);
+      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+      return minutes >= target2330InMinutes;
+    });
+
+    const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
+    const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
+
+    return {
+      falta1400,
+      falta2330,
+      scheduleOk: !falta1400 && !falta2330
+    };
+  }, [realInvoiceData]);
+
+  const dteScheduleStatus = useMemo(() => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+    const target1330InMinutes = 13 * 60 + 30; // 13:30 (810 mins)
+    const target2300InMinutes = 23 * 60;      // 23:00 (1380 mins)
+
+    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
+    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+
+    const hoyStr = format(now, "yyyy-MM-dd");
+
+    const dteHoy = dteData.filter((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      if (!fecha) return false;
+      const dDate = new Date(fecha);
+      if (isNaN(dDate.getTime())) return false;
+      return format(dDate, "yyyy-MM-dd") === hoyStr;
+    });
+
+    const ejecucion1330Registrada = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
+      return minutes >= target1330InMinutes && minutes < target2300InMinutes;
+    });
+
+    const ejecucion2300Registrada = dteHoy.some((d: any) => {
+      const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
+      const dDate = new Date(fecha);
+      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
+      return minutes >= target2300InMinutes;
+    });
+
+    const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;
+    const falta2300 = esHora2300Pasada && !ejecucion2300Registrada;
+
+    return {
+      falta1330,
+      falta2300,
+      scheduleOk: !falta1330 && !falta2300
+    };
+  }, [dteData]);
+
   const operacionStats = useMemo(() => {
     const totalDocs = filteredInvoices.length;
     const errorDocs = filteredInvoices.filter(f => isInfraestructuraError(f.motivo)).length;
@@ -942,10 +1104,23 @@ export function DashboardMetrics({
     const srv = services.find(s => s.id === serviceId);
     if (srv) {
       if (srv.id === "facturas") {
-        return parseFloat(operacionStats.disponibilidadGlobal);
+        return facturasScheduleStatus.scheduleOk ? 100 : 0;
+      }
+      if (srv.id === "dte") {
+        return dteScheduleStatus.scheduleOk ? 100 : 0;
+      }
+      if (srv.id === "sgc") {
+        return sgcPingOk ? 100 : 0;
+      }
+      if (srv.id === "ofitec") {
+        return ofitecStatus.disponible ? 100 : 0;
       }
       return 100 - srv.errorPercentage;
     }
+    if (serviceId === "facturas") return facturasScheduleStatus.scheduleOk ? 100 : 0;
+    if (serviceId === "dte") return dteScheduleStatus.scheduleOk ? 100 : 0;
+    if (serviceId === "sgc") return sgcPingOk ? 100 : 0;
+    if (serviceId === "ofitec") return ofitecStatus.disponible ? 100 : 0;
     return (serviceAvailabilities as Record<string, number>)[serviceId] || 100;
   };
 
@@ -953,20 +1128,20 @@ export function DashboardMetrics({
   const getRealServiceStatus = (service: any): "success" | "warning" | "error" => {
     if (service.isComingSoon) return "success";
     
+    if (service.id === "sgc") {
+      return sgcPingOk ? "success" : "error";
+    }
+
+    if (service.id === "ofitec") {
+      return ofitecStatus.disponible ? "success" : "error";
+    }
+    
     if (service.id === "facturas") {
-      const facturasService = services.find(s => s.id === "facturas");
-      if (facturasService) {
-        const hasRealInfraError = facturasService.logs?.some((log: any) => 
-          isInfraestructuraError(log.message) || 
-          isInfraestructuraError(log.details) ||
-          isInfraestructuraError(log.estado || "")
-        );
-        
-        if (!hasRealInfraError) {
-          return "success";
-        }
-        return facturasService.status || "success";
-      }
+      return facturasScheduleStatus.scheduleOk ? "success" : "error";
+    }
+
+    if (service.id === "dte") {
+      return dteScheduleStatus.scheduleOk ? "success" : "error";
     }
     
     return service.status || "success";
@@ -1395,7 +1570,7 @@ export function DashboardMetrics({
     if (activeServices.length === 0) return 100;
     const sum = activeServices.reduce((acc, s) => acc + getServiceAvailability(s.id), 0);
     return sum / activeServices.length;
-  }, [services, operacionStats.disponibilidadGlobal, dataVersion]);
+  }, [services, operacionStats.disponibilidadGlobal, sgcPingOk, ofitecStatus, facturasScheduleStatus, dataVersion]);
 
   // ✅ INFRAESTRUCTURA: Integración real con Zabbix (6 servidores principales)
   const servidoresInfra = useMemo(() => {
@@ -1766,7 +1941,7 @@ export function DashboardMetrics({
                     );
                   }
                   const avail = getServiceAvailability(s.id);
-                  const color = avail >= 99 ? "bg-emerald-500" : (avail >= 96 ? "bg-emerald-500" : "bg-amber-500");
+                  const color = avail >= 99 ? "bg-emerald-500" : (avail >= 90 ? "bg-amber-500" : "bg-red-500");
                   return (
                     <div 
                       key={s.id} 
