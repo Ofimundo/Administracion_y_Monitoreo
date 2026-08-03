@@ -7,16 +7,6 @@ import https from "https";
 import http from "http";
 import { executeQuery, executeProcedure, isSimulationMode } from "./db-client";
 import {
-  getSimulatedDatabase,
-  saveSimulatedDatabase,
-  INITIAL_DATABASE,
-  PA_UPD_BITACORA_ACEPTACION_RECHAZO,
-  PA_UPD_ESTADO_ACEPTACION_RECHAZO,
-  PA_EJECUCION_ACEPTACION_RECHAZO,
-  PA_SII_ACEPTACION_RECHAZO,
-  PA_INS_BITACORA_ACEPTACION_RECHAZO,
-} from "./db-simulation";
-import {
   getProcesoActivo,
   solicitarDetencionProceso,
   getEstadoCompleto,
@@ -79,56 +69,18 @@ app.get("/api/facturas/test-db", async (req, res) => {
 // 2. GET /api/facturas/bitacora
 app.get("/api/facturas/bitacora", async (req, res) => {
   try {
-    const isSimulated = isSimulationMode();
-    
     const estado = req.query.estado as string | undefined;
     const search = req.query.search as string | undefined;
     const tipoDocumento = req.query.tipoDocumento as string | undefined;
     const fechaDesde = req.query.fechaDesde as string | undefined;
     const fechaHasta = req.query.fechaHasta as string | undefined;
+    const cliente = req.query.cliente as string | undefined;
 
-    console.log("📊 [API] Filtros recibidos:", { estado, search, tipoDocumento, fechaDesde, fechaHasta });
-    console.log("📊 [API] Modo:", isSimulated ? "SIMULACIÓN" : "REAL SQL Server");
+    console.log("📊 [API] Consultando bitácora en SQL Server con filtros:", { estado, search, tipoDocumento, fechaDesde, fechaHasta, cliente });
 
-    if (isSimulated) {
-      const db = getSimulatedDatabase();
-      let bitacora = [...db.bitacora];
-      bitacora.sort((a, b) => new Date(b.fecha_proceso).getTime() - new Date(a.fecha_proceso).getTime());
+    let conditions: string[] = [];
 
-      if (estado && estado !== "todos") {
-        let estadoNormalizado = estado;
-        if (estado === "aprobado") estadoNormalizado = "Aprobado";
-        else if (estado === "rechazado") estadoNormalizado = "Rechazado";
-        else if (estado === "pendiente") estadoNormalizado = "Pendiente";
-        else if (estado === "pendiente espera") estadoNormalizado = "Pendiente Espera";
-        else if (estado === "manual") estadoNormalizado = "Manual";
-        bitacora = bitacora.filter(b => b.estado?.toLowerCase() === estadoNormalizado.toLowerCase());
-      }
-
-      if (tipoDocumento && tipoDocumento !== "todos") {
-        bitacora = bitacora.filter(b => b.tipo_documento === parseInt(tipoDocumento));
-      }
-
-      if (fechaDesde) {
-        bitacora = bitacora.filter(b => b.fecha_proceso.split('T')[0] >= fechaDesde);
-      }
-      if (fechaHasta) {
-        bitacora = bitacora.filter(b => b.fecha_proceso.split('T')[0] <= fechaHasta);
-      }
-      if (search && search.trim() !== "") {
-        const query = search.toLowerCase();
-        bitacora = bitacora.filter(b =>
-          b.folio_documento.toString().includes(query) ||
-          b.rut_proveedor.toLowerCase().includes(query) ||
-          b.razon_social.toLowerCase().includes(query)
-        );
-      }
-
-      return res.json({ success: true, mode: "simulation", count: bitacora.length, data: bitacora });
-    } else {
-      let conditions: string[] = [];
-
-      if (estado && estado !== "todos") {
+    if (estado && estado !== "todos") {
         let estadoValue = "";
         switch (estado) {
           case "aprobado": estadoValue = "Aprobado"; break;
@@ -161,28 +113,101 @@ app.get("/api/facturas/bitacora", async (req, res) => {
         conditions.push(`CAST(fecha_proceso AS DATE) <= '${fechaHasta}'`);
       }
 
-      let sqlQuery = `
-        SELECT 
-          id_proceso,
-          folio_documento,
-          tipo_documento,
-          orden_compra,
-          razon_social,
-          rut_proveedor,
-          dias_por_vencer,
-          estado,
-          id_regla,
-          motivo,
-          horas_por_revisar,
-          fecha_proceso,
-          fecha_modificacion
-        FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]
-      `;
-      
-      if (conditions.length > 0) {
-        sqlQuery += " WHERE " + conditions.join(" AND ");
+      const whereClause = conditions.length > 0 ? " WHERE " + conditions.join(" AND ") : "";
+
+      let sqlQuery = "";
+      const isAntofagasta = cliente && (cliente.includes("antofagasta") || cliente === "cl_cmds_antofagasta");
+      const isStuedemann = cliente && (cliente.includes("stuedemann") || cliente === "cl_stuedemann");
+
+      if (isAntofagasta) {
+        sqlQuery = `
+          SELECT 
+            id_proceso,
+            CAST(folio_documento AS NVARCHAR(50)) as folio_documento,
+            CAST(tipo_documento AS NVARCHAR(50)) as tipo_documento,
+            orden_compra,
+            razon_social,
+            rut_proveedor,
+            dias_por_vencer,
+            estado,
+            NULL as id_regla,
+            motivo,
+            NULL as horas_por_revisar,
+            fecha_proceso,
+            NULL as fecha_modificacion,
+            'CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA' as cliente_nombre,
+            'cl_cmds_antofagasta' as cliente_id
+          FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora_antofagasta]
+          ${whereClause}
+          ORDER BY fecha_proceso DESC
+        `;
+      } else if (isStuedemann) {
+        sqlQuery = `
+          SELECT 
+            id_proceso,
+            CAST(folio_documento AS NVARCHAR(50)) as folio_documento,
+            CAST(tipo_documento AS NVARCHAR(50)) as tipo_documento,
+            orden_compra,
+            razon_social,
+            rut_proveedor,
+            dias_por_vencer,
+            estado,
+            id_regla,
+            motivo,
+            horas_por_revisar,
+            fecha_proceso,
+            fecha_modificacion,
+            'STUEDEMANN S.A.' as cliente_nombre,
+            'cl_stuedemann' as cliente_id
+          FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]
+          ${whereClause}
+          ORDER BY fecha_proceso DESC
+        `;
+      } else {
+        sqlQuery = `
+          SELECT 
+            id_proceso,
+            CAST(folio_documento AS NVARCHAR(50)) as folio_documento,
+            CAST(tipo_documento AS NVARCHAR(50)) as tipo_documento,
+            orden_compra,
+            razon_social,
+            rut_proveedor,
+            dias_por_vencer,
+            estado,
+            id_regla,
+            motivo,
+            horas_por_revisar,
+            fecha_proceso,
+            fecha_modificacion,
+            'STUEDEMANN S.A.' as cliente_nombre,
+            'cl_stuedemann' as cliente_id
+          FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]
+          ${whereClause}
+
+          UNION ALL
+
+          SELECT 
+            id_proceso,
+            CAST(folio_documento AS NVARCHAR(50)) as folio_documento,
+            CAST(tipo_documento AS NVARCHAR(50)) as tipo_documento,
+            orden_compra,
+            razon_social,
+            rut_proveedor,
+            dias_por_vencer,
+            estado,
+            NULL as id_regla,
+            motivo,
+            NULL as horas_por_revisar,
+            fecha_proceso,
+            NULL as fecha_modificacion,
+            'CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA' as cliente_nombre,
+            'cl_cmds_antofagasta' as cliente_id
+          FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora_antofagasta]
+          ${whereClause}
+
+          ORDER BY fecha_proceso DESC
+        `;
       }
-      sqlQuery += " ORDER BY fecha_proceso DESC";
 
       console.log("🔌 [SQL Query]:", sqlQuery);
 
@@ -207,7 +232,6 @@ app.get("/api/facturas/bitacora", async (req, res) => {
           data: [],
         });
       }
-    }
   } catch (error: any) {
     console.error("❌ Error general en API:", error);
     return res.status(500).json({
@@ -221,47 +245,22 @@ app.get("/api/facturas/bitacora", async (req, res) => {
 // 3. POST /api/facturas/sincronizar
 app.post("/api/facturas/sincronizar", async (req, res) => {
   try {
-    const isSimulated = isSimulationMode();
-    console.log(`[API Sincronizar] Sincronizando bitácora. Modo Simulación: ${isSimulated}`);
+    console.log("ℹ️ [Modo Solo Consulta] Consultando estado de bitácora en SQL Server (Sin ejecuciones de SP)...");
+    const result = await executeQuery("SELECT COUNT(1) as total_registros FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]");
 
-    if (isSimulated) {
-      let db = getSimulatedDatabase();
-
-      const syncRes = PA_UPD_BITACORA_ACEPTACION_RECHAZO(db);
-      db = syncRes.db;
-
-      const stateRes = PA_UPD_ESTADO_ACEPTACION_RECHAZO(db);
-      db = stateRes.db;
-
-      saveSimulatedDatabase(db);
-
-      return res.json({
-        success: true,
-        mode: "simulation",
-        syncedCount: syncRes.syncedCount,
-        updatedCount: stateRes.updatedCount,
-        message: `Sincronización completada. Aprobaciones manuales sincronizadas: ${syncRes.syncedCount}. Documentos restablecidos para re-evaluación: ${stateRes.updatedCount}.`,
-      });
-    } else {
-      console.log("🚀 Ejecutando SP: [RPA].[PA_UPD_BITACORA_ACEPTACION_RECHAZO]...");
-      const syncResult = await executeProcedure("[RPA].[PA_UPD_BITACORA_ACEPTACION_RECHAZO]");
-      
-      console.log("🚀 Ejecutando SP: [RPA].[PA_UPD_ESTADO_ACEPTACION_RECHAZO]...");
-      const stateResult = await executeProcedure("[RPA].[PA_UPD_ESTADO_ACEPTACION_RECHAZO]");
-
-      return res.json({
-        success: true,
-        mode: "real",
-        syncResult,
-        stateResult,
-        message: "Sincronización de SP reales completada con éxito en SQL Server.",
-      });
-    }
+    return res.json({
+      success: true,
+      mode: "real_read_only",
+      totalCount: result?.recordset?.[0]?.total_registros || 0,
+      syncedCount: 0,
+      updatedCount: 0,
+      message: "Consulta de bitácora realizada con éxito en SQL Server (Modo Solo Lectura: Sin modificaciones).",
+    });
   } catch (error: any) {
     console.error("❌ Error en API /api/facturas/sincronizar:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Error al sincronizar la bitácora",
+      message: error.message || "Error al consultar la bitácora",
     });
   }
 });
@@ -282,58 +281,41 @@ app.post("/api/facturas/ejecutar", async (req, res) => {
   if (getProcesoActivo()) {
     return res.status(409).json({
       success: false,
-      message: "Ya hay un proceso de facturación en ejecución. Por favor, espera a que termine o detén el proceso actual.",
+      message: "Ya hay una consulta de facturación en ejecución. Por favor, espera a que termine.",
     });
   }
 
   try {
-    const isSimulated = isSimulationMode();
-    console.log(`[API Ejecutar] Ejecutando proceso RPA. Modo Simulación: ${isSimulated}`);
-
     marcarInicioProceso();
+    const start = Date.now();
+    const fechaDesde = (req.query.fechaDesde as string) || (req.body?.fechaDesde as string);
+    const fechaHasta = (req.query.fechaHasta as string) || (req.body?.fechaHasta as string);
 
-    if (isSimulated) {
-      const result = await PA_EJECUCION_ACEPTACION_RECHAZO();
-      
-      ultimaEjecucion = {
-        fecha: new Date().toISOString(),
-        ...result,
-      };
-      
-      marcarFinProceso();
-      
-      return res.json({
-        mode: "simulation",
-        ...result,
-        success: true,
-      });
-    } else {
-      const start = Date.now();
-      
-      const ejecutarConDetencion = async () => {
-        if (debeDetenerseProceso()) {
-          throw new Error("Proceso detenido por solicitud del usuario antes de iniciar");
-        }
-        
-        const result = await executeProcedure("[RPA].[PA_EJECUCION_ACEPTACION_RECHAZO]");
-        
-        if (debeDetenerseProceso()) {
-          console.log("[API Ejecutar] Proceso detenido por usuario durante la ejecución");
-        }
-        
-        return result;
-      };
-      
-      const result = await ejecutarConDetencion();
-      
-      const durationMs = Date.now() - start;
-      const logs = [
-        {
-          timestamp: new Date().toISOString(),
-          message: `🤖 Ejecución de SP Real [RPA].[PA_EJECUCION_ACEPTACION_RECHAZO] completada en ${durationMs}ms`,
-          type: "success" as const,
-        },
-      ];
+    let conditions: string[] = [];
+    if (fechaDesde) {
+      conditions.push(`CAST(fecha_proceso AS DATE) >= '${fechaDesde.replace(/'/g, "''")}'`);
+    }
+    if (fechaHasta) {
+      conditions.push(`CAST(fecha_proceso AS DATE) <= '${fechaHasta.replace(/'/g, "''")}'`);
+    }
+
+    let sqlQuery = "SELECT * FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]";
+    if (conditions.length > 0) {
+      sqlQuery += " WHERE " + conditions.join(" AND ");
+    }
+    sqlQuery += " ORDER BY fecha_proceso DESC";
+
+    console.log("ℹ️ [Modo Solo Consulta] Leyendo datos de bitácora por rango de fechas:", sqlQuery);
+    const result = await executeQuery(sqlQuery);
+    
+    const durationMs = Date.now() - start;
+    const logs = [
+      {
+        timestamp: new Date().toISOString(),
+        message: `📊 Consulta por rango de fechas realizada con éxito (${result?.recordset?.length || 0} registros en ${durationMs}ms)`,
+        type: "info" as const,
+      },
+    ];
 
       ultimaEjecucion = {
         fecha: new Date().toISOString(),
@@ -351,19 +333,19 @@ app.post("/api/facturas/ejecutar", async (req, res) => {
 
       return res.json({
         success: true,
-        mode: "real",
+        mode: "real_read_only",
         durationMs,
         recordset: result?.recordset || [],
-        output: result?.output || {},
+        output: {},
         logs,
+        message: "Consulta realizada con éxito (Modo Solo Lectura: No se ejecutó ningún procedimiento almacenado de modificación).",
       });
-    }
   } catch (error: any) {
     console.error("❌ Error en API /api/facturas/ejecutar:", error);
     marcarFinProceso();
     return res.status(500).json({
       success: false,
-      message: error.message || "Error interno al ejecutar el proceso RPA",
+      message: error.message || "Error al consultar los datos",
     });
   }
 });
@@ -453,207 +435,38 @@ app.post("/api/facturas/accion-manual", async (req, res) => {
       });
     }
 
-    const isSimulated = isSimulationMode();
-    console.log(`[API Acción Manual] Procesando. Folio: ${folio}, Acción: ${accion}, Modo Simulación: ${isSimulated}`);
+    console.log(`[API Acción Manual] Procesando consulta para Folio: ${folio}, Acción: ${accion}`);
 
-    if (isSimulated) {
-      let db = getSimulatedDatabase();
-
-      const doc = db.dte_doccab.find((d) => d.Folio === folio && d.TipoDTE === tipoDocumento);
-      if (!doc) {
-        return res.status(404).json({ success: false, message: "Documento no encontrado en Softland." });
+    let rutEmisor = "";
+    let record = null;
+    try {
+      console.log(`🔌 [Modo Solo Consulta] Buscando registro en bitácora para Folio: ${folio}, Tipo: ${tipoDocumento}...`);
+      const queryResult = await executeQuery(
+        `SELECT TOP 1 * FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora] WHERE folio_documento = @p0 AND tipo_documento = @p1`,
+        [folio, tipoDocumento]
+      );
+      if (queryResult?.recordset?.length > 0) {
+        record = queryResult.recordset[0];
+        rutEmisor = record.rut_proveedor;
+        console.log(`✅ Registro consultado con éxito en bitácora. RUT proveedor: ${rutEmisor}`);
       }
-
-      const resSii = await PA_SII_ACEPTACION_RECHAZO(db, {
-        rutCliente: doc.RutEmisor,
-        tipoDocumento,
-        folio,
-        motivo: motivo || `Gestión Manual (Usuario): ${accion === "ERM" ? "Aprobar" : "Rechazar"}`,
-        accion,
-      });
-      db = resSii.db;
-
-      const today = new Date();
-      const expiry = new Date(doc.FechaVencimiento + "T12:00:00");
-      const diffTime = expiry.getTime() - today.getTime();
-      const diasPorVencer = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      const refOC = db.dte_docref.find((r) => r.TipoDTE === tipoDocumento && r.Folio === folio && r.TpoDocRef === "801");
-
-      PA_INS_BITACORA_ACEPTACION_RECHAZO(db, {
-        folio,
-        tipo_documento: tipoDocumento,
-        orden_compra: refOC?.FolioRef || null,
-        razon_social: doc.RazonSocialEmisor,
-        rut_proveedor: doc.RutEmisor,
-        dias_por_vencer: diasPorVencer,
-        estado: accion === "ERM" ? "Aprobado" : "Rechazado",
-        id_regla: 888,
-        motivo: motivo || `Resolución manual del usuario en portal: ${accion === "ERM" ? "Aprobado" : "Rechazar"}`,
-        horas_por_revisar: null,
-      });
-
-      saveSimulatedDatabase(db);
-
-      return res.json({
-        success: true,
-        mode: "simulation",
-        message: `Acción manual '${accion}' ejecutada exitosamente. SII Código: ${resSii.code}`,
-        docState: doc,
-      });
-    } else {
-      let rutEmisor = "";
-      try {
-        console.log(`🔌 Buscando RUT del proveedor para Folio: ${folio}, Tipo: ${tipoDocumento} en la bitácora...`);
-        const queryResult = await executeQuery(
-          `SELECT TOP 1 rut_proveedor FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora] WHERE folio_documento = @p0 AND tipo_documento = @p1`,
-          [folio, tipoDocumento]
-        );
-        if (queryResult?.recordset?.length > 0) {
-          rutEmisor = queryResult.recordset[0].rut_proveedor;
-          console.log(`✅ RUT de proveedor encontrado: ${rutEmisor}`);
-        } else {
-          console.warn(`⚠️ No se encontró registro en la bitácora para Folio ${folio}. Se enviará vacío.`);
-        }
-      } catch (dbErr) {
-        console.error("❌ Error al consultar RUT de proveedor:", dbErr);
-      }
-
-      const inputs = {
-        rut_emisor: { type: sql.VarChar(12), value: rutEmisor },
-        tipo_documento: { type: sql.Int, value: tipoDocumento },
-        folio: { type: sql.Int, value: folio },
-        motivo: { type: sql.VarChar(500), value: motivo || "Gestión manual desde panel" },
-        accion: { type: sql.VarChar(3), value: accion },
-      };
-
-      console.log(`🚀 Ejecutando SP SII Real: [RPA].[PA_SII_ACEPTACION_RECHAZO] para Folio ${folio}`);
-      const result = await executeProcedure("[RPA].[PA_SII_ACEPTACION_RECHAZO]", inputs);
-
-      return res.json({
-        success: true,
-        mode: "real",
-        result,
-        message: `Acción manual '${accion}' enviada a SQL Server para Folio ${folio}.`,
-      });
+    } catch (dbErr) {
+      console.error("❌ Error al consultar la bitácora:", dbErr);
     }
+
+    console.log(`ℹ️ [Modo Solo Consulta] Petición procesada sin ejecutar procedimientos almacenados de modificación en SQL Server.`);
+
+    return res.json({
+      success: true,
+      mode: "real_read_only",
+      record,
+      message: `Consulta realizada con éxito para Folio ${folio}. (Modo Solo Lectura: No se ejecutaron modificaciones en la base de datos).`,
+    });
   } catch (error: any) {
     console.error("❌ Error en API /api/facturas/accion-manual:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Error al realizar acción manual",
-    });
-  }
-});
-
-// 10. GET /api/facturas/db-editor
-app.get("/api/facturas/db-editor", (req, res) => {
-  try {
-    const db = getSimulatedDatabase();
-    return res.json({
-      success: true,
-      db,
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al leer la base de datos de simulación: " + error.message
-    });
-  }
-});
-
-// POST /api/facturas/db-editor
-app.post("/api/facturas/db-editor", (req, res) => {
-  try {
-    const { table, action, data } = req.body;
-
-    if (!table || !action || !data) {
-      return res.status(400).json({
-        success: false,
-        message: "Parámetros 'table', 'action' y 'data' son requeridos."
-      });
-    }
-
-    const db = getSimulatedDatabase();
-    const tableData = (db as any)[table];
-
-    if (!tableData || !Array.isArray(tableData)) {
-      return res.status(400).json({
-        success: false,
-        message: `La tabla '${table}' no existe o no es un arreglo.`
-      });
-    }
-
-    if (action === "update") {
-      if (table === "dte_doccab") {
-        const idx = tableData.findIndex((d: any) => d.Folio === data.Folio && d.TipoDTE === data.TipoDTE);
-        if (idx >= 0) {
-          tableData[idx] = { ...tableData[idx], ...data };
-        } else {
-          return res.status(404).json({ success: false, message: "Documento no encontrado." });
-        }
-      }
-      else if (table === "owordencom") {
-        const idx = tableData.findIndex((o: any) => o.NroOrden === data.NroOrden);
-        if (idx >= 0) {
-          tableData[idx] = { ...tableData[idx], ...data };
-        } else {
-          return res.status(404).json({ success: false, message: "Orden de Compra no encontrada." });
-        }
-      }
-      else if (table === "cwt_auxi_attr") {
-        const idx = tableData.findIndex((a: any) => a.RutAux === data.RutAux);
-        if (idx >= 0) {
-          tableData[idx] = { ...tableData[idx], ...data };
-        } else {
-          tableData.push(data);
-        }
-      }
-      else {
-        return res.status(400).json({ success: false, message: "Actualización no soportada para esta tabla." });
-      }
-    } else if (action === "insert") {
-      tableData.push(data);
-    } else if (action === "delete") {
-      if (table === "dte_doccab") {
-        (db as any)[table] = tableData.filter((d: any) => !(d.Folio === data.Folio && d.TipoDTE === data.TipoDTE));
-      } else if (table === "owordencom") {
-        (db as any)[table] = tableData.filter((o: any) => o.NroOrden !== data.NroOrden);
-      } else {
-        return res.status(400).json({ success: false, message: "Eliminación no soportada para esta tabla." });
-      }
-    }
-
-    saveSimulatedDatabase(db);
-
-    return res.json({
-      success: true,
-      message: `Tabla '${table}' actualizada exitosamente. Acción: ${action}.`,
-      db,
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al actualizar la base de datos de simulación: " + error.message
-    });
-  }
-});
-
-// DELETE /api/facturas/db-editor
-app.delete("/api/facturas/db-editor", (req, res) => {
-  try {
-    const newDb = JSON.parse(JSON.stringify(INITIAL_DATABASE));
-    saveSimulatedDatabase(newDb);
-
-    return res.json({
-      success: true,
-      message: "Base de datos de simulación reiniciada a los valores de fábrica exitosamente.",
-      db: newDb,
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al reiniciar la base de datos de simulación: " + error.message
+      message: error.message || "Error al consultar acción manual",
     });
   }
 });
@@ -2716,74 +2529,14 @@ async function syncApprovedProspectsReal(fichas: any[]) {
       const serviceId = getServiceIdFromLine(line, code, projectName);
       
       try {
-        console.log(`[SYNC] Sincronizando prospecto aprobado REAL: ${clienteName} con servicio ID ${serviceId}`);
+        console.log(`ℹ️ [Modo Solo Consulta] Sincronización en modo lectura para prospecto: ${clienteName} con servicio ID ${serviceId}`);
         const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
-        const resCheck = await executeQuery(queryCheckClient, [clienteName]);
+        await executeQuery(queryCheckClient, [clienteName]);
         
-        let clienteId: number;
-        
-        if (resCheck?.recordset && resCheck.recordset.length > 0) {
-          clienteId = resCheck.recordset[0].Cliente_ID;
-          console.log(`   El cliente ya existe en MON.Clientes (ID: ${clienteId})`);
-        } else {
-          const rut = `77.000.${String(id).padStart(3, '0')}-0`;
-          const codigoCliente = `77000${String(id).padStart(3, '0')}0`;
-          
-          console.log(`   Insertando cliente nuevo REAL: ${clienteName} (RUT: ${rut}, Código: ${codigoCliente})`);
-          const queryInsertClient = `
-            INSERT INTO [THE_COOLER_CENTRAL].[MON].[Clientes] (Codigo_Cliente, Rut_Cliente, Nombre_cliente, Activo, Fecha_Creacion)
-            VALUES (@p0, @p1, @p2, 1, GETDATE());
-            SELECT SCOPE_IDENTITY() AS Cliente_ID;
-          `;
-          const resInsert = await executeQuery(queryInsertClient, [codigoCliente, rut, clienteName]);
-          clienteId = resInsert?.recordset[0]?.Cliente_ID;
-          console.log(`   Cliente insertado REAL con éxito (ID: ${clienteId})`);
-        }
-        
-        if (clienteId) {
-          const queryCheckRel = "SELECT Relacion_ID FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Cliente_ID = @p0 AND Servicio_ID = @p1";
-          const resCheckRel = await executeQuery(queryCheckRel, [clienteId, serviceId]);
-          
-          if (!resCheckRel?.recordset || resCheckRel.recordset.length === 0) {
-            console.log(`   Insertando relación Cliente_Servicio REAL (Cliente: ${clienteId}, Servicio: ${serviceId})`);
-            const queryInsertRel = `
-              INSERT INTO [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] (Cliente_ID, Servicio_ID, Activo)
-              VALUES (@p0, @p1, 1);
-            `;
-            await executeQuery(queryInsertRel, [clienteId, serviceId]);
-            console.log(`   Relación Cliente_Servicio REAL insertada con éxito`);
-          } else {
-            console.log(`   La relación Cliente_Servicio REAL ya existe`);
-          }
-        }
-
-        // Sincronizar proyecto activo en Proyectos de base de datos
-        console.log(`[SYNC] Sincronizando proyecto activo: ${projectName}`);
         const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
-        const resProjCheck = await executeQuery(queryCheckProj, [code]);
-        
-        if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
-          console.log(`   Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${code}`);
-          const queryInsertProj = `
-            INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
-            (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
-            VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
-          `;
-          await executeQuery(queryInsertProj, [
-            code,
-            projectName,
-            clienteName,
-            ficha.GestorComercial || 'Sin Asignar',
-            ficha.ValorServicio || 0,
-            ficha.Estimaciones ? (typeof ficha.Estimaciones === 'string' ? ficha.Estimaciones : JSON.stringify(ficha.Estimaciones)) : ''
-          ]);
-          console.log(`   Proyecto activo insertado con éxito`);
-        } else {
-          const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
-          await executeQuery(queryUpdateProj, [code]);
-        }
+        await executeQuery(queryCheckProj, [code]);
       } catch (err) {
-        console.error(`❌ Error al sincronizar prospecto aprobado REAL ${clienteName}:`, err);
+        console.error(`❌ Error al consultar prospecto ${clienteName}:`, err);
       }
     }
   }
@@ -3004,109 +2757,9 @@ async function syncFichasProspectoWithRemote() {
     for (const f of remoteFichas) {
       try {
         const queryCheck = "SELECT Id, Estado FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Codigo = @p0";
-        const resCheck = await executeQuery(queryCheck, [f.codigo]);
-        
-        let prospectoDbId: number;
-        let dbEstado = "";
-        
-        if (resCheck?.recordset && resCheck.recordset.length > 0) {
-          prospectoDbId = resCheck.recordset[0].Id;
-          dbEstado = resCheck.recordset[0].Estado;
-          
-          if (dbEstado !== f.estado) {
-            console.log(`[SYNC] Actualizando estado del prospecto ${f.codigo} de '${dbEstado}' a '${f.estado}'`);
-            const queryUpdate = "UPDATE [GESTION_PROYECTOS].[dbo].[FichasProspecto] SET Estado = @p0, FechaActualizacion = GETDATE() WHERE Id = @p1";
-            await executeQuery(queryUpdate, [f.estado, prospectoDbId]);
-          }
-        } else {
-          console.log(`[SYNC] Insertando nuevo prospecto remoto: ${f.codigo} - ${f.nombreProyecto}`);
-          const queryInsert = `
-            INSERT INTO [GESTION_PROYECTOS].[dbo].[FichasProspecto] 
-            (Codigo, NombreProyecto, Estado, Cliente, GestorComercial, ValorServicio, LineaServicio, TipoCliente, FechaCreacion, FechaActualizacion)
-            VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, GETDATE(), GETDATE());
-            SELECT SCOPE_IDENTITY() as Id;
-          `;
-          const resInsert = await executeQuery(queryInsert, [
-            f.codigo,
-            f.nombreProyecto,
-            f.estado,
-            f.cliente,
-            f.gestorComercial,
-            f.valorServicio || 0,
-            f.lineaServicio || 'ACRF_01',
-            f.tipoCliente || 'Nuevo'
-          ]);
-          prospectoDbId = resInsert?.recordset?.[0]?.Id;
-        }
-        
-        const estadoLower = (f.estado || "").toLowerCase();
-        if (estadoLower.includes("100%") || estadoLower.includes("aceptado por cliente") || estadoLower.includes("aprobado") || estadoLower.includes("aprobada")) {
-          const line = f.lineaServicio;
-          const code = f.codigo;
-          const projectName = f.nombreProyecto;
-          const clienteName = f.cliente;
-          
-          const serviceId = getServiceIdFromLine(line, code, projectName);
-          
-          console.log(`[SYNC] Sincronizando cliente en MON: ${clienteName}`);
-          const queryCheckClient = "SELECT Cliente_ID FROM [THE_COOLER_CENTRAL].[MON].[Clientes] WHERE Nombre_cliente = @p0";
-          const resClientCheck = await executeQuery(queryCheckClient, [clienteName]);
-          
-          let clienteId: number;
-          if (resClientCheck?.recordset && resClientCheck.recordset.length > 0) {
-            clienteId = resClientCheck.recordset[0].Cliente_ID;
-          } else {
-            const rut = `77.000.${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}-0`;
-            const codigoCliente = `77000${String(prospectoDbId || Math.floor(Math.random() * 800 + 100)).padStart(3, '0')}0`;
-            
-            const queryInsertClient = `
-              INSERT INTO [THE_COOLER_CENTRAL].[MON].[Clientes] (Codigo_Cliente, Rut_Cliente, Nombre_cliente, Activo, Fecha_Creacion)
-              VALUES (@p0, @p1, @p2, 1, GETDATE());
-              SELECT SCOPE_IDENTITY() AS Cliente_ID;
-            `;
-            const resInsertClient = await executeQuery(queryInsertClient, [codigoCliente, rut, clienteName]);
-            clienteId = resInsertClient?.recordset[0]?.Cliente_ID;
-          }
-          
-          if (clienteId) {
-            const queryCheckRel = "SELECT Relacion_ID FROM [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] WHERE Cliente_ID = @p0 AND Servicio_ID = @p1";
-            const resCheckRel = await executeQuery(queryCheckRel, [clienteId, serviceId]);
-            if (!resCheckRel?.recordset || resCheckRel.recordset.length === 0) {
-              const queryInsertRel = `
-                INSERT INTO [THE_COOLER_CENTRAL].[MON].[Cliente_Servicio] (Cliente_ID, Servicio_ID, Activo)
-                VALUES (@p0, @p1, 1);
-              `;
-              await executeQuery(queryInsertRel, [clienteId, serviceId]);
-            }
-          }
-          
-          console.log(`[SYNC] Sincronizando proyecto activo: ${f.nombreProyecto}`);
-          const queryCheckProj = "SELECT Id FROM [GESTION_PROYECTOS].[dbo].[Proyectos] WHERE Codigo = @p0";
-          const resProjCheck = await executeQuery(queryCheckProj, [f.codigo]);
-          
-          if (!resProjCheck?.recordset || resProjCheck.recordset.length === 0) {
-            console.log(`[SYNC] Creando nuevo proyecto activo en [GESTION_PROYECTOS].[dbo].[Proyectos] para ${f.codigo}`);
-            const queryInsertProj = `
-              INSERT INTO [GESTION_PROYECTOS].[dbo].[Proyectos] 
-              (Codigo, NombreProyecto, Cliente, Lider, Estado, Avance, Venta, HHPlanificadas, HHReal, FechaInicio, FechaFin, Descripcion, FechaCreacion, FechaActualizacion)
-              VALUES (@p0, @p1, @p2, @p3, 'Activo', 100.0, @p4, 0.0, 0.0, GETDATE(), NULL, @p5, GETDATE(), GETDATE())
-            `;
-            await executeQuery(queryInsertProj, [
-              f.codigo,
-              f.nombreProyecto,
-              f.cliente,
-              f.gestorComercial || 'Sin Asignar',
-              f.valorServicio || 0,
-              f.estimaciones ? (typeof f.estimaciones === 'string' ? f.estimaciones : JSON.stringify(f.estimaciones)) : ''
-            ]);
-            console.log(`[SYNC] Proyecto activo insertado con éxito`);
-          } else {
-            const queryUpdateProj = "UPDATE [GESTION_PROYECTOS].[dbo].[Proyectos] SET Estado = 'Activo', FechaActualizacion = GETDATE() WHERE Codigo = @p0 AND Estado <> 'Activo'";
-            await executeQuery(queryUpdateProj, [f.codigo]);
-          }
-        }
+        await executeQuery(queryCheck, [f.codigo]);
       } catch (err: any) {
-        console.error(`❌ Error sincronizando ficha prospecto ${f.codigo}:`, err.message);
+        console.error(`❌ Error consultando ficha prospecto ${f.codigo}:`, err.message);
       }
     }
   }
@@ -3249,24 +2902,17 @@ app.put("/api/mon/fichas-prospecto/:id/estado", async (req, res) => {
         data: ficha
       });
     } else {
-      // Update FichasProspecto table in GESTION_PROYECTOS
-      const updateQuery = "UPDATE [GESTION_PROYECTOS].[dbo].[FichasProspecto] SET Estado = @p0, FechaActualizacion = GETDATE() WHERE Id = @p1";
-      await executeQuery(updateQuery, [estado, id]);
-      
-      // Fetch updated record and run sync
+      // Read-only query for FichasProspecto table in GESTION_PROYECTOS
+      console.log(`ℹ️ [Modo Solo Consulta] Consultando prospecto ${id} sin ejecutar modificaciones en SQL Server...`);
       const fetchQuery = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Id = @p0";
       const resFetch = await executeQuery(fetchQuery, [id]);
       const updatedFicha = resFetch?.recordset[0];
       
-      if (updatedFicha) {
-        await syncApprovedProspectsReal([updatedFicha]);
-      }
-      
       return res.json({
         success: true,
-        mode: "real",
-        message: `Estado de prospecto ${id} actualizado a '${estado}'`,
-        data: updatedFicha
+        mode: "real_read_only",
+        message: `Consulta realizada con éxito para prospecto ${id} (Modo Solo Lectura: Sin modificaciones).`,
+        data: updatedFicha || { Id: id, Estado: estado }
       });
     }
   } catch (error: any) {
@@ -3279,6 +2925,235 @@ app.put("/api/mon/fichas-prospecto/:id/estado", async (req, res) => {
   }
 });
 
+
+// ============================================================
+// MONITOREO DE DISPONIBILIDAD Y RENDIMIENTO DE OFICORE
+// ============================================================
+// ============================================================
+// MONITOREO DE DISPONIBILIDAD Y RENDIMIENTO DE OFICORE
+// ============================================================
+let oficoreStatus = {
+  disponible: true,
+  responseTimeMs: 0,
+  responseTimeSec: 0,
+  statusCode: 200,
+  lastCheck: new Date().toISOString(),
+  mensaje: "Sistema operativo y accesible",
+  error: null as string | null,
+  codigoError: null as string | null,
+  motivoError: null as string | null
+};
+
+async function monitorOficore() {
+  const startTime = Date.now();
+  try {
+    const LOGIN_URL = "https://oficore.com/";
+    const USERNAME = "marrano@ofimundo.cl";
+    const PASSWORD = "ma*576394";
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let response = await fetch(LOGIN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitoringBot/1.0"
+      },
+      body: new URLSearchParams({
+        usuario: USERNAME,
+        username: USERNAME,
+        email: USERNAME,
+        password: PASSWORD,
+        clave: PASSWORD
+      }).toString(),
+      signal: controller.signal,
+      redirect: "follow"
+    }).catch(async () => {
+      return await fetch(LOGIN_URL, {
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitoringBot/1.0"
+        },
+        signal: controller.signal
+      });
+    });
+
+    clearTimeout(timeoutId);
+    const durationMs = Date.now() - startTime;
+    const durationSec = Number((durationMs / 1000).toFixed(2));
+
+    const isOk = response.ok || response.status === 200 || response.status === 302 || response.status === 301 || response.status === 401;
+
+    oficoreStatus = {
+      disponible: isOk,
+      responseTimeMs: durationMs,
+      responseTimeSec: durationSec,
+      statusCode: response.status,
+      lastCheck: new Date().toISOString(),
+      mensaje: isOk 
+        ? `[UP] Sistema operativo y accesible (${durationSec}s)` 
+        : `[ADVERTENCIA] Código HTTP inesperado: ${response.status}`,
+      error: isOk ? null : `HTTP Status ${response.status}`,
+      codigoError: isOk ? null : `HTTP_${response.status}`,
+      motivoError: isOk ? null : `El servidor respondió con estado HTTP ${response.status}`
+    };
+
+    console.log(`📊 [OFICORE MONITOR] Status: ${oficoreStatus.statusCode}, Tiempo: ${durationSec}s, Disponible: ${oficoreStatus.disponible}`);
+  } catch (err: any) {
+    const durationMs = Date.now() - startTime;
+    const durationSec = Number((durationMs / 1000).toFixed(2));
+    const isTimeout = err.name === "AbortError";
+    const errorMsg = isTimeout ? "Timeout de conexión (15s excedido)" : (err.message || "Error de conexión");
+    const errCode = isTimeout ? "TIMEOUT_15S" : (err.code || "ECONNREFUSED");
+    
+    oficoreStatus = {
+      disponible: false,
+      responseTimeMs: durationMs,
+      responseTimeSec: durationSec,
+      statusCode: 0,
+      lastCheck: new Date().toISOString(),
+      mensaje: `[CAÍDA] Error de conexión: ${errorMsg}`,
+      error: errorMsg,
+      codigoError: errCode,
+      motivoError: errorMsg
+    };
+
+    console.error(`❌ [OFICORE MONITOR] Error de monitoreo (${durationSec}s):`, errorMsg);
+  }
+}
+
+// Ejecutar monitoreo de Oficore cada 5 minutos (300.000 ms) y 3s después del inicio
+setInterval(monitorOficore, 300000);
+setTimeout(monitorOficore, 3000);
+
+app.get("/api/monitor/oficore", (req, res) => {
+  return res.json({
+    success: true,
+    ...oficoreStatus
+  });
+});
+
+app.get("/api/oficore/stats", (req, res) => {
+  return res.json({
+    success: true,
+    mode: "real",
+    stats: {
+      disponible: oficoreStatus.disponible,
+      responseTimeSec: oficoreStatus.responseTimeSec,
+      statusCode: oficoreStatus.statusCode,
+      lastCheck: oficoreStatus.lastCheck
+    },
+    detalles: [],
+    count: 0,
+    ...oficoreStatus
+  });
+});
+
+// ============================================================
+// MONITOREO DE DISPONIBILIDAD Y RENDIMIENTO DE MI CUENTA
+// ============================================================
+let miCuentaStatus = {
+  disponible: true,
+  responseTimeMs: 0,
+  responseTimeSec: 0,
+  statusCode: 200,
+  lastCheck: new Date().toISOString(),
+  mensaje: "Sistema operativo y accesible",
+  error: null as string | null,
+  codigoError: null as string | null,
+  motivoError: null as string | null
+};
+
+async function monitorMiCuenta() {
+  const startTime = Date.now();
+  try {
+    const LOGIN_URL = "https://oficore.com/";
+    const USERNAME = "marrano@ofimundo.cl";
+    const PASSWORD = "ma*576394";
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let response = await fetch(LOGIN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitoringBot/1.0"
+      },
+      body: new URLSearchParams({
+        usuario: USERNAME,
+        username: USERNAME,
+        email: USERNAME,
+        password: PASSWORD,
+        clave: PASSWORD
+      }).toString(),
+      signal: controller.signal,
+      redirect: "follow"
+    }).catch(async () => {
+      return await fetch(LOGIN_URL, {
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitoringBot/1.0"
+        },
+        signal: controller.signal
+      });
+    });
+
+    clearTimeout(timeoutId);
+    const durationMs = Date.now() - startTime;
+    const durationSec = Number((durationMs / 1000).toFixed(2));
+
+    const isOk = response.ok || response.status === 200 || response.status === 302 || response.status === 301 || response.status === 401;
+
+    miCuentaStatus = {
+      disponible: isOk,
+      responseTimeMs: durationMs,
+      responseTimeSec: durationSec,
+      statusCode: response.status,
+      lastCheck: new Date().toISOString(),
+      mensaje: isOk 
+        ? `[UP] Sistema operativo y accesible (${durationSec}s)` 
+        : `[ADVERTENCIA] Código HTTP inesperado: ${response.status}`,
+      error: isOk ? null : `HTTP Status ${response.status}`,
+      codigoError: isOk ? null : `HTTP_${response.status}`,
+      motivoError: isOk ? null : `El servidor respondió con estado HTTP ${response.status}`
+    };
+
+    console.log(`📊 [MI CUENTA MONITOR] Status: ${miCuentaStatus.statusCode}, Tiempo: ${durationSec}s, Disponible: ${miCuentaStatus.disponible}`);
+  } catch (err: any) {
+    const durationMs = Date.now() - startTime;
+    const durationSec = Number((durationMs / 1000).toFixed(2));
+    const isTimeout = err.name === "AbortError";
+    const errorMsg = isTimeout ? "Timeout de conexión (15s excedido)" : (err.message || "Error de conexión");
+    const errCode = isTimeout ? "TIMEOUT_15S" : (err.code || "ECONNREFUSED");
+    
+    miCuentaStatus = {
+      disponible: false,
+      responseTimeMs: durationMs,
+      responseTimeSec: durationSec,
+      statusCode: 0,
+      lastCheck: new Date().toISOString(),
+      mensaje: `[CAÍDA] Error de conexión: ${errorMsg}`,
+      error: errorMsg,
+      codigoError: errCode,
+      motivoError: errorMsg
+    };
+
+    console.error(`❌ [MI CUENTA MONITOR] Error de monitoreo (${durationSec}s):`, errorMsg);
+  }
+}
+
+// Ejecutar monitoreo de Mi Cuenta cada 5 minutos (300.000 ms) y 4s después del inicio
+setInterval(monitorMiCuenta, 300000);
+setTimeout(monitorMiCuenta, 4000);
+
+app.get("/api/monitor/mi-cuenta", (req, res) => {
+  return res.json({
+    success: true,
+    ...miCuentaStatus
+  });
+});
 
 app.get("/api/infraestructura/status", (req, res) => {
   return res.json({

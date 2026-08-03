@@ -309,6 +309,15 @@ const generateRealisticSampleData = (serviceId: string, count: number = 876) => 
 
 export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: ClientDashboardProps) {
   const { toast } = useToast();
+
+  const clientInfo = useMemo(() => {
+    return clients.find((c) => c.id === clientId) || {
+      id: clientId,
+      name: "Cliente",
+      rut: "",
+    };
+  }, [clientId]);
+
   const [selectedServiceId, setSelectedServiceId] = useState("facturas");
   const [sgcSubModule, setSgcSubModule] = useState<"all" | "docs" | "picking" | "contratos" | "equipos" | "despachos">("all");
   const [sgcExtraData, setSgcExtraData] = useState<{ picking?: any; contratos?: any; equipos?: any; despachos?: any }>({});
@@ -492,6 +501,18 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
               const fHasta = format(filters.fechaHasta, "yyyyMMdd");
               const sep = apiUrl.includes("?") ? "&" : "?";
               apiUrl += `${sep}fechaDesde=${fDesde}&fechaHasta=${fHasta}`;
+            }
+
+            const clientNameLower = (clientInfo.name || "").toLowerCase();
+            const isAntofagastaClient = clientId.includes("antofagasta") || clientNameLower.includes("antofagasta") || (clientInfo.rut || "").includes("70.892.100");
+            const isStuedemannClient = clientId.includes("stuedemann") || clientNameLower.includes("stuedemann") || (clientInfo.rut || "").includes("96.502.540");
+
+            if (isAntofagastaClient) {
+              const sep = apiUrl.includes("?") ? "&" : "?";
+              apiUrl += `${sep}cliente=cl_cmds_antofagasta`;
+            } else if (isStuedemannClient) {
+              const sep = apiUrl.includes("?") ? "&" : "?";
+              apiUrl += `${sep}cliente=cl_stuedemann`;
             }
 
             const res = await fetch(apiUrl);

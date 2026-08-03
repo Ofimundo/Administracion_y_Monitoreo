@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { services, getServiceById, initializeDatabaseData, subscribeToData, type Client, type LogEntry } from "@/lib/services-data";
-import { cn } from "@/lib/utils";
+import { cn, isInfraestructuraError } from "@/lib/utils";
 import {
   ArrowLeft,
   Clock,
@@ -97,118 +97,7 @@ const isServiceComingSoon = (serviceId: string): boolean => {
   return COMING_SOON_SERVICES.includes(serviceId);
 };
 
-// ✅ SOLO ERRORES DE INFRAESTRUCTURA REALES
-const ERRORES_INFRAESTRUCTURA = [
-  // Errores de servidor/API
-  "softland no disponible",
-  "softland error",
-  "servidor no responde",
-  "servidor no disponible",
-  "server unavailable",
-  "internal server error",
-  "error interno del servidor",
-  "servicio rpa no responde",
-  "rpa no disponible",
-  "api no responde",
-  "servicio no disponible",
-  "sistema no disponible",
-  
-  // Errores de base de datos
-  "base de datos caída",
-  "sql server no disponible",
-  "database error",
-  "error de base de datos",
-  
-  // Errores de timeout del sistema
-  "timeout",
-  "request timeout",
-  "gateway timeout",
-  
-  // Errores de red
-  "network error",
-  "socket hang up",
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  
-  // Errores HTTP de servidor
-  "502", "503", "504", "500"
-];
 
-// ✅ PALABRAS QUE INDICAN QUE NO ES UN ERROR DE INFRAESTRUCTURA
-const NO_INFRAESTRUCTURA = [
-  // Palabras relacionadas con SII (son errores de negocio/validación)
-  "sii",
-  "dte",
-  "reclamar",
-  "aceptado",
-  "registrado previamente",
-  "evento registrado",
-  "acuso recibo",
-  
-  // Palabras relacionadas con reglas de negocio
-  "desviación",
-  "límite permitido",
-  "reglas de negocio",
-  "cumple con todas",
-  
-  // Palabras relacionadas con documentos
-  "documento aprobado",
-  "documento rechazado",
-  "documento cumple",
-  "aprobado exitosamente",
-  "rechazado debido",
-  "folio",
-  
-  // Palabras relacionadas con OFICORE (son estados normales)
-  "recibido",
-  "asignado",
-  "gestionando",
-  "resuelto",
-  "incompleto",
-  "serv. técnico",
-  "anulado",
-  "re-abierto",
-  
-  // Palabras relacionadas con OFITEC (son estados normales)
-  "pendiente",
-  "despachado",
-  "finalizado",
-  "soporte telefonico",
-  "por coordinar",
-  "presupuesto pendiente",
-  "chequeo pendiente",
-  "reporte completado",
-  "llamadas sin solucion",
-  "habilitacion por coordinar",
-  "incompleto tecnico",
-  "terminado",
-  "despachada historico",
-  "incompleto por repuesto",
-  "confirmacion de equipo",
-  
-  // Palabras generales
-  "manual",
-  "pendiente",
-  "estado",
-  "incidencia",
-  "llamada",
-  "sast"
-];
-
-const isInfraestructuraError = (motivo: string): boolean => {
-  if (!motivo) return false;
-  const motivoLower = motivo.toLowerCase();
-  
-  // ✅ PRIMERO: Verificar si es algo que NO es infraestructura
-  for (const term of NO_INFRAESTRUCTURA) {
-    if (motivoLower.includes(term)) {
-      return false;
-    }
-  }
-  
-  // ✅ SEGUNDO: Verificar contra la lista de errores de infraestructura reales
-  return ERRORES_INFRAESTRUCTURA.some(term => motivoLower.includes(term));
-};
 
 export default function ServiceDetailPage() {
   const params = useParams();
@@ -257,6 +146,7 @@ export default function ServiceDetailPage() {
       to: new Date(currentYear, 11, 31),
     };
   });
+  const [statsClientFilter, setStatsClientFilter] = useState<string>("todos");
   const [showStatsDateFilter, setShowStatsDateFilter] = useState(false);
   const [hasStatsFilter, setHasStatsFilter] = useState(false);
   
@@ -305,7 +195,10 @@ export default function ServiceDetailPage() {
     setMounted(true);
   }, []);
 
-  const fetchLiveData = async (dateRange?: { from: Date | undefined; to: Date | undefined }) => {
+  const fetchLiveData = async (
+    dateRange?: { from: Date | undefined; to: Date | undefined },
+    clientFilter?: string
+  ) => {
     const serviceId = params.id as string;
     const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
     if (!activeServices.includes(serviceId)) return;
@@ -324,6 +217,11 @@ export default function ServiceDetailPage() {
           const toStr = format(targetRange.to, "yyyyMMdd");
           queryParams += `&fechaHasta=${toStr}`;
         }
+      }
+
+      const targetClient = clientFilter !== undefined ? clientFilter : statsClientFilter;
+      if (targetClient && targetClient !== "todos") {
+        queryParams += `${queryParams ? "&" : "?"}cliente=${targetClient}`;
       }
 
       // ============================================================
@@ -900,11 +798,12 @@ export default function ServiceDetailPage() {
   };
   
   const applyStatsDateFilter = () => {
-    fetchLiveData(statsDateRange);
+    fetchLiveData(statsDateRange, statsClientFilter);
     setShowStatsDateFilter(false);
+    setHasStatsFilter(true);
     toast({
       title: "Filtrando datos...",
-      description: `Consultando${statsDateRange.from ? ` desde ${format(statsDateRange.from, "dd/MM/yyyy")}` : ""}${statsDateRange.to ? ` hasta ${format(statsDateRange.to, "dd/MM/yyyy")}` : ""}`,
+      description: `Consultando${statsDateRange.from ? ` desde ${format(statsDateRange.from, "dd/MM/yyyy")}` : ""}${statsDateRange.to ? ` hasta ${format(statsDateRange.to, "dd/MM/yyyy")}` : ""}${statsClientFilter !== "todos" ? ` (${statsClientFilter})` : ""}`,
     });
   };
 
@@ -915,7 +814,8 @@ export default function ServiceDetailPage() {
       to: new Date(currentYear, 11, 31)
     };
     setStatsDateRange(defaultRange);
-    fetchLiveData(defaultRange);
+    setStatsClientFilter("todos");
+    fetchLiveData(defaultRange, "todos");
     setHasStatsFilter(false);
     toast({
       title: "Filtro limpiado",
@@ -1278,6 +1178,24 @@ export default function ServiceDetailPage() {
               <CardContent>
                 {showStatsDateFilter && (
                   <div className="p-3 bg-muted/30 rounded-lg space-y-3 mb-4">
+                    {/* Selector de Cliente */}
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-medium text-muted-foreground uppercase">Filtrar por Cliente</Label>
+                      <Select
+                        value={statsClientFilter}
+                        onValueChange={(val) => setStatsClientFilter(val)}
+                      >
+                        <SelectTrigger className="h-8 text-xs bg-background font-medium">
+                          <SelectValue placeholder="Todos los clientes" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">🌐 Todos los Clientes (Consolidado General)</SelectItem>
+                          <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                          <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
                     <div className="space-y-1">
                       <Label className="text-[10px] font-medium text-muted-foreground uppercase">Periodos Rápidos</Label>
                       <Select
@@ -1633,10 +1551,13 @@ export default function ServiceDetailPage() {
                       const hasTelemetryData = 
                         client.id === "cl_ofimundo" || 
                         client.id === "cl_stuedemann" || 
+                        client.id === "cl_cmds_antofagasta" ||
                         nameLower.includes("ofimundo") || 
                         nameLower.includes("stuedemann") || 
+                        nameLower.includes("antofagasta") ||
                         (client.rut || "").includes("76.452.910") || 
-                        (client.rut || "").includes("96.502.540");
+                        (client.rut || "").includes("96.502.540") ||
+                        (client.rut || "").includes("70.892.100");
                       const isNoMonitoringClient = !hasTelemetryData;
 
                       const displayStatus = isNoMonitoringClient ? "success" : (client.status || "success");

@@ -167,11 +167,13 @@ export function ServicesList() {
     let isMounted = true;
     const fetchMonitors = async () => {
       try {
+        const now = new Date();
+        const primerDiaMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const [sgcRes, ofitecRes, factRes, dteRes] = await Promise.all([
           fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
           fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
-          fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
-          fetch("/api/dte/stats").then(r => r.json()).catch(() => null),
+          fetch(`/api/facturas/bitacora?estado=todos&fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
+          fetch(`/api/dte/stats?fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
         ]);
         if (isMounted) {
           if (sgcRes) setSgcPingOk(sgcRes.pong === true || sgcRes.isAvailable === true);
@@ -192,15 +194,20 @@ export function ServicesList() {
   }, []);
 
   // Verificar si falta ejecución de 14:00 o 23:30 para Facturas
+  // Verificar si falta ejecución de 14:00 o 23:30 para Facturas (Rango flexible: 12:00 - 16:00 y 21:00 - 23:59)
   const isFacturasScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    const target1400InMinutes = 14 * 60; // 14:00
-    const target2330InMinutes = 23 * 60 + 30; // 23:30
+    // Ventana amplia: si corre entre 12:00 y 21:00 se considera la ejecución de la tarde.
+    // Solo alertar a partir de las 16:00 si no se registró ninguna ejecución.
+    const window1400Start = 12 * 60; // 12:00
+    const alert1400Time = 16 * 60;   // 16:00
+    const window2330Start = 21 * 60; // 21:00
+    const alert2330Time = 23 * 60 + 59; // 23:59
 
-    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
-    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+    const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
+    const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
 
     const hoyStr = format(now, "yyyy-MM-dd");
 
@@ -214,13 +221,13 @@ export function ServicesList() {
     const ejecucion1400Registrada = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= target1400InMinutes && minutes < target2330InMinutes;
+      return minutes >= window1400Start && minutes < window2330Start;
     });
 
     const ejecucion2330Registrada = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= target2330InMinutes;
+      return minutes >= window2330Start;
     });
 
     const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
@@ -229,16 +236,20 @@ export function ServicesList() {
     return falta1400 || falta2330;
   }, [facturasBitacora]);
 
-  // Verificar si falta ejecución de 13:30 o 23:00 para DTE
+  // Verificar si falta ejecución de 13:30 o 23:00 para DTE (Rango flexible: 12:00 - 16:00 y 21:00 - 23:59)
   const isDteScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    const target1330InMinutes = 13 * 60 + 30; // 13:30 (810 mins)
-    const target2300InMinutes = 23 * 60;      // 23:00 (1380 mins)
+    // Ventana amplia: si corre entre 12:00 y 21:00 se considera la ejecución de la tarde.
+    // Solo alertar a partir de las 16:00 si no se registró ninguna ejecución.
+    const window1330Start = 12 * 60; // 12:00
+    const alert1330Time = 16 * 60;   // 16:00
+    const window2300Start = 21 * 60; // 21:00
+    const alert2300Time = 23 * 60 + 59; // 23:59
 
-    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
-    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+    const esHora1330Pasada = currentTimeInMinutes >= alert1330Time;
+    const esHora2300Pasada = currentTimeInMinutes >= alert2300Time;
 
     const hoyStr = format(now, "yyyy-MM-dd");
 
@@ -254,14 +265,14 @@ export function ServicesList() {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= target1330InMinutes && minutes < target2300InMinutes;
+      return minutes >= window1330Start && minutes < window2300Start;
     });
 
     const ejecucion2300Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= target2300InMinutes;
+      return minutes >= window2300Start;
     });
 
     const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;

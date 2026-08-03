@@ -167,10 +167,10 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const isFacturasScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-    const target1400InMinutes = 14 * 60;
-    const target2330InMinutes = 23 * 60 + 30;
-    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
-    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+    const alert1400CutoffInMinutes = 16 * 60; // Alerta si son pasadas las 16:00 y no ejecutó
+    const alert2330CutoffInMinutes = 24 * 60; 
+    const esHora1400Pasada = currentTimeInMinutes >= alert1400CutoffInMinutes;
+    const esHora2330Pasada = currentTimeInMinutes >= alert2330CutoffInMinutes;
     const hoyStr = format(now, "yyyy-MM-dd");
 
     const facturasHoy = (facturasBitacora || []).filter((f: any) => {
@@ -183,13 +183,13 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     const ejec1400 = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const mins = fDate.getHours() * 60 + fDate.getMinutes();
-      return mins >= target1400InMinutes && mins < target2330InMinutes;
+      return mins >= (12 * 60) && mins < (16 * 60);
     });
 
     const ejec2330 = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const mins = fDate.getHours() * 60 + fDate.getMinutes();
-      return mins >= target2330InMinutes;
+      return mins >= (22 * 60 + 30);
     });
 
     const falta1400 = esHora1400Pasada && !ejec1400;
@@ -201,10 +201,10 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const isDteScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-    const target1330InMinutes = 13 * 60 + 30; // 13:30
-    const target2300InMinutes = 23 * 60;      // 23:00
-    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
-    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+    const alert1330CutoffInMinutes = 15 * 60 + 30; // Alerta si son pasadas las 15:30 y no ejecutó
+    const alert2300CutoffInMinutes = 24 * 60;
+    const esHora1330Pasada = currentTimeInMinutes >= alert1330CutoffInMinutes;
+    const esHora2300Pasada = currentTimeInMinutes >= alert2300CutoffInMinutes;
     const hoyStr = format(now, "yyyy-MM-dd");
 
     const dteHoy = (dteLogs || []).filter((d: any) => {
@@ -219,14 +219,14 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const mins = dDate.getHours() * 60 + dDate.getMinutes();
-      return mins >= target1330InMinutes && mins < target2300InMinutes;
+      return mins >= (11 * 60 + 30) && mins < (15 * 60 + 30);
     });
 
     const ejec2300 = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const mins = dDate.getHours() * 60 + dDate.getMinutes();
-      return mins >= target2300InMinutes;
+      return mins >= (22 * 60);
     });
 
     const falta1330 = esHora1330Pasada && !ejec1330;
@@ -498,10 +498,13 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
             const hasTelemetryData = 
               client.id === "cl_ofimundo" || 
               client.id === "cl_stuedemann" || 
+              client.id === "cl_cmds_antofagasta" ||
               client.name.toLowerCase().includes("ofimundo") || 
               client.name.toLowerCase().includes("stuedemann") || 
+              client.name.toLowerCase().includes("antofagasta") ||
               (client.rut || "").includes("76.452.910") || 
-              (client.rut || "").includes("96.502.540");
+              (client.rut || "").includes("96.502.540") ||
+              (client.rut || "").includes("70.892.100");
             
             const rawClientWithData = getClientWithRealData(client);
             const clientWithData = hasTelemetryData ? rawClientWithData : {

@@ -30,7 +30,7 @@ import {
   ExternalLink,
   FileSpreadsheet
 } from "lucide-react";
-import { format, startOfMonth } from "date-fns";
+import { format, startOfMonth, subDays, parseISO, isWithinInterval, startOfDay, endOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 
@@ -68,6 +68,10 @@ export function SupportTab() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
 
+  // Estados de Filtro de Rango de Fechas
+  const [fechaDesde, setFechaDesde] = useState<Date>(() => startOfMonth(new Date()));
+  const [fechaHasta, setFechaHasta] = useState<Date>(() => new Date());
+
   // Estados de exportación
   const [showExportModal, setShowExportModal] = useState(false);
   const [selectedFields, setSelectedFields] = useState<string[]>(() =>
@@ -75,14 +79,13 @@ export function SupportTab() {
   );
   const [selectAll, setSelectAll] = useState(true);
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (desde: Date = fechaDesde, hasta: Date = fechaHasta) => {
     setLoading(true);
     try {
-      const now = new Date();
-      const fechaDesde = format(startOfMonth(now), "yyyyMMdd");
-      const fechaHasta = format(now, "yyyyMMdd");
+      const fDesde = format(desde, "yyyyMMdd");
+      const fHasta = format(hasta, "yyyyMMdd");
 
-      const res = await fetch(`/api/oficore/stats?fechaDesde=${fechaDesde}&fechaHasta=${fechaHasta}`);
+      const res = await fetch(`/api/oficore/stats?fechaDesde=${fDesde}&fechaHasta=${fHasta}`);
       const data = await res.json();
 
       if (data.success && data.detalles) {
@@ -102,6 +105,49 @@ export function SupportTab() {
     fetchTickets();
   }, []);
 
+  const handleDateFromChange = (val: string) => {
+    if (!val) return;
+    const parts = val.split("-");
+    const newDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 0, 0, 0);
+    setFechaDesde(newDate);
+    setCurrentPage(1);
+    fetchTickets(newDate, fechaHasta);
+  };
+
+  const handleDateToChange = (val: string) => {
+    if (!val) return;
+    const parts = val.split("-");
+    const newDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59);
+    setFechaHasta(newDate);
+    setCurrentPage(1);
+    fetchTickets(fechaDesde, newDate);
+  };
+
+  const applyDatePreset = (preset: "hoy" | "7dias" | "mes" | "30dias") => {
+    const now = new Date();
+    let desde = startOfMonth(now);
+    let hasta = now;
+
+    if (preset === "hoy") {
+      desde = startOfDay(now);
+      hasta = endOfDay(now);
+    } else if (preset === "7dias") {
+      desde = startOfDay(subDays(now, 7));
+      hasta = endOfDay(now);
+    } else if (preset === "mes") {
+      desde = startOfMonth(now);
+      hasta = endOfDay(now);
+    } else if (preset === "30dias") {
+      desde = startOfDay(subDays(now, 30));
+      hasta = endOfDay(now);
+    }
+
+    setFechaDesde(desde);
+    setFechaHasta(hasta);
+    setCurrentPage(1);
+    fetchTickets(desde, hasta);
+  };
+
   // Áreas oficiales maestras de la base de datos (MDA.area_responsable)
   const areasDisponibles = useMemo(() => {
     const oficiales = ["COMERCIAL", "TECNOLOGÍA", "SERVICIO", "MESA DE AYUDA", "EXPERIENCIA", "CONTROL GESTIÓN", "GERENCIA"];
@@ -112,13 +158,23 @@ export function SupportTab() {
     return Array.from(setAreas);
   }, [tickets]);
 
-  // Estados únicos
+  // Estados únicos maestros de la base de datos (MDA.accion)
   const estadosDisponibles = useMemo(() => {
-    const setEst = new Set<string>();
+    const masterEstados = [
+      "Asignado",
+      "Gestionando",
+      "Recibido",
+      "Resuelto",
+      "Re-Abierto",
+      "Incompleto",
+      "Anulado",
+      "Serv. Técnico"
+    ];
+    const setEst = new Set<string>(masterEstados);
     tickets.forEach(t => {
       if (t.estado_descripcion) setEst.add(t.estado_descripcion);
     });
-    return Array.from(setEst).sort();
+    return Array.from(setEst);
   }, [tickets]);
 
   // Filtrado dinámico
@@ -236,22 +292,36 @@ export function SupportTab() {
     setShowExportModal(false);
   };
 
-  // Badge de estado con estilos armoniosos
+  // Badge de estado con los nombres reales exactos de la base de datos (MDA.accion)
   const renderEstadoBadge = (estado?: string, idAccion?: number) => {
-    const est = (estado || "").toLowerCase();
+    const name = estado || (idAccion === 5 ? "Resuelto" : "Ingresado");
+    const est = name.toLowerCase();
+
     if (idAccion === 5 || est.includes("resuelto")) {
-      return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200">Resuelto</Badge>;
+      return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold">Resuelto</Badge>;
     }
-    if (est.includes("cerrado")) {
-      return <Badge className="bg-slate-100 text-slate-700 border-slate-200">Cerrado</Badge>;
+    if (idAccion === 3 || est.includes("asignado")) {
+      return <Badge className="bg-amber-100 text-amber-800 border-amber-200 font-semibold">Asignado</Badge>;
     }
-    if (est.includes("proceso") || est.includes("asignado")) {
-      return <Badge className="bg-amber-100 text-amber-800 border-amber-200">En Proceso</Badge>;
+    if (idAccion === 4 || est.includes("gestionando")) {
+      return <Badge className="bg-blue-100 text-blue-800 border-blue-200 font-semibold">Gestionando</Badge>;
     }
-    if (est.includes("re-abierto") || est.includes("reabierto")) {
-      return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Re-Abierto</Badge>;
+    if (idAccion === 1 || est.includes("recibido")) {
+      return <Badge className="bg-sky-100 text-sky-800 border-sky-200 font-semibold">Recibido</Badge>;
     }
-    return <Badge className="bg-blue-100 text-blue-800 border-blue-200">{estado || "Ingresado"}</Badge>;
+    if (idAccion === 9 || est.includes("re-abierto") || est.includes("reabierto")) {
+      return <Badge className="bg-purple-100 text-purple-800 border-purple-200 font-semibold">Re-Abierto</Badge>;
+    }
+    if (idAccion === 6 || est.includes("incompleto")) {
+      return <Badge className="bg-orange-100 text-orange-800 border-orange-200 font-semibold">Incompleto</Badge>;
+    }
+    if (idAccion === 8 || est.includes("anulado")) {
+      return <Badge className="bg-slate-100 text-slate-700 border-slate-200 font-semibold">Anulado</Badge>;
+    }
+    if (idAccion === 7 || est.includes("técnico") || est.includes("tecnico")) {
+      return <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 font-semibold">Serv. Técnico</Badge>;
+    }
+    return <Badge className="bg-slate-100 text-slate-800 border-slate-200 font-semibold">{name}</Badge>;
   };
 
   return (
@@ -295,7 +365,7 @@ export function SupportTab() {
           <Button 
             variant="outline" 
             size="sm" 
-            onClick={fetchTickets}
+            onClick={() => fetchTickets()}
             disabled={loading}
             className="h-9 w-9 p-0"
             title="Actualizar datos"
@@ -377,6 +447,54 @@ export function SupportTab() {
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
+            {/* Filtro de Rango de Fechas */}
+            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-md border border-slate-200 text-xs">
+              <CalendarIcon className="h-3.5 w-3.5 text-blue-600 ml-1 shrink-0" />
+              <span className="text-[11px] font-medium text-slate-600 hidden sm:inline">Desde:</span>
+              <Input
+                type="date"
+                value={format(fechaDesde, "yyyy-MM-dd")}
+                onChange={(e) => handleDateFromChange(e.target.value)}
+                className="h-7 text-xs border-slate-200 bg-white w-[125px] px-1.5 focus-visible:ring-1"
+                title="Fecha Desde"
+              />
+              <span className="text-slate-400 font-bold text-[11px]">-</span>
+              <span className="text-[11px] font-medium text-slate-600 hidden sm:inline">Hasta:</span>
+              <Input
+                type="date"
+                value={format(fechaHasta, "yyyy-MM-dd")}
+                onChange={(e) => handleDateToChange(e.target.value)}
+                className="h-7 text-xs border-slate-200 bg-white w-[125px] px-1.5 focus-visible:ring-1"
+                title="Fecha Hasta"
+              />
+              <div className="hidden xl:flex items-center gap-1 border-l border-slate-200 pl-1.5 ml-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => applyDatePreset("hoy")}
+                  className="h-6 text-[10px] px-1.5 font-medium text-slate-600 hover:bg-slate-200"
+                >
+                  Hoy
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => applyDatePreset("7dias")}
+                  className="h-6 text-[10px] px-1.5 font-medium text-slate-600 hover:bg-slate-200"
+                >
+                  7 Días
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => applyDatePreset("mes")}
+                  className="h-6 text-[10px] px-1.5 font-medium text-slate-600 hover:bg-slate-200"
+                >
+                  Este Mes
+                </Button>
+              </div>
+            </div>
+
             {/* Filtro por Área */}
             <Select 
               value={selectedArea} 
@@ -385,7 +503,7 @@ export function SupportTab() {
                 setCurrentPage(1);
               }}
             >
-              <SelectTrigger className="w-[180px] h-9 text-xs border-slate-200">
+              <SelectTrigger className="w-[170px] h-9 text-xs border-slate-200">
                 <Building2 className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
                 <SelectValue placeholder="Área Asignada" />
               </SelectTrigger>
@@ -405,7 +523,7 @@ export function SupportTab() {
                 setCurrentPage(1);
               }}
             >
-              <SelectTrigger className="w-[170px] h-9 text-xs border-slate-200">
+              <SelectTrigger className="w-[160px] h-9 text-xs border-slate-200">
                 <Filter className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
                 <SelectValue placeholder="Estado del Ticket" />
               </SelectTrigger>
@@ -425,7 +543,12 @@ export function SupportTab() {
                   setSearchTerm("");
                   setSelectedArea("todos");
                   setSelectedEstado("todos");
+                  const now = new Date();
+                  const startMonth = startOfMonth(now);
+                  setFechaDesde(startMonth);
+                  setFechaHasta(now);
                   setCurrentPage(1);
+                  fetchTickets(startMonth, now);
                 }}
                 className="h-9 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
               >

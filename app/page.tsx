@@ -8,7 +8,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clients, services, type Service, type Client, initializeDatabaseData } from "@/lib/services-data";
+import { isInfraestructuraError } from "@/lib/utils";
+import { format } from "date-fns";
 import Image from "next/image";
+import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard,
   Flame,
@@ -76,35 +79,25 @@ export default function HomePage() {
         // Refrescar los datos de clientes, servicios, prospectos y proyectos de base de datos
         await initializeDatabaseData();
 
-        // 1. Monitoreo de Facturas desde la Base de Datos
+        // 1. Monitoreo del Mes en Curso (Primer día del mes actual)
+        const now = new Date();
+        const primerDiaMesActual = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd");
+
+        // 1. Monitoreo de Facturas desde la Base de Datos (Mes en curso)
         let facturasErrPercent = 0;
         let facturasStatus = "success";
         try {
-          const resFacturas = await fetch("/api/facturas/bitacora?estado=todos");
+          const resFacturas = await fetch(`/api/facturas/bitacora?estado=todos&fechaDesde=${primerDiaMesActual}`);
           const dataFacturas = await resFacturas.json();
           
           if (!isSubscribed || !mountedRef.current) return;
           
           if (dataFacturas.success && dataFacturas.data) {
             const totalDocs = dataFacturas.data.length;
-            const technicalErrors = [
-              "error de conexión", "timeout", "servidor no responde",
-              "softland no disponible", "sii no responde", "connection failed",
-              "failed to connect", "could not connect", "connection refused",
-              "network error", "no se pudo conectar",
-              "softland error", "sii error", "error de red"
-            ];
-            
-            const errorDocs = dataFacturas.data.filter((e: any) => {
-              const motivo = e.motivo || "";
-              const motivoLower = motivo.toLowerCase();
-              const hasTextError = technicalErrors.some(term => motivoLower.includes(term.toLowerCase()));
-              if (hasTextError) return true;
-              return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
-            }).length;
+            const errorDocs = dataFacturas.data.filter((e: any) => isInfraestructuraError(e.motivo)).length;
             
             facturasErrPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
-            facturasStatus = errorDocs > 0 ? (facturasErrPercent > 40 ? "error" : "warning") : "success";
+            facturasStatus = errorDocs > 0 && facturasErrPercent > 5 ? (facturasErrPercent > 40 ? "error" : "warning") : "success";
           } else {
             facturasErrPercent = 100;
             facturasStatus = "error";
@@ -124,7 +117,10 @@ export default function HomePage() {
               cl.status = facturasStatus as any;
             });
           }
-          if (facturasStatus === "error") {
+          if (facturasStatus === "success") {
+            // Limpiar logs de errores obsoletos de conexión a BD
+            srvFacturas.logs = srvFacturas.logs.filter(l => l.id !== "err_bd" && !isInfraestructuraError(l.message));
+          } else if (facturasStatus === "error") {
             srvFacturas.logs = [
               { id: "err_bd", message: "Error crítico de base de datos o consulta de facturas fallida", timestamp: new Date().toISOString(), type: "error" },
               ...srvFacturas.logs.filter(l => l.id !== "err_bd")
@@ -132,11 +128,11 @@ export default function HomePage() {
           }
         }
 
-        // 2. Monitoreo de OFICORE desde la Base de Datos
+        // 2. Monitoreo de OFICORE desde la Base de Datos (Mes en curso)
         let oficoreErrPercent = 0;
         let oficoreStatus = "success";
         try {
-          const resOficore = await fetch("/api/oficore/stats");
+          const resOficore = await fetch(`/api/oficore/stats?fechaDesde=${primerDiaMesActual}`);
           const dataOficore = await resOficore.json();
           if (!isSubscribed || !mountedRef.current) return;
 
@@ -171,11 +167,11 @@ export default function HomePage() {
           }
         }
 
-        // 3. Monitoreo de OFITEC desde la Base de Datos
+        // 3. Monitoreo de OFITEC desde la Base de Datos (Mes en curso)
         let ofitecErrPercent = 0;
         let ofitecStatus = "success";
         try {
-          const resOfitec = await fetch("/api/ofitec/stats");
+          const resOfitec = await fetch(`/api/ofitec/stats?fechaDesde=${primerDiaMesActual}`);
           const dataOfitec = await resOfitec.json();
           if (!isSubscribed || !mountedRef.current) return;
 
@@ -210,11 +206,11 @@ export default function HomePage() {
           }
         }
 
-        // 4. Monitoreo de SGC desde la Base de Datos (captura errores de permisos reales)
+        // 4. Monitoreo de SGC desde la Base de Datos (Mes en curso)
         let sgcErrPercent = 0;
         let sgcStatus = "success";
         try {
-          const resSgc = await fetch("/api/sgc/stats");
+          const resSgc = await fetch(`/api/sgc/stats?fechaDesde=${primerDiaMesActual}`);
           const dataSgc = await resSgc.json();
           if (!isSubscribed || !mountedRef.current) return;
 
@@ -249,26 +245,27 @@ export default function HomePage() {
           }
         }
 
-        // 5. Monitoreo de DTE desde la Base de Datos
+        // 5. Monitoreo de DTE desde la Base de Datos (Mes en curso)
         let dteErrPercent = 0;
         let dteStatus = "success";
         try {
-          const resDte = await fetch("/api/dte/stats");
+          const resDte = await fetch(`/api/dte/stats?fechaDesde=${primerDiaMesActual}`);
           const dataDte = await resDte.json();
           if (!isSubscribed || !mountedRef.current) return;
 
-          if (dataDte.success && dataDte.data) {
-            const totalRuns = dataDte.data.length;
-            const exitosos = dataDte.data.filter((d: any) => d.Estado === "EXITOSO").length;
-            const fallidos = totalRuns - exitosos;
+          if (dataDte.success && dataDte.data && Array.isArray(dataDte.data)) {
+            // Evaluar ejecuciones del mes en curso
+            const currentMonthRuns = dataDte.data;
+            const totalRuns = currentMonthRuns.length;
+            const fallidos = currentMonthRuns.filter((d: any) => d.Estado === "FALLIDO").length;
             
             dteErrPercent = totalRuns > 0 ? Math.round((fallidos / totalRuns) * 100) : 0;
             
-            const latestRun = dataDte.data[0];
+            const latestRun = currentMonthRuns[0];
             if (latestRun) {
-              if (latestRun.Estado !== "EXITOSO") {
+              if (latestRun.Estado === "FALLIDO" || dteErrPercent > 40) {
                 dteStatus = "error";
-              } else if (dteErrPercent > 20) {
+              } else if (latestRun.Estado === "COMPLETADO CON ERRORES" || dteErrPercent > 10) {
                 dteStatus = "warning";
               } else {
                 dteStatus = "success";
@@ -357,7 +354,7 @@ export default function HomePage() {
     { id: "clients", label: "Clientes", icon: Users, component: ClientsList, hasServiceCallback: false, hasClientCallback: true },
     { id: "timeline", label: "Línea de Tiempo", icon: Clock, component: EventsTimeline, hasServiceCallback: true, hasClientCallback: false },
     { id: "comparison", label: "Comparador Clientes", icon: UserCircle, component: ClientComparison, hasServiceCallback: false, hasClientCallback: false },
-    { id: "command-center", label: "Centro Comandos", icon: Terminal, component: CommandCenter, hasServiceCallback: false, hasClientCallback: false },
+    { id: "command-center", label: "Centro Comandos", icon: Terminal, component: CommandCenter, hasServiceCallback: false, hasClientCallback: false, isComingSoon: true },
   ];
 
   // Si se está mostrando el dashboard del cliente, renderizar solo eso
@@ -410,6 +407,11 @@ export default function HomePage() {
                   >
                     <tab.icon className="h-4 w-4" />
                     {tab.label}
+                    {tab.isComingSoon && (
+                      <Badge variant="outline" className="ml-1 text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 font-medium px-1.5 py-0">
+                        Próximamente
+                      </Badge>
+                    )}
                   </TabsTrigger>
                 ))}
               </TabsList>

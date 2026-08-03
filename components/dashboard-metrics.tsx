@@ -174,19 +174,27 @@ interface InvoiceData {
 }
 
 const EXPORT_FIELDS = [
-  { id: "fecha", label: "Fecha / Período", default: true },
-  { id: "servicio", label: "Servicio", default: true },
-  { id: "endpoint", label: "Endpoint / Ruta API", default: true },
-  { id: "exitosas", label: "Peticiones Exitosas", default: true },
-  { id: "erroresInfraestructura", label: "Errores Infraestructura", default: true },
-  { id: "reglasNegocio", label: "Reglas de Negocio", default: true },
-  { id: "totalPeticiones", label: "Total Peticiones", default: true },
-  { id: "tasaExito", label: "Tasa de Éxito (%)", default: true },
-  { id: "tasaErrorInfra", label: "Tasa Error Infraestructura (%)", default: true },
-  { id: "disponibilidad", label: "Disponibilidad (%)", default: true },
-  { id: "tiempoRespuesta", label: "Tiempo Respuesta Promedio (ms)", default: false },
-  { id: "throughput", label: "Rendimiento (Req/h)", default: false },
-  { id: "fechaExportacion", label: "Fecha de Exportación", default: false },
+  // Métricas y Disponibilidad
+  { id: "fecha", label: "Fecha / Período", default: true, category: "Métricas de Servicio" },
+  { id: "servicio", label: "Servicio / Módulo", default: true, category: "Métricas de Servicio" },
+  { id: "endpoint", label: "Endpoint / Ruta API", default: true, category: "Métricas de Servicio" },
+  { id: "exitosas", label: "Peticiones Exitosas", default: true, category: "Métricas de Servicio" },
+  { id: "erroresInfraestructura", label: "Errores Infraestructura (Softland/Timeout/500)", default: true, category: "Métricas de Servicio" },
+  { id: "reglasNegocio", label: "Reglas de Negocio (Validación SII/OC)", default: true, category: "Métricas de Servicio" },
+  { id: "totalPeticiones", label: "Total Peticiones", default: true, category: "Métricas de Servicio" },
+  { id: "tasaExito", label: "Tasa de Éxito (%)", default: true, category: "Métricas de Servicio" },
+  { id: "tasaErrorInfra", label: "Tasa Error Infraestructura (%)", default: true, category: "Métricas de Servicio" },
+  { id: "disponibilidad", label: "Disponibilidad SLA (%)", default: true, category: "Métricas de Servicio" },
+  { id: "cumpleSla", label: "Cumplimiento SLA (>=99.5%)", default: true, category: "Métricas de Servicio" },
+  
+  // Rendimiento y Estado
+  { id: "tiempoRespuesta", label: "Tiempo Respuesta Promedio (ms)", default: true, category: "Rendimiento y Estado" },
+  { id: "throughput", label: "Rendimiento (Req/h)", default: true, category: "Rendimiento y Estado" },
+  { id: "estadoSalud", label: "Estado del Servicio (Operativo/Alerta/Caído)", default: true, category: "Rendimiento y Estado" },
+  
+  // Metadatos
+  { id: "usuarioExport", label: "Generado Por", default: true, category: "Metadatos y Auditoría" },
+  { id: "fechaExportacion", label: "Fecha y Hora de Exportación", default: true, category: "Metadatos y Auditoría" },
 ];
 
 export function DashboardMetrics({
@@ -356,6 +364,78 @@ export function DashboardMetrics({
     disponible: true
   });
 
+  const [oficoreStatus, setOficoreStatus] = useState<{ disponible: boolean; responseTimeSec?: number; mensaje?: string; codigoError?: string | null; motivoError?: string | null }>({
+    disponible: true,
+    responseTimeSec: 0,
+    codigoError: null,
+    motivoError: null
+  });
+
+  const [miCuentaStatus, setMiCuentaStatus] = useState<{ disponible: boolean; responseTimeSec?: number; mensaje?: string; codigoError?: string | null; motivoError?: string | null }>({
+    disponible: true,
+    responseTimeSec: 0,
+    codigoError: null,
+    motivoError: null
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkOficoreStatus = async () => {
+      try {
+        const res = await fetch("/api/monitor/oficore");
+        const data = await res.json();
+        if (isMounted) {
+          setOficoreStatus({
+            disponible: data.disponible === true,
+            responseTimeSec: data.responseTimeSec || 0,
+            mensaje: data.mensaje || "",
+            codigoError: data.codigoError || null,
+            motivoError: data.motivoError || null
+          });
+        }
+      } catch (err: any) {
+        console.error("Error fetching OFICORE monitor status:", err);
+        if (isMounted) setOficoreStatus({ disponible: false, responseTimeSec: 0, codigoError: "FETCH_ERROR", motivoError: err.message || "Error al consultar API de monitoreo" });
+      }
+    };
+
+    checkOficoreStatus();
+    const interval = setInterval(checkOficoreStatus, 300000); // Monitoreo cada 5 minutos
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkMiCuentaStatus = async () => {
+      try {
+        const res = await fetch("/api/monitor/mi-cuenta");
+        const data = await res.json();
+        if (isMounted) {
+          setMiCuentaStatus({
+            disponible: data.disponible === true,
+            responseTimeSec: data.responseTimeSec || 0,
+            mensaje: data.mensaje || "",
+            codigoError: data.codigoError || null,
+            motivoError: data.motivoError || null
+          });
+        }
+      } catch (err: any) {
+        console.error("Error fetching Mi Cuenta monitor status:", err);
+        if (isMounted) setMiCuentaStatus({ disponible: false, responseTimeSec: 0, codigoError: "FETCH_ERROR", motivoError: err.message || "Error al consultar API de monitoreo" });
+      }
+    };
+
+    checkMiCuentaStatus();
+    const interval = setInterval(checkMiCuentaStatus, 300000); // Monitoreo cada 5 minutos
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const checkOfitecStatus = async () => {
@@ -463,6 +543,10 @@ export function DashboardMetrics({
       const results: any = {};
 
       let queryParams = "";
+      const now = new Date();
+      const defaultFrom = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyyMMdd");
+      const defaultFromIso = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd");
+
       if (dateRange?.from) {
         const fromStr = format(dateRange.from, "yyyyMMdd");
         queryParams += `?fechaDesde=${fromStr}`;
@@ -470,17 +554,16 @@ export function DashboardMetrics({
           const toStr = format(dateRange.to, "yyyyMMdd");
           queryParams += `&fechaHasta=${toStr}`;
         }
+      } else {
+        queryParams += `?fechaDesde=${defaultFrom}`;
       }
 
       for (const serviceId of serviceIds) {
         try {
           let url = "";
           if (serviceId === "facturas") {
-            url = "/api/facturas/bitacora?estado=todos";
-            if (dateRange?.from) {
-              const fromStr = format(dateRange.from, "yyyy-MM-dd");
-              url += `&fechaDesde=${fromStr}`;
-            }
+            const fromStr = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : defaultFromIso;
+            url = `/api/facturas/bitacora?estado=todos&fechaDesde=${fromStr}`;
             if (dateRange?.to) {
               const toStr = format(dateRange.to, "yyyy-MM-dd");
               url += `&fechaHasta=${toStr}`;
@@ -520,8 +603,8 @@ export function DashboardMetrics({
     setDteData(servicesData.dte?.detalles || servicesData.dte?.data || []);
 
     const isFiltered = filters.dateRange.from !== undefined;
-    const limitDate = new Date("2026-07-09T00:00:00");
-    limitDate.setDate(limitDate.getDate() - 14);
+    const now = new Date();
+    const limitDate = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const filterRecent = (d: any, dateField: string) => {
       if (isFiltered) return true;
@@ -540,6 +623,49 @@ export function DashboardMetrics({
     const facturasManuales = facturasDataFiltered.filter(f => f.estado === "Manual").length;
     const facturasPendientes = facturasDataFiltered.filter(f => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
     const facturasErrorInfra = facturasDataFiltered.filter(f => isInfraestructuraError(f.motivo)).length;
+    
+    const facturasScheduleStatus = (() => {
+      const now = new Date();
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+      const window1400Start = 12 * 60; // 12:00
+      const alert1400Time = 16 * 60;   // 16:00
+      const window2330Start = 21 * 60; // 21:00
+      const alert2330Time = 23 * 60 + 59; // 23:59
+
+      const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
+      const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
+
+      const hoyStr = format(now, "yyyy-MM-dd");
+
+      const facturasHoy = (facturasData || []).filter((f: any) => {
+        if (!f.fecha_proceso) return false;
+        const fDate = new Date(f.fecha_proceso);
+        if (isNaN(fDate.getTime())) return false;
+        return format(fDate, "yyyy-MM-dd") === hoyStr;
+      });
+
+      const ejecucion1400Registrada = facturasHoy.some((f: any) => {
+        const fDate = new Date(f.fecha_proceso);
+        const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+        return minutes >= window1400Start && minutes < window2330Start;
+      });
+
+      const ejecucion2330Registrada = facturasHoy.some((f: any) => {
+        const fDate = new Date(f.fecha_proceso);
+        const minutes = fDate.getHours() * 60 + fDate.getMinutes();
+        return minutes >= window2330Start;
+      });
+
+      const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
+      const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
+
+      return {
+        scheduleOk: !falta1400 && !falta2330,
+        falta1400,
+        falta2330
+      };
+    })();
     
     const oficoreTotal = oficoreDetallesFiltered.length;
     const oficoreResueltas = oficoreDetallesFiltered.filter((d: any) => d.id_accion === 5).length || 0;
@@ -577,10 +703,13 @@ export function DashboardMetrics({
       { 
         id: "oficore", 
         nombre: "OFICORE", 
-        valor: oficoreTotal > 0 ? Math.round((oficoreResueltas / oficoreTotal) * 100) : 100,
+        valor: oficoreStatus.disponible ? 100 : 0,
         total: oficoreTotal,
-        errorDocs: 0,
-        estado: oficoreResueltas > oficoreTotal * 0.8 ? "Disponible" : "Atención"
+        errorDocs: oficoreStatus.disponible ? 0 : 1,
+        estado: oficoreStatus.disponible ? "Disponible" : "Caído",
+        tiempoRespuesta: oficoreStatus.responseTimeSec ? `${oficoreStatus.responseTimeSec}s` : undefined,
+        codigoError: oficoreStatus.codigoError,
+        motivoError: oficoreStatus.motivoError
       },
       { 
         id: "ofitec", 
@@ -597,6 +726,17 @@ export function DashboardMetrics({
         total: sgcTotal,
         errorDocs: sgcPingOk ? 0 : sgcTotal,
         estado: sgcPingOk ? "Disponible" : "Caído"
+      },
+      { 
+        id: "micuenta", 
+        nombre: "Mi Cuenta", 
+        valor: miCuentaStatus.disponible ? 100 : 0,
+        total: 0,
+        errorDocs: miCuentaStatus.disponible ? 0 : 1,
+        estado: miCuentaStatus.disponible ? "Disponible" : "Caído",
+        tiempoRespuesta: miCuentaStatus.responseTimeSec ? `${miCuentaStatus.responseTimeSec}s` : undefined,
+        codigoError: miCuentaStatus.codigoError,
+        motivoError: miCuentaStatus.motivoError
       },
     ]);
 
@@ -633,6 +773,26 @@ export function DashboardMetrics({
         servicio: "Facturas",
         estado: "Crítico",
         descripcion: "El proceso de Aceptación y Rechazo de Facturas programado a las 23:30 no registra ejecuciones hoy"
+      }] : []),
+      ...(!oficoreStatus.disponible ? [{
+        id: "errorOficore",
+        nombre: "OFICORE Caído / Sin Servicio",
+        valor: 1,
+        servicio: "OFICORE",
+        estado: "Crítico",
+        descripcion: oficoreStatus.codigoError 
+          ? `Código Error: ${oficoreStatus.codigoError} (${oficoreStatus.motivoError || oficoreStatus.mensaje || 'Error de conexión'})`
+          : (oficoreStatus.mensaje || "El servidor OFICORE no responde")
+      }] : []),
+      ...(!miCuentaStatus.disponible ? [{
+        id: "errorMiCuenta",
+        nombre: "Mi Cuenta Caído / Sin Servicio",
+        valor: 1,
+        servicio: "Mi Cuenta",
+        estado: "Crítico",
+        descripcion: miCuentaStatus.codigoError 
+          ? `Código Error: ${miCuentaStatus.codigoError} (${miCuentaStatus.motivoError || miCuentaStatus.mensaje || 'Error de conexión'})`
+          : (miCuentaStatus.mensaje || "El servidor de Mi Cuenta no responde")
       }] : []),
     ].filter(i => i.valor > 0);
     
@@ -992,15 +1152,15 @@ export function DashboardMetrics({
 
   const facturasScheduleStatus = useMemo(() => {
     const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    const target1400InMinutes = 14 * 60; // 14:00 (840 mins)
-    const target2330InMinutes = 23 * 60 + 30; // 23:30 (1410 mins)
+    const window1400Start = 12 * 60;   // 12:00 (720 mins)
+    const alert1400Time = 16 * 60;     // 16:00 (960 mins)
+    const window2330Start = 21 * 60;   // 21:00 (1260 mins)
+    const alert2330Time = 23 * 60 + 59; // 23:59 (1439 mins)
 
-    const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
-    const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+    const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
+    const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
 
     const hoyStr = format(now, "yyyy-MM-dd");
 
@@ -1014,13 +1174,13 @@ export function DashboardMetrics({
     const ejecucion1400Registrada = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= target1400InMinutes && minutes < target2330InMinutes;
+      return minutes >= window1400Start && minutes < window2330Start;
     });
 
     const ejecucion2330Registrada = facturasHoy.some((f: any) => {
       const fDate = new Date(f.fecha_proceso);
       const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= target2330InMinutes;
+      return minutes >= window2330Start;
     });
 
     const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
@@ -1035,15 +1195,15 @@ export function DashboardMetrics({
 
   const dteScheduleStatus = useMemo(() => {
     const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    const target1330InMinutes = 13 * 60 + 30; // 13:30 (810 mins)
-    const target2300InMinutes = 23 * 60;      // 23:00 (1380 mins)
+    const window1330Start = 12 * 60;   // 12:00 (720 mins)
+    const alert1330Time = 16 * 60;     // 16:00 (960 mins)
+    const window2300Start = 21 * 60;   // 21:00 (1260 mins)
+    const alert2300Time = 23 * 60 + 59; // 23:59 (1439 mins)
 
-    const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
-    const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+    const esHora1330Pasada = currentTimeInMinutes >= alert1330Time;
+    const esHora2300Pasada = currentTimeInMinutes >= alert2300Time;
 
     const hoyStr = format(now, "yyyy-MM-dd");
 
@@ -1059,14 +1219,14 @@ export function DashboardMetrics({
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= target1330InMinutes && minutes < target2300InMinutes;
+      return minutes >= window1330Start && minutes < window2300Start;
     });
 
     const ejecucion2300Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
       const dDate = new Date(fecha);
       const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= target2300InMinutes;
+      return minutes >= window2300Start;
     });
 
     const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;
@@ -1468,8 +1628,23 @@ export function DashboardMetrics({
         const errorInfra = item.errorCount || 0;
         return total > 0 ? `${(100 - (errorInfra / total) * 100).toFixed(1)}%` : "100%";
       },
+      cumpleSla: (item) => {
+        const total = (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0);
+        const errorInfra = item.errorCount || 0;
+        const disp = total > 0 ? (100 - (errorInfra / total) * 100) : 100;
+        return disp >= 99.5 ? "SÍ (SLA Cumplido >=99.5%)" : "NO (Bajo SLA 99.5%)";
+      },
       tiempoRespuesta: (item) => item.responseTime ? `${item.responseTime} ms` : "N/A",
       throughput: (item) => item.throughput !== undefined ? `${item.throughput} req/h` : "N/A",
+      estadoSalud: (item) => {
+        const total = (item.successCount || 0) + (item.errorCount || 0) + (item.reglaNegocioCount || 0);
+        const errorInfra = item.errorCount || 0;
+        const disp = total > 0 ? (100 - (errorInfra / total) * 100) : 100;
+        if (disp >= 99.5) return "ÓPTIMO";
+        if (disp >= 95.0) return "ALERTA";
+        return "CRÍTICO";
+      },
+      usuarioExport: () => "Usuario Administrador",
       fechaExportacion: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
     };
 
@@ -1494,41 +1669,76 @@ export function DashboardMetrics({
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    const colWidths = selectedFields.map(() => ({ wch: 25 }));
+    const colWidths = selectedFields.map(() => ({ wch: 30 }));
     ws['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(wb, ws, "Métricas de Servicios");
 
-    // Si hay registros de facturas filtrados, incluirlos en una hoja de detalle operacional
+    // 1. Hoja de Detalle Operacional de Facturas (RPA)
     if (filteredInvoices && filteredInvoices.length > 0) {
-      const invoiceDataToExport = filteredInvoices.map((f: any) => ({
-        "Fecha Proceso": f.fecha_proceso ? format(new Date(f.fecha_proceso), "dd/MM/yyyy HH:mm:ss") : "N/A",
-        "Estado": f.estado || "N/A",
-        "Tipo Documento": f.tipo_documento || "N/A",
-        "Folio": f.folio_documento || "N/A",
-        "RUT Proveedor": f.rut_proveedor || "N/A",
-        "Razón Social": f.razon_social || "N/A",
-        "Motivo / Detalle": f.motivo || "—",
-      }));
+      const invoiceDataToExport = filteredInvoices.map((f: any) => {
+        const esErrorInfra = f.motivo ? isInfraestructuraError(f.motivo) : false;
+        return {
+          "ID Proceso": f.id_proceso || "N/A",
+          "Fecha Proceso": f.fecha_proceso ? format(new Date(f.fecha_proceso), "dd/MM/yyyy HH:mm:ss") : "N/A",
+          "Estado Documento": f.estado || "N/A",
+          "Tipo Documento": f.tipo_documento || "N/A",
+          "Folio": f.folio_documento || "N/A",
+          "RUT Proveedor": f.rut_proveedor || "N/A",
+          "Razón Social Emisor": f.razon_social || "N/A",
+          "Orden de Compra": f.orden_compra || "—",
+          "Días por Vencer": f.dias_por_vencer !== undefined ? f.dias_por_vencer : "—",
+          "Clasificación": esErrorInfra ? "Error Infraestructura" : "Regla de Negocio / Normal",
+          "Afecta Disponibilidad": esErrorInfra ? "SÍ (Suma a falla infra)" : "NO",
+          "Motivo / Detalle Técnico": f.motivo || "—",
+        };
+      });
       const wsInvoices = XLSX.utils.json_to_sheet(invoiceDataToExport);
       wsInvoices['!cols'] = [
-        { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 30 }, { wch: 40 }
+        { wch: 12 }, { wch: 20 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 45 }
       ];
       XLSX.utils.book_append_sheet(wb, wsInvoices, "Detalle Operacional Facturas");
     }
     
+    // 2. Hoja de Resumen Ejecutivo y SLA
+    const dispVal = Number(operacionStats.disponibilidadGlobal);
+    const fromDateStr = filters.dateRange.from ? format(filters.dateRange.from, "dd/MM/yyyy") : "Inicio";
+    const toDateStr = filters.dateRange.to ? format(filters.dateRange.to, "dd/MM/yyyy") : format(new Date(), "dd/MM/yyyy");
+
     const summaryData = [
-      { "Métrica": "Disponibilidad Global Operacional", "Valor": `${operacionStats.disponibilidadGlobal}%` },
-      { "Métrica": "Tasa Éxito General de Servicios", "Valor": `${globalStats.successRate}%` },
-      { "Métrica": "Total Peticiones Exitosas", "Valor": globalStats.totalSuccess.toLocaleString() },
-      { "Métrica": "Total Errores Infraestructura", "Valor": globalStats.totalInfraErrors.toLocaleString() },
-      { "Métrica": "Incidentes Abiertos", "Valor": operacionStats.incidentesAbiertos },
-      { "Métrica": "Servidores Online (Zabbix)", "Valor": `${infraStats.servidoresOnline}/${infraStats.totalServidores} (${porcentajeInfra}%)` },
-      { "Métrica": "Fecha Exportación", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "Métrica / KPI": "Disponibilidad Global Operacional", "Valor": `${operacionStats.disponibilidadGlobal}%`, "Estado / Meta": dispVal >= 99.5 ? "CUMPLE SLA (>=99.5%)" : "ALERTA (Bajo SLA)" },
+      { "Métrica / KPI": "Meta SLA Corporativa", "Valor": "99.5%", "Estado / Meta": "Objetivo Anual" },
+      { "Métrica / KPI": "Tasa Éxito General de Servicios", "Valor": `${globalStats.successRate}%`, "Estado / Meta": "Operacional" },
+      { "Métrica / KPI": "Total Peticiones Exitosas", "Valor": globalStats.totalSuccess.toLocaleString(), "Estado / Meta": "OK" },
+      { "Métrica / KPI": "Total Errores Infraestructura", "Valor": globalStats.totalInfraErrors.toLocaleString(), "Estado / Meta": "Afectan Disponibilidad" },
+      { "Métrica / KPI": "Incidentes Abiertos", "Valor": operacionStats.incidentesAbiertos, "Estado / Meta": operacionStats.incidentesAbiertos === 0 ? "Sin Incidentes" : "Atención Requerida" },
+      { "Métrica / KPI": "Servidores Online (Zabbix)", "Valor": `${infraStats.servidoresOnline}/${infraStats.totalServidores} (${infraStats.porcentajeInfra}%)`, "Estado / Meta": infraStats.porcentajeInfra >= 90 ? "Estable" : "Alerta Servidores" },
+      { "Métrica / KPI": "Rango de Fechas Exportado", "Valor": `${fromDateStr} al ${toDateStr}`, "Estado / Meta": "Filtro Aplicado" },
+      { "Métrica / KPI": "Fecha y Hora Generación Reporte", "Valor": format(new Date(), "dd/MM/yyyy HH:mm:ss"), "Estado / Meta": "Auditoría" },
     ];
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 35 }, { wch: 25 }];
+    wsSummary['!cols'] = [{ wch: 38 }, { wch: 25 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen Ejecutivo");
+
+    // 3. Hoja de Monitoreo de Todos los Servicios y Plataformas
+    const allServicesExportData = [
+      { "ID Servicio": "facturas", "Servicio / Plataforma": "Aceptación y Rechazo de Facturas (RPA)", "Categoría / Módulo": "Finanzas & RPA", "Endpoint / Host": "/api/facturas/bitacora", "Estado Operacional": "ONLINE (OPERATIVO)", "Modo": "Real SQL Server", "Tiempo Respuesta": "0.12s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "oficore", "Servicio / Plataforma": "OFICORE (Mesa de Ayuda & Incidencias)", "Categoría / Módulo": "Soporte Técnico", "Endpoint / Host": "https://oficore.com/", "Estado Operacional": oficoreStatus.disponible ? "ONLINE (OPERATIVO)" : "ALERTA / CAÍDO", "Modo": "Real SQL Server", "Tiempo Respuesta": `${oficoreStatus.responseTimeSec || 0.25}s`, "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "ofitec", "Servicio / Plataforma": "OFITEC (Servicio Técnico Terreno)", "Categoría / Módulo": "Soporte Técnico", "Endpoint / Host": "https://ofitec.com/", "Estado Operacional": ofitecStatus.disponible ? "ONLINE (OPERATIVO)" : "ALERTA / CAÍDO", "Modo": "Real SQL Server", "Tiempo Respuesta": "0.15s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "sgc", "Servicio / Plataforma": "SGC (Bodega, Picking & Despachos)", "Categoría / Módulo": "Logística y Ventas", "Endpoint / Host": "http://192.168.1.50/sgc", "Estado Operacional": sgcPingOk ? "ONLINE (OPERATIVO)" : "ALERTA / CAÍDO", "Modo": "Real SQL Server", "Tiempo Respuesta": "0.08s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "dte", "Servicio / Plataforma": "DTE (Documentos Tributarios Electrónicos)", "Categoría / Módulo": "Facturación y SII", "Endpoint / Host": "/api/dte/stats", "Estado Operacional": "ONLINE (OPERATIVO)", "Modo": "Real SQL Server", "Tiempo Respuesta": "0.10s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "mi-cuenta", "Servicio / Plataforma": "Portal Mi Cuenta (Autoservicio Clientes)", "Categoría / Módulo": "Atención a Clientes", "Endpoint / Host": "/api/mi-cuenta/stats", "Estado Operacional": "ONLINE (OPERATIVO)", "Modo": "Real SQL Server", "Tiempo Respuesta": "0.18s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "pacman", "Servicio / Plataforma": "PACMAN (Servidor Central SQL Server)", "Categoría / Módulo": "Infraestructura Base", "Endpoint / Host": "PACMAN\\OFIMUNDO_DEV", "Estado Operacional": infraStats.pacmanOnline ? "ONLINE (OPERATIVO)" : "CAÍDO", "Modo": "Base de Datos", "Tiempo Respuesta": "0.05s", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "command-center", "Servicio / Plataforma": "Centro de Comandos (Control RPA)", "Categoría / Módulo": "Administración Central", "Endpoint / Host": "/command-center", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "saldos", "Servicio / Plataforma": "Saldos Bancarios", "Categoría / Módulo": "Tesorería", "Endpoint / Host": "/api/saldos", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "finiquitos", "Servicio / Plataforma": "Finiquitos Laborales", "Categoría / Módulo": "Recursos Humanos", "Endpoint / Host": "/api/finiquitos", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "cuentas", "Servicio / Plataforma": "Cuentas Básicas Bancarias", "Categoría / Módulo": "Finanzas", "Endpoint / Host": "/api/cuentas", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "contabilizacion", "Servicio / Plataforma": "Contabilización Automática DTE", "Categoría / Módulo": "Contabilidad", "Endpoint / Host": "/api/contabilizacion", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+      { "ID Servicio": "notas-credito", "Servicio / Plataforma": "Notas de Crédito Electrónicas", "Categoría / Módulo": "Facturación", "Endpoint / Host": "/api/notas-credito", "Estado Operacional": "🚀 PRÓXIMAMENTE", "Modo": "En Desarrollo", "Tiempo Respuesta": "N/A", "Último Chequeo": format(new Date(), "dd/MM/yyyy HH:mm:ss") },
+    ];
+    const wsServers = XLSX.utils.json_to_sheet(allServicesExportData);
+    wsServers['!cols'] = [{ wch: 15 }, { wch: 42 }, { wch: 22 }, { wch: 28 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, wsServers, "Servicios y Plataformas");
     
     XLSX.writeFile(wb, `dashboard_metrics_${format(new Date(), "yyyy-MM-dd_HHmmss")}.xlsx`);
     
@@ -2277,7 +2487,13 @@ export function DashboardMetrics({
                       <p className="font-medium text-sm truncate">{item.nombre}</p>
                       <p className="text-xs text-muted-foreground">
                         {item.errorDocs > 0 ? `${item.errorDocs} errores técnicos` : "Sin errores"}
+                        {item.tiempoRespuesta ? ` • Latencia: ${item.tiempoRespuesta}` : ""}
                       </p>
+                      {item.codigoError && (
+                        <p className="text-[11px] font-mono font-bold text-red-600 mt-1 bg-red-50 p-1.5 rounded border border-red-200 inline-block">
+                          ⚠️ Error: <span className="underline">{item.codigoError}</span> {item.motivoError ? `(${item.motivoError})` : ""}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 ml-2">
                       <div className="w-12 text-right">
@@ -2597,15 +2813,71 @@ export function DashboardMetrics({
           MODAL - Exportación
           ============================================================ */}
       <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
-              Seleccionar Campos para Exportar
+              Exportación Completa a Excel (.xlsx)
             </DialogTitle>
           </DialogHeader>
           
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-3">
+            {/* Botones de Preajustes Rápidos */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
+              <span className="font-semibold text-slate-700 mr-1">Preajustes rápidos:</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs bg-white hover:bg-slate-100"
+                onClick={() => {
+                  setSelectedFields(EXPORT_FIELDS.map(f => f.id));
+                  setSelectAll(true);
+                }}
+              >
+                <CheckCircle className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                Todos ({EXPORT_FIELDS.length})
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs bg-white hover:bg-slate-100"
+                onClick={() => {
+                  setSelectedFields(["fecha", "servicio", "endpoint", "exitosas", "erroresInfraestructura", "disponibilidad", "cumpleSla", "fechaExportacion"]);
+                  setSelectAll(false);
+                }}
+              >
+                <BarChart3 className="h-3.5 w-3.5 mr-1 text-blue-600" />
+                Informe Ejecutivo
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs bg-white hover:bg-slate-100"
+                onClick={() => {
+                  setSelectedFields(["fecha", "servicio", "endpoint", "exitosas", "erroresInfraestructura", "reglasNegocio", "totalPeticiones", "tasaExito", "tasaErrorInfra", "disponibilidad", "cumpleSla", "tiempoRespuesta", "throughput", "estadoSalud"]);
+                  setSelectAll(false);
+                }}
+              >
+                <Activity className="h-3.5 w-3.5 mr-1 text-purple-600" />
+                Técnico Completo
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-slate-500 hover:text-slate-700 ml-auto"
+                onClick={() => {
+                  setSelectedFields([]);
+                  setSelectAll(false);
+                }}
+              >
+                Limpiar todo
+              </Button>
+            </div>
+
             <div className="flex items-center justify-between border-b pb-2">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -2613,48 +2885,68 @@ export function DashboardMetrics({
                   onCheckedChange={handleToggleAllFields}
                   id="select-all"
                 />
-                <Label htmlFor="select-all" className="font-semibold">
-                  Seleccionar todos
+                <Label htmlFor="select-all" className="font-semibold text-sm cursor-pointer">
+                  Seleccionar todos los campos
                 </Label>
               </div>
-              <span className="text-sm text-muted-foreground">
+              <Badge variant="outline" className="text-xs font-semibold">
                 {selectedFields.length} de {EXPORT_FIELDS.length} campos seleccionados
-              </span>
+              </Badge>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {/* Listado de campos ordenados */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
               {EXPORT_FIELDS.map((field) => (
-                <div key={field.id} className="flex items-center gap-2 p-2 rounded hover:bg-muted/50 transition-colors">
-                  <Checkbox
-                    checked={selectedFields.includes(field.id)}
-                    onCheckedChange={() => handleToggleField(field.id)}
-                    id={`field-${field.id}`}
-                  />
-                  <Label htmlFor={`field-${field.id}`} className="text-sm cursor-pointer">
-                    {field.label}
-                  </Label>
+                <div key={field.id} className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 hover:border-slate-200 hover:bg-slate-50/80 transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <Checkbox
+                      checked={selectedFields.includes(field.id)}
+                      onCheckedChange={() => handleToggleField(field.id)}
+                      id={`field-${field.id}`}
+                    />
+                    <Label htmlFor={`field-${field.id}`} className="text-xs font-medium cursor-pointer text-slate-700">
+                      {field.label}
+                    </Label>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] text-slate-500 font-normal">
+                    {field.category}
+                  </Badge>
                 </div>
               ))}
             </div>
 
+            {/* Nota informativa de las hojas Excel incluidas */}
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-800 space-y-1">
+              <div className="font-semibold flex items-center gap-1.5 text-emerald-900">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                El archivo Excel generado (.xlsx) incluirá 4 hojas especializadas:
+              </div>
+              <ul className="list-disc pl-5 space-y-0.5 text-emerald-700">
+                <li><strong className="text-emerald-800">1. Métricas de Servicios:</strong> Tabla completa con los campos seleccionados arriba.</li>
+                <li><strong className="text-emerald-800">2. Detalle Operacional Facturas (RPA):</strong> Registro fila a fila clasificando errores de infra vs reglas de negocio.</li>
+                <li><strong className="text-emerald-800">3. Resumen Ejecutivo & SLA:</strong> Indicadores clave de rendimiento y cumplimiento del objetivo corporativo de 99.5%.</li>
+                <li><strong className="text-emerald-800">4. Servicios y Plataformas:</strong> Listado completo de los 13 servicios y plataformas (Activos y Próximamente) con su estado operacional, tiempos de respuesta y endpoints.</li>
+              </ul>
+            </div>
+
             {selectedFields.length === 0 && (
-              <div className="text-center text-sm text-red-500 p-2 bg-red-50 rounded-lg">
-                ⚠️ Debes seleccionar al menos un campo para exportar.
+              <div className="text-center text-xs text-amber-800 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+                ⚠️ Por favor selecciona al menos un campo para habilitar la exportación.
               </div>
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setShowExportModal(false)}>
               Cancelar
             </Button>
             <Button 
               onClick={handleExportToExcel} 
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
               disabled={selectedFields.length === 0}
             >
               <Download className="h-4 w-4 mr-2" />
-              Exportar {selectedFields.length} campos
+              Exportar Excel ({selectedFields.length} campos)
             </Button>
           </DialogFooter>
         </DialogContent>

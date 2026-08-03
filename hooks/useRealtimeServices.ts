@@ -1,6 +1,7 @@
 // hooks/useRealtimeServices.ts
 import { useState, useEffect } from "react";
 import { Service, updateServiceStatus, getServices } from "@/lib/services-data";
+import { isInfraestructuraError } from "@/lib/utils";
 
 export function useRealtimeServices() {
   const [services, setServices] = useState<Service[]>([]);
@@ -8,26 +9,18 @@ export function useRealtimeServices() {
 
   const fetchAndUpdateServices = async () => {
     try {
-      // Obtener datos de facturas
-      const res = await fetch("/api/facturas/bitacora?estado=todos");
+      // Obtener datos de facturas del mes en curso
+      const now = new Date();
+      const primerDiaMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const res = await fetch(`/api/facturas/bitacora?estado=todos&fechaDesde=${primerDiaMes}`);
       const data = await res.json();
       
       if (data.success && data.data) {
         const totalDocs = data.data.length;
-        const errorDocs = data.data.filter((e: any) => {
-          const motivo = e.motivo || "";
-          const erroresTecnicos = [
-            "error de conexión", "timeout", "servidor no responde",
-            "softland no disponible", "sii no responde", "connection failed",
-            "failed to connect", "could not connect", "connection refused",
-            "network error", "500", "503", "no se pudo conectar",
-            "softland error", "sii error", "error de red"
-          ];
-          return erroresTecnicos.some(term => motivo.toLowerCase().includes(term.toLowerCase()));
-        }).length;
+        const errorDocs = data.data.filter((e: any) => isInfraestructuraError(e.motivo)).length;
         
         const errPercent = totalDocs > 0 ? Math.round((errorDocs / totalDocs) * 100) : 0;
-        const status = errorDocs > 0 ? (errPercent > 40 ? "error" : "warning") : "success";
+        const status = errorDocs > 0 && errPercent > 5 ? (errPercent > 40 ? "error" : "warning") : "success";
         
         // Actualizar el servicio en la memoria
         updateServiceStatus("facturas", errPercent, status);

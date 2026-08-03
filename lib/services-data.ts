@@ -49,6 +49,7 @@ export interface MetricDataPoint {
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
   { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"] },
+  { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success", services: ["facturas"] },
 ];
 
 // Servicios que están próximamente (muestran mensaje especial)
@@ -70,6 +71,7 @@ const baseServices: Service[] = [
     status: "success",
     clients: [
       { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", errorPercentage: 0, status: "success" },
     ],
     logs: [
       { id: "1", message: "Servicio inicializado correctamente", timestamp: new Date().toISOString(), type: "success" },
@@ -114,7 +116,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [],
     isComingSoon: false,
@@ -146,7 +148,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [],
     isComingSoon: false,
@@ -158,7 +160,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [],
     isComingSoon: false,
@@ -170,7 +172,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [],
     isComingSoon: false,
@@ -182,7 +184,7 @@ const baseServices: Service[] = [
     errorPercentage: 0,
     status: "success",
     clients: [
-      { id: "cl_ofimundo", name: "Ofimundo S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
     ],
     logs: [],
     isComingSoon: false,
@@ -486,6 +488,61 @@ export async function initializeDatabaseData(): Promise<boolean> {
           }));
         }
       });
+
+      // Asegurar cliente de Antofagasta
+      const staticClients = [
+        { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as const, services: ["facturas"] }
+      ];
+      staticClients.forEach(sc => {
+        if (!dbClients.some(c => c.id === sc.id || c.name === sc.name)) {
+          dbClients.push(sc);
+        }
+      });
+
+      const facturasSrv = dbServices.find(s => s.id === "facturas");
+      if (facturasSrv) {
+        if (!facturasSrv.clients) facturasSrv.clients = [];
+        if (!facturasSrv.clients.some(c => c.name.includes("ANTOFAGASTA"))) {
+          facturasSrv.clients.push({
+            id: "cl_cmds_antofagasta",
+            name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA",
+            rut: "70.892.100-9",
+            email: "contacto@cmds.cl",
+            phone: "+56 55 288 7000",
+            errorPercentage: 0,
+            status: "success"
+          });
+        }
+      }
+
+      // Asegurar que STUEDEMANN S.A. tenga asignados los 6 servicios activos
+      const allActiveServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
+      const stuedemannClient = dbClients.find(c => c.id === "cl_stuedemann" || c.name.toLowerCase().includes("stuedemann") || (c.rut || "").includes("96.502.540"));
+      
+      dbClients.forEach(c => {
+        if (c.id === "cl_stuedemann" || c.name.toLowerCase().includes("stuedemann") || (c.rut || "").includes("96.502.540")) {
+          c.services = [...allActiveServices];
+        }
+      });
+
+      if (stuedemannClient) {
+        dbServices.forEach(s => {
+          if (allActiveServices.includes(s.id)) {
+            if (!s.clients) s.clients = [];
+            if (!s.clients.some(c => c.name.toLowerCase().includes("stuedemann") || c.id === stuedemannClient.id)) {
+              s.clients.push({
+                id: stuedemannClient.id,
+                name: stuedemannClient.name,
+                rut: stuedemannClient.rut,
+                email: stuedemannClient.email,
+                phone: stuedemannClient.phone,
+                errorPercentage: 0,
+                status: "success"
+              });
+            }
+          }
+        });
+      }
 
       // 4. Actualizar arreglos exportados in-place para conservar las referencias importadas
       clients.length = 0;

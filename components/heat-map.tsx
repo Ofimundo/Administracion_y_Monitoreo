@@ -95,14 +95,18 @@ const isServiceComingSoon = (serviceId: string): boolean => {
 const fetchAllRealData = async () => {
   const results: any = { facturas: null, oficore: null, ofitec: null, sgc: null, contratos: null, equipos: null, "mi-cuenta": null, sgcPing: null, ofitecMonitor: null };
   try {
+    const now = new Date();
+    const primerDiaMesActual = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyyMMdd");
+    const dateParam = `fechaDesde=${primerDiaMesActual}`;
+
     const [factRes, oficoreRes, ofitecRes, sgcRes, contratosRes, equiposRes, miCuentaRes, sgcPingRes, ofitecMonitorRes] = await Promise.all([
-      fetch("/api/facturas/bitacora?estado=todos").then(r => r.json()).catch(() => null),
-      fetch("/api/oficore/stats").then(r => r.json()).catch(() => null),
-      fetch("/api/ofitec/stats").then(r => r.json()).catch(() => null),
-      fetch("/api/sgc/stats").then(r => r.json()).catch(() => null),
-      fetch("/api/sgc/contratos-stats").then(r => r.json()).catch(() => null),
-      fetch("/api/sgc/equipos-stats").then(r => r.json()).catch(() => null),
-      fetch("/api/mi-cuenta/stats").then(r => r.json()).catch(() => null),
+      fetch(`/api/facturas/bitacora?estado=todos&${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/oficore/stats?${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/ofitec/stats?${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/sgc/stats?${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/sgc/contratos-stats?${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/sgc/equipos-stats?${dateParam}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/mi-cuenta/stats?${dateParam}`).then(r => r.json()).catch(() => null),
       fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
       fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
     ]);
@@ -252,13 +256,13 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               return ["500", "502", "503", "504"].some(code => new RegExp(`\\b${code}\\b`).test(motivoLower));
             }).length;
 
-            // Validación de horarios (14:00 y 23:30)
+            // Validación de horarios con tolerancia (alertar recién a las 16:00 y 24:00 si no ejecuto)
             const now = new Date();
             const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-            const target1400InMinutes = 14 * 60;
-            const target2330InMinutes = 23 * 60 + 30;
-            const esHora1400Pasada = currentTimeInMinutes >= target1400InMinutes;
-            const esHora2330Pasada = currentTimeInMinutes >= target2330InMinutes;
+            const alert1400CutoffInMinutes = 16 * 60; // 16:00
+            const alert2330CutoffInMinutes = 24 * 60;
+            const esHora1400Pasada = currentTimeInMinutes >= alert1400CutoffInMinutes;
+            const esHora2330Pasada = currentTimeInMinutes >= alert2330CutoffInMinutes;
             const hoyStr = format(now, "yyyy-MM-dd");
 
             const facturasHoy = data.filter((f: any) => {
@@ -271,13 +275,13 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             const ejec1400 = facturasHoy.some((f: any) => {
               const fDate = new Date(f.fecha_proceso);
               const mins = fDate.getHours() * 60 + fDate.getMinutes();
-              return mins >= target1400InMinutes && mins < target2330InMinutes;
+              return mins >= (12 * 60) && mins < (16 * 60);
             });
 
             const ejec2330 = facturasHoy.some((f: any) => {
               const fDate = new Date(f.fecha_proceso);
               const mins = fDate.getHours() * 60 + fDate.getMinutes();
-              return mins >= target2330InMinutes;
+              return mins >= (22 * 60 + 30);
             });
 
             const falta1400 = esHora1400Pasada && !ejec1400;
@@ -322,10 +326,10 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             
             const now = new Date();
             const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-            const target1330InMinutes = 13 * 60 + 30; // 13:30
-            const target2300InMinutes = 23 * 60;      // 23:00
-            const esHora1330Pasada = currentTimeInMinutes >= target1330InMinutes;
-            const esHora2300Pasada = currentTimeInMinutes >= target2300InMinutes;
+            const alert1330CutoffInMinutes = 15 * 60 + 30; // 15:30
+            const alert2300CutoffInMinutes = 24 * 60;
+            const esHora1330Pasada = currentTimeInMinutes >= alert1330CutoffInMinutes;
+            const esHora2300Pasada = currentTimeInMinutes >= alert2300CutoffInMinutes;
             const hoyStr = format(now, "yyyy-MM-dd");
 
             const dteHoy = data.filter((d: any) => {
@@ -340,14 +344,14 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
               const dDate = new Date(fecha);
               const mins = dDate.getHours() * 60 + dDate.getMinutes();
-              return mins >= target1330InMinutes && mins < target2300InMinutes;
+              return mins >= (11 * 60 + 30) && mins < (15 * 60 + 30);
             });
 
             const ejec2300 = dteHoy.some((d: any) => {
               const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
               const dDate = new Date(fecha);
               const mins = dDate.getHours() * 60 + dDate.getMinutes();
-              return mins >= target2300InMinutes;
+              return mins >= (22 * 60);
             });
 
             const falta1330 = esHora1330Pasada && !ejec1330;

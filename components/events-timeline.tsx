@@ -63,6 +63,7 @@ interface Filters {
   search: string;
   types: string[];
   serviceId: string;
+  clientId: string;
   dateRange: {
     from: Date | undefined;
     to: Date | undefined;
@@ -291,6 +292,7 @@ const DEFAULT_FILTERS: Filters = {
   search: "",
   types: ["success", "error", "warning", "info", "comingSoon"],
   serviceId: "all",
+  clientId: "todos",
   dateRange: { from: undefined, to: undefined },
 };
 
@@ -419,11 +421,14 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
 
         // 1. Fetch facturas
         try {
-          const url = `/api/facturas/bitacora?estado=todos${queryParams ? `&${queryParams.slice(1)}` : ""}`;
-          const res = await fetch(url);
+          let facturasUrl = `/api/facturas/bitacora?estado=todos${queryParams ? `&${queryParams.slice(1)}` : ""}`;
+          if (filters.clientId && filters.clientId !== "todos") {
+            facturasUrl += `&cliente=${filters.clientId}`;
+          }
+          const res = await fetch(facturasUrl);
           const data = await res.json();
           if (data.success && data.data) {
-            newLogs.facturas = data.data.slice(0, 200).map((entry: any, index: number) => {
+            newLogs.facturas = data.data.map((entry: any, index: number) => {
               const type = getLogType(entry.estado, entry.motivo, "facturas");
               const isInfra = isInfraestructuraError(entry.motivo);
               
@@ -431,15 +436,20 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               if (isInfra) {
                 message = `🔴 ERROR DE INFRAESTRUCTURA: ${message}`;
               }
+
+              const clienteNombre = entry.cliente_nombre || (entry.cliente_id === "cl_cmds_antofagasta" || filters.clientId === "cl_cmds_antofagasta" ? "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA" : "STUEDEMANN S.A.");
+              const clienteId = entry.cliente_id || (filters.clientId && filters.clientId !== "todos" ? filters.clientId : (clienteNombre.includes("ANTOFAGASTA") ? "cl_cmds_antofagasta" : "cl_stuedemann"));
               
               return {
                 id: `factura_${entry.id_proceso || index}_${index}`,
                 message: message,
-                details: `Folio #${entry.folio_documento} · ${entry.razon_social} · RUT: ${entry.rut_proveedor}`,
+                details: `[${clienteNombre}] Folio #${entry.folio_documento} · ${entry.razon_social} · RUT Proveedor: ${entry.rut_proveedor}`,
                 timestamp: entry.fecha_proceso,
                 type: isInfra ? "error" : type,
                 estado: entry.estado,
                 isInfraestructura: isInfra,
+                cliente_id: clienteId,
+                cliente_nombre: clienteNombre,
               };
             });
           }
@@ -828,6 +838,24 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
       result = result.filter(event => event.serviceId === filters.serviceId);
     }
 
+    if (filters.clientId && filters.clientId !== "todos") {
+      result = result.filter(event => {
+        const log = event.log as any;
+        if (log.cliente_id) {
+          return log.cliente_id === filters.clientId;
+        }
+        const detailsLower = (event.log.details || "").toLowerCase();
+        const msgLower = (event.log.message || "").toLowerCase();
+        if (filters.clientId === "cl_stuedemann") {
+          return detailsLower.includes("stuedemann") || msgLower.includes("stuedemann") || detailsLower.includes("96.502.540") || event.serviceId === "facturas";
+        }
+        if (filters.clientId === "cl_cmds_antofagasta") {
+          return detailsLower.includes("antofagasta") || msgLower.includes("antofagasta") || detailsLower.includes("70.892.100");
+        }
+        return true;
+      });
+    }
+
     if (filters.dateRange.from && filters.dateRange.to) {
       result = result.filter(event => {
         const eventDate = new Date(event.log.timestamp);
@@ -846,6 +874,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     if (filters.search) count++;
     if (filters.types.length !== 5) count++;
     if (filters.serviceId !== "all") count++;
+    if (filters.clientId !== "todos") count++;
     if (filters.dateRange.from || filters.dateRange.to) count++;
     return count;
   }, [filters]);
@@ -957,7 +986,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs font-medium mb-1.5 block">Servicio</Label>
                 <Select value={filters.serviceId} onValueChange={(value) => setFilters({ ...filters, serviceId: value })}>
@@ -972,6 +1001,20 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                         {isServiceComingSoon(service.id) && " 🚀"}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium mb-1.5 block">Cliente</Label>
+                <Select value={filters.clientId} onValueChange={(value) => setFilters({ ...filters, clientId: value })}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Todos los clientes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">🌐 Todos los clientes</SelectItem>
+                    <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                    <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -24,7 +24,12 @@ export function NavigationTabs() {
       <TabsList className="grid w-full max-w-2xl grid-cols-3">
         <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
         <TabsTrigger value="comparison">Comparador de Clientes</TabsTrigger>
-        <TabsTrigger value="commands">Centro de Comandos</TabsTrigger>
+        <TabsTrigger value="commands" className="gap-1.5">
+          Centro de Comandos
+          <span className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded px-1 py-0.2 font-medium">
+            🚀 Próximamente
+          </span>
+        </TabsTrigger>
       </TabsList>
     </Tabs>
   )
