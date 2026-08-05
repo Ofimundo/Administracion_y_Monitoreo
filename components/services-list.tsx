@@ -195,58 +195,95 @@ export function ServicesList() {
 
   // Verificar si falta ejecución de 14:00 o 23:30 para Facturas
   // Verificar si falta ejecución de 14:00 o 23:30 para Facturas (Rango flexible: 12:00 - 16:00 y 21:00 - 23:59)
+  // Helper para obtener fecha (yyyy-MM-dd) y minutos transcurridos del día sin desfase de zona horaria UTC
+  const parseLocalStringDate = (fechaStr: string) => {
+    if (!fechaStr) return null;
+    const match = String(fechaStr).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+    if (match) {
+      return {
+        dateStr: match[1],
+        minutes: parseInt(match[2], 10) * 60 + parseInt(match[3], 10)
+      };
+    }
+    const dDate = new Date(fechaStr);
+    if (isNaN(dDate.getTime())) return null;
+    return {
+      dateStr: format(dDate, "yyyy-MM-dd"),
+      minutes: dDate.getHours() * 60 + dDate.getMinutes()
+    };
+  };
+
   const isFacturasScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    // Ventana amplia: si corre entre 12:00 y 21:00 se considera la ejecución de la tarde.
-    // Solo alertar a partir de las 16:00 si no se registró ninguna ejecución.
-    const window1400Start = 12 * 60; // 12:00
-    const alert1400Time = 16 * 60;   // 16:00
-    const window2330Start = 21 * 60; // 21:00
-    const alert2330Time = 23 * 60 + 59; // 23:59
+    // 1. Ofimundo / Stuedemann (14:00 PM y 23:30 PM)
+    const window1400Start = 13 * 60 + 45; // 13:45 PM
+    const alert1400Time = 15 * 60;        // 15:00 PM
+    const window2330Start = 23 * 60;       // 23:00 PM
+    const alert2330Time = 23 * 60 + 59;   // 23:59 PM (00:00)
+
+    // 2. Antofagasta (12:00 PM - Rango 11:45 AM a 13:00 PM)
+    const window1200AntofagastaStart = 11 * 60 + 45; // 11:45 AM
+    const alert1200AntofagastaTime = 13 * 60;        // 13:00 PM
 
     const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
     const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
+    const esHora1200AntofagastaPasada = currentTimeInMinutes >= alert1200AntofagastaTime;
 
     const hoyStr = format(now, "yyyy-MM-dd");
 
-    const facturasHoy = (facturasBitacora || []).filter((f: any) => {
-      if (!f.fecha_proceso) return false;
-      const fDate = new Date(f.fecha_proceso);
-      if (isNaN(fDate.getTime())) return false;
-      return format(fDate, "yyyy-MM-dd") === hoyStr;
+    const facturasStuedemannHoy = (facturasBitacora || []).filter((f: any) => {
+      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (isAntofagasta) return false;
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
-    const ejecucion1400Registrada = facturasHoy.some((f: any) => {
-      const fDate = new Date(f.fecha_proceso);
-      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= window1400Start && minutes < window2330Start;
+    const facturasAntofagastaHoy = (facturasBitacora || []).filter((f: any) => {
+      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (!isAntofagasta) return false;
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
-    const ejecucion2330Registrada = facturasHoy.some((f: any) => {
-      const fDate = new Date(f.fecha_proceso);
-      const minutes = fDate.getHours() * 60 + fDate.getMinutes();
-      return minutes >= window2330Start;
+    const ejecucion1400Registrada = facturasStuedemannHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window1400Start && parsed.minutes <= alert1400Time;
+    });
+
+    const ejecucion2330Registrada = facturasStuedemannHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window2330Start && parsed.minutes <= alert2330Time;
+    });
+
+    const ejecucion1200AntofagastaRegistrada = facturasAntofagastaHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window1200AntofagastaStart && parsed.minutes <= alert1200AntofagastaTime;
     });
 
     const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
     const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
+    const falta1200Antofagasta = esHora1200AntofagastaPasada && !ejecucion1200AntofagastaRegistrada;
 
-    return falta1400 || falta2330;
+    return falta1400 || falta2330 || falta1200Antofagasta;
   }, [facturasBitacora]);
 
-  // Verificar si falta ejecución de 13:30 o 23:00 para DTE (Rango flexible: 12:00 - 16:00 y 21:00 - 23:59)
+  // Verificar si falta ejecución de 13:30 o 23:00 para DTE
   const isDteScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
-    // Ventana amplia: si corre entre 12:00 y 21:00 se considera la ejecución de la tarde.
-    // Solo alertar a partir de las 16:00 si no se registró ninguna ejecución.
-    const window1330Start = 12 * 60; // 12:00
-    const alert1330Time = 16 * 60;   // 16:00
-    const window2300Start = 21 * 60; // 21:00
-    const alert2300Time = 23 * 60 + 59; // 23:59
+    // 1. Primera ejecución 13:30: Rango 12:45 a 15:00, alerta desde las 15:00
+    const window1330Start = 12 * 60 + 45; // 12:45 PM
+    const alert1330Time = 15 * 60;        // 15:00 PM
+    
+    // 2. Segunda ejecución 23:00: Rango 22:30 a 23:59, alerta desde las 23:59 (00:00)
+    const window2300Start = 22 * 60 + 30; // 22:30 PM
+    const alert2300Time = 23 * 60 + 59;   // 23:59 PM (00:00)
 
     const esHora1330Pasada = currentTimeInMinutes >= alert1330Time;
     const esHora2300Pasada = currentTimeInMinutes >= alert2300Time;
@@ -255,24 +292,22 @@ export function ServicesList() {
 
     const dteHoy = (dteLogs || []).filter((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      if (!fecha) return false;
-      const dDate = new Date(fecha);
-      if (isNaN(dDate.getTime())) return false;
-      return format(dDate, "yyyy-MM-dd") === hoyStr;
+      const parsed = parseLocalStringDate(fecha);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
     const ejecucion1330Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      const dDate = new Date(fecha);
-      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= window1330Start && minutes < window2300Start;
+      const parsed = parseLocalStringDate(fecha);
+      if (!parsed) return false;
+      return parsed.minutes >= window1330Start && parsed.minutes <= alert1330Time;
     });
 
     const ejecucion2300Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      const dDate = new Date(fecha);
-      const minutes = dDate.getHours() * 60 + dDate.getMinutes();
-      return minutes >= window2300Start;
+      const parsed = parseLocalStringDate(fecha);
+      if (!parsed) return false;
+      return parsed.minutes >= window2300Start && parsed.minutes <= alert2300Time;
     });
 
     const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;
@@ -308,29 +343,23 @@ export function ServicesList() {
       return ofitecStatus.disponible ? "success" : "error";
     }
 
-    if (service.id === "dte") {
-      if (isDteScheduleMissing) return "error";
-      return service.status || "success";
+    if (service.id === "oficore") {
+      return "success";
     }
 
-    // Para facturas, recalcular basado en errores reales de infraestructura u horarios omitidos
-    if (service.id === "facturas") {
-      if (isFacturasScheduleMissing) return "error";
+    if (service.id === "mi-cuenta" || service.id === "micuenta") {
+      return "success";
+    }
 
-      const hasRealInfraError = service.logs?.some((log: any) => 
-        isInfraestructuraError(log.message) || 
-        isInfraestructuraError(log.details) ||
-        isInfraestructuraError(log.estado || "")
-      );
-      
-      if (!hasRealInfraError) {
-        return "success";
-      }
-      
-      return service.status || "success";
+    if (service.id === "dte") {
+      return isDteScheduleMissing ? "error" : "success";
+    }
+
+    if (service.id === "facturas") {
+      return isFacturasScheduleMissing ? "error" : "success";
     }
     
-    return service.status || "success";
+    return "success";
   };
 
   // ✅ Función para obtener el porcentaje de error real
@@ -347,26 +376,23 @@ export function ServicesList() {
       return ofitecStatus.disponible ? 0 : 100;
     }
 
+    if (service.id === "oficore") {
+      return 0;
+    }
+
+    if (service.id === "mi-cuenta" || service.id === "micuenta") {
+      return 0;
+    }
+
     if (service.id === "dte") {
-      if (isDteScheduleMissing) return 100;
-      return service.errorPercentage || 0;
+      return isDteScheduleMissing ? 100 : 0;
     }
 
     if (service.id === "facturas") {
-      if (isFacturasScheduleMissing) return 100;
-
-      const hasRealInfraError = service.logs?.some((log: any) => 
-        isInfraestructuraError(log.message) || 
-        isInfraestructuraError(log.details) ||
-        isInfraestructuraError(log.estado || "")
-      );
-      
-      if (!hasRealInfraError) {
-        return 0;
-      }
+      return isFacturasScheduleMissing ? 100 : 0;
     }
     
-    return service.errorPercentage || 0;
+    return 0;
   };
 
   const availableStatuses = [

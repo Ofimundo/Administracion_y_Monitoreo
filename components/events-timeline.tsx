@@ -413,10 +413,16 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
 
       try {
         let queryParams = "";
-        if (filters.dateRange.from && filters.dateRange.to) {
+        if (filters.dateRange.from) {
           const fromStr = format(filters.dateRange.from, "yyyy-MM-dd");
+          queryParams = `?fechaDesde=${fromStr}`;
+          if (filters.dateRange.to) {
+            const toStr = format(filters.dateRange.to, "yyyy-MM-dd");
+            queryParams += `&fechaHasta=${toStr}`;
+          }
+        } else if (filters.dateRange.to) {
           const toStr = format(filters.dateRange.to, "yyyy-MM-dd");
-          queryParams = `?fechaDesde=${fromStr}&fechaHasta=${toStr}`;
+          queryParams = `?fechaHasta=${toStr}`;
         }
 
         // 1. Fetch facturas
@@ -672,16 +678,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                 estadoStr = "Pendiente";
               }
 
-              // Alineación de fecha histórica si se consulta el año 2026
-              let eventDateStr = entry.fecha_emision;
-              const origHastaYear = filters.dateRange.to ? filters.dateRange.to.getFullYear() : new Date().getFullYear();
-              if (origHastaYear >= 2018 && entry.fecha_emision) {
-                const d = new Date(entry.fecha_emision);
-                if (!isNaN(d.getTime())) {
-                  d.setFullYear(d.getFullYear() + (origHastaYear - 2017));
-                  eventDateStr = d.toISOString();
-                }
-              }
+              const eventDateStr = entry.fecha_emision || new Date().toISOString();
 
               const details = `ID Despacho: #${entry.id} · Picking #${entry.n_picking} · Cliente: ${entry.nombre || "N/A"} (${entry.rut_cliente || "N/A"}) · Vendedor: ${entry.vendedor || "N/A"}${entry.aprobador ? ` · Aprobador: ${entry.aprobador}` : ""}`;
               
@@ -711,10 +708,11 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           if (data.success && data.data) {
             newLogs.dte = data.data.slice(0, 200).map((entry: any, index: number) => {
               const isInfra = entry.Estado !== "EXITOSO";
+              const finFormatted = formatExactDateTime(entry.fecha_fin_ejecucion);
               return {
                 id: `dte_${entry.id_log || index}_${index}`,
                 message: isInfra ? `🔴 ERROR DE INFRAESTRUCTURA: Ejecución fallida de DTE` : `Ejecución de DTE exitosa`,
-                details: `ID Log: #${entry.id_log} · Fin: ${format(new Date(entry.fecha_fin_ejecucion), "dd/MM/yyyy HH:mm:ss")}`,
+                details: `ID Log: #${entry.id_log} · Fin: ${finFormatted}`,
                 timestamp: entry.fecha_inicio_ejecucion,
                 type: isInfra ? "error" : "success",
                 estado: entry.Estado === "EXITOSO" ? "Aprobado" : "Rechazado",
@@ -856,13 +854,16 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
       });
     }
 
-    if (filters.dateRange.from && filters.dateRange.to) {
+    if (filters.dateRange.from || filters.dateRange.to) {
+      const from = filters.dateRange.from ? new Date(filters.dateRange.from.setHours(0, 0, 0, 0)) : new Date(0);
+      const to = filters.dateRange.to ? new Date(filters.dateRange.to.setHours(23, 59, 59, 999)) : new Date(8640000000000000);
+      
       result = result.filter(event => {
-        const eventDate = new Date(event.log.timestamp);
-        return isWithinInterval(eventDate, {
-          start: filters.dateRange.from!,
-          end: filters.dateRange.to!,
-        });
+        if (!event.log.timestamp) return false;
+        const cleanStr = String(event.log.timestamp).replace("Z", "");
+        const d = new Date(cleanStr.includes("T") ? cleanStr : cleanStr.replace(" ", "T"));
+        if (isNaN(d.getTime())) return true;
+        return d >= from && d <= to;
       });
     }
 
@@ -887,10 +888,28 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     }));
   };
 
+  const formatExactDateTime = (timestamp: string) => {
+    if (!timestamp) return "—";
+    const cleanStr = String(timestamp).replace("Z", "");
+    const match = cleanStr.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):?(\d{2})?/);
+    if (match) {
+      const [_, datePart, hh, mm, ss] = match;
+      const [yyyy, MM, dd] = datePart.split("-");
+      return `${dd}/${MM}/${yyyy} ${hh}:${mm}${ss ? `:${ss}` : ""}`;
+    }
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return timestamp;
+    return format(d, "dd/MM/yyyy HH:mm:ss");
+  };
+
   const formatRelativeTime = (timestamp: string) => {
-    const date = new Date(timestamp);
+    if (!timestamp) return "";
+    const cleanStr = String(timestamp).replace("Z", "");
+    const date = new Date(cleanStr.includes("T") ? cleanStr : cleanStr.replace(" ", "T"));
+    if (isNaN(date.getTime())) return "";
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return "";
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
@@ -1147,8 +1166,11 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
-                          <Clock className="h-3 w-3" />
-                          {formatRelativeTime(event.log.timestamp)}
+                          <Clock className="h-3 w-3 text-slate-400" />
+                          <span className="font-semibold text-slate-700">{formatExactDateTime(event.log.timestamp)}</span>
+                          {formatRelativeTime(event.log.timestamp) && (
+                            <span className="text-slate-400">({formatRelativeTime(event.log.timestamp)})</span>
+                          )}
                         </div>
                       </div>
 

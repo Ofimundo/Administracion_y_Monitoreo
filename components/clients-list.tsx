@@ -164,73 +164,122 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     return () => clearInterval(interval);
   }, []);
 
+  // Helper para obtener fecha (yyyy-MM-dd) y minutos transcurridos del día sin desfase de zona horaria UTC
+  const parseLocalStringDate = (fechaStr: string) => {
+    if (!fechaStr) return null;
+    const match = String(fechaStr).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+    if (match) {
+      return {
+        dateStr: match[1],
+        minutes: parseInt(match[2], 10) * 60 + parseInt(match[3], 10)
+      };
+    }
+    const dDate = new Date(fechaStr);
+    if (isNaN(dDate.getTime())) return null;
+    return {
+      dateStr: format(dDate, "yyyy-MM-dd"),
+      minutes: dDate.getHours() * 60 + dDate.getMinutes()
+    };
+  };
+
   const isFacturasScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-    const alert1400CutoffInMinutes = 16 * 60; // Alerta si son pasadas las 16:00 y no ejecutó
-    const alert2330CutoffInMinutes = 24 * 60; 
-    const esHora1400Pasada = currentTimeInMinutes >= alert1400CutoffInMinutes;
-    const esHora2330Pasada = currentTimeInMinutes >= alert2330CutoffInMinutes;
+
+    // 1. Ofimundo / Stuedemann (14:00 PM y 23:30 PM)
+    const window1400Start = 13 * 60 + 45; // 13:45 PM
+    const alert1400Time = 15 * 60;        // 15:00 PM
+    const window2330Start = 23 * 60;       // 23:00 PM
+    const alert2330Time = 23 * 60 + 59;   // 23:59 PM (00:00)
+
+    // 2. Antofagasta (12:00 PM - Rango 11:45 AM a 13:00 PM)
+    const window1200AntofagastaStart = 11 * 60 + 45; // 11:45 AM
+    const alert1200AntofagastaTime = 13 * 60;        // 13:00 PM
+
+    const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
+    const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
+    const esHora1200AntofagastaPasada = currentTimeInMinutes >= alert1200AntofagastaTime;
+
     const hoyStr = format(now, "yyyy-MM-dd");
 
-    const facturasHoy = (facturasBitacora || []).filter((f: any) => {
-      if (!f.fecha_proceso) return false;
-      const fDate = new Date(f.fecha_proceso);
-      if (isNaN(fDate.getTime())) return false;
-      return format(fDate, "yyyy-MM-dd") === hoyStr;
+    const facturasStuedemannHoy = (facturasBitacora || []).filter((f: any) => {
+      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (isAntofagasta) return false;
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
-    const ejec1400 = facturasHoy.some((f: any) => {
-      const fDate = new Date(f.fecha_proceso);
-      const mins = fDate.getHours() * 60 + fDate.getMinutes();
-      return mins >= (12 * 60) && mins < (16 * 60);
+    const facturasAntofagastaHoy = (facturasBitacora || []).filter((f: any) => {
+      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (!isAntofagasta) return false;
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
-    const ejec2330 = facturasHoy.some((f: any) => {
-      const fDate = new Date(f.fecha_proceso);
-      const mins = fDate.getHours() * 60 + fDate.getMinutes();
-      return mins >= (22 * 60 + 30);
+    const ejecucion1400Registrada = facturasStuedemannHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window1400Start && parsed.minutes <= alert1400Time;
     });
 
-    const falta1400 = esHora1400Pasada && !ejec1400;
-    const falta2330 = esHora2330Pasada && !ejec2330;
+    const ejecucion2330Registrada = facturasStuedemannHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window2330Start && parsed.minutes <= alert2330Time;
+    });
 
-    return falta1400 || falta2330;
+    const ejecucion1200AntofagastaRegistrada = facturasAntofagastaHoy.some((f: any) => {
+      const parsed = parseLocalStringDate(f.fecha_proceso);
+      if (!parsed) return false;
+      return parsed.minutes >= window1200AntofagastaStart && parsed.minutes <= alert1200AntofagastaTime;
+    });
+
+    const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
+    const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
+    const falta1200Antofagasta = esHora1200AntofagastaPasada && !ejecucion1200AntofagastaRegistrada;
+
+    return falta1400 || falta2330 || falta1200Antofagasta;
   }, [facturasBitacora]);
 
   const isDteScheduleMissing = useMemo(() => {
     const now = new Date();
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-    const alert1330CutoffInMinutes = 15 * 60 + 30; // Alerta si son pasadas las 15:30 y no ejecutó
-    const alert2300CutoffInMinutes = 24 * 60;
-    const esHora1330Pasada = currentTimeInMinutes >= alert1330CutoffInMinutes;
-    const esHora2300Pasada = currentTimeInMinutes >= alert2300CutoffInMinutes;
+
+    // 1. Primera ejecución 13:30: Rango 12:45 a 15:00, alerta desde las 15:00
+    const window1330Start = 12 * 60 + 45; // 12:45 PM
+    const alert1330Time = 15 * 60;        // 15:00 PM
+    
+    // 2. Segunda ejecución 23:00: Rango 22:30 a 23:59, alerta desde las 23:59 (00:00)
+    const window2300Start = 22 * 60 + 30; // 22:30 PM
+    const alert2300Time = 23 * 60 + 59;   // 23:59 PM (00:00)
+
+    const esHora1330Pasada = currentTimeInMinutes >= alert1330Time;
+    const esHora2300Pasada = currentTimeInMinutes >= alert2300Time;
+
     const hoyStr = format(now, "yyyy-MM-dd");
 
     const dteHoy = (dteLogs || []).filter((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      if (!fecha) return false;
-      const dDate = new Date(fecha);
-      if (isNaN(dDate.getTime())) return false;
-      return format(dDate, "yyyy-MM-dd") === hoyStr;
+      const parsed = parseLocalStringDate(fecha);
+      return parsed && parsed.dateStr === hoyStr;
     });
 
-    const ejec1330 = dteHoy.some((d: any) => {
+    const ejecucion1330Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      const dDate = new Date(fecha);
-      const mins = dDate.getHours() * 60 + dDate.getMinutes();
-      return mins >= (11 * 60 + 30) && mins < (15 * 60 + 30);
+      const parsed = parseLocalStringDate(fecha);
+      if (!parsed) return false;
+      return parsed.minutes >= window1330Start && parsed.minutes <= alert1330Time;
     });
 
-    const ejec2300 = dteHoy.some((d: any) => {
+    const ejecucion2300Registrada = dteHoy.some((d: any) => {
       const fecha = d.fecha_inicio_ejecucion || d.fecha_proceso;
-      const dDate = new Date(fecha);
-      const mins = dDate.getHours() * 60 + dDate.getMinutes();
-      return mins >= (22 * 60);
+      const parsed = parseLocalStringDate(fecha);
+      if (!parsed) return false;
+      return parsed.minutes >= window2300Start && parsed.minutes <= alert2300Time;
     });
 
-    const falta1330 = esHora1330Pasada && !ejec1330;
-    const falta2300 = esHora2300Pasada && !ejec2300;
+    const falta1330 = esHora1330Pasada && !ejecucion1330Registrada;
+    const falta2300 = esHora2300Pasada && !ejecucion2300Registrada;
 
     return falta1330 || falta2300;
   }, [dteLogs]);
