@@ -46,6 +46,20 @@ interface TicketItem {
   estado_descripcion?: string;
 }
 
+const formatTicketDate = (fechaStr?: string) => {
+  if (!fechaStr) return "N/A";
+  const cleanStr = String(fechaStr).replace("Z", "");
+  const match = cleanStr.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):?(\d{2})?/);
+  if (match) {
+    const [_, datePart, hh, mm, ss] = match;
+    const [yyyy, MM, dd] = datePart.split("-");
+    return `${dd}/${MM}/${yyyy} ${hh}:${mm}`;
+  }
+  const d = new Date(fechaStr);
+  if (isNaN(d.getTime())) return fechaStr;
+  return format(d, "dd/MM/yyyy HH:mm");
+};
+
 const EXPORT_FIELDS = [
   { id: "id_incidencia", label: "N° Ticket", default: true },
   { id: "area_nombre", label: "Área Asignada", default: true },
@@ -252,7 +266,7 @@ export function SupportTab() {
       tecnico: (t) => t.tecnico || "Sin Asignar",
       contacto_nombre: (t) => t.contacto_nombre || "Sin Nombre",
       codigo_cliente: (t) => t.codigo_cliente || "N/A",
-      fecha_detalle: (t) => t.fecha_detalle ? format(new Date(t.fecha_detalle), "dd/MM/yyyy HH:mm") : "N/A",
+      fecha_detalle: (t) => formatTicketDate(t.fecha_detalle),
       id_area: (t) => t.id_area ?? "N/A",
       id_accion: (t) => t.id_accion ?? "N/A",
       exportDate: () => format(new Date(), "dd/MM/yyyy HH:mm:ss"),
@@ -639,7 +653,7 @@ export function SupportTab() {
 
                     {/* Fecha de Registro */}
                     <TableCell className="text-xs text-slate-500 font-mono text-right">
-                      {t.fecha_detalle ? format(new Date(t.fecha_detalle), "dd/MM/yyyy HH:mm") : "N/A"}
+                      {formatTicketDate(t.fecha_detalle)}
                     </TableCell>
 
                     {/* Botón Ver más detalle */}
