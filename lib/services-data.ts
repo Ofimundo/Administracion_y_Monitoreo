@@ -71,6 +71,7 @@ const baseServices: Service[] = [
     status: "success",
     clients: [
       { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" },
+      { id: "cl_automovil_club", name: "AUTOMOVIL CLUB DE CHILE", errorPercentage: 0, status: "success" },
       { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", errorPercentage: 0, status: "success" },
     ],
     logs: [
@@ -271,14 +272,33 @@ export { services };
 
 // Función para obtener servicios de un cliente
 export const getClientServices = (clientId: string): Service[] => {
-  const client = clients.find(c => c.id === clientId);
-  if (!client || !client.services) return [];
+  const client = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")));
+  if (!client || !client.services) {
+    if (clientId === "cl_cmds_antofagasta" || clientId.includes("antofagasta")) {
+      return services.filter(s => s.id === "facturas");
+    }
+    return services.filter(s => s.id === "facturas");
+  }
   return services.filter(service => client.services?.includes(service.id) && !service.isComingSoon);
 };
 
 // Función para obtener cliente por ID con datos completos
 export const getClientById = (clientId: string): Client | undefined => {
-  return clients.find(c => c.id === clientId);
+  const found = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")));
+  if (found) return found;
+  if (clientId === "cl_cmds_antofagasta" || clientId.includes("antofagasta")) {
+    return {
+      id: "cl_cmds_antofagasta",
+      name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA",
+      rut: "70.892.100-9",
+      email: "contacto@cmds.cl",
+      phone: "+56 55 288 7000",
+      errorPercentage: 0,
+      status: "success",
+      services: ["facturas"]
+    };
+  }
+  return undefined;
 };
 
 // Función para resetear servicios a estado base (útil para recarga)
@@ -489,12 +509,18 @@ export async function initializeDatabaseData(): Promise<boolean> {
         }
       });
 
-      // Asegurar cliente de Antofagasta
+      // Asegurar cliente estático (Antofagasta)
       const staticClients = [
         { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as const, services: ["facturas"] }
       ];
       staticClients.forEach(sc => {
-        if (!dbClients.some(c => c.id === sc.id || c.name === sc.name)) {
+        const existingIndex = dbClients.findIndex(c => c.id === sc.id || c.name.toUpperCase().includes("ANTOFAGASTA"));
+        if (existingIndex !== -1) {
+          dbClients[existingIndex].id = sc.id;
+          if (!dbClients[existingIndex].services?.includes("facturas")) {
+            dbClients[existingIndex].services = [...(dbClients[existingIndex].services || []), "facturas"];
+          }
+        } else {
           dbClients.push(sc);
         }
       });

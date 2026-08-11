@@ -93,6 +93,7 @@ interface Filters {
   search: string;
   estado: string;
   tipoDocumento: string;
+  cliente: string;
   fechaDesde: Date | null;
   fechaHasta: Date | null;
 }
@@ -119,6 +120,10 @@ export function InvoiceAcceptanceDashboard() {
   const [bitacora, setBitacora] = useState<BitacoraEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Estados de Monitoreo MON.Monitoreo_Ejecucion
+  const [monitoreoEjecuciones, setMonitoreoEjecuciones] = useState<any[]>([]);
+  const [monitoreoLoading, setMonitoreoLoading] = useState(false);
+
   // Estados de exportación
   const [showExportModal, setShowExportModal] = useState(false);
   const [selectedFields, setSelectedFields] = useState<string[]>(() =>
@@ -131,6 +136,7 @@ export function InvoiceAcceptanceDashboard() {
     search: "",
     estado: "todos",
     tipoDocumento: "todos",
+    cliente: "todos",
     fechaDesde: null,
     fechaHasta: null,
   });
@@ -162,14 +168,31 @@ export function InvoiceAcceptanceDashboard() {
     if (filters.search && filters.search.trim() !== "") count++;
     if (filters.estado !== "todos") count++;
     if (filters.tipoDocumento !== "todos") count++;
+    if (filters.cliente !== "todos") count++;
     if (filters.fechaDesde || filters.fechaHasta) count++;
     setActiveFiltersCount(count);
   }, [filters]);
+
+  const fetchMonitoreoEjecucion = async () => {
+    try {
+      setMonitoreoLoading(true);
+      const res = await fetch("/api/facturas/monitoreo-ejecucion");
+      const data = await res.json();
+      if (data.success && data.data) {
+        setMonitoreoEjecuciones(data.data);
+      }
+    } catch (e) {
+      console.error("Error al cargar monitoreo ejecucion:", e);
+    } finally {
+      setMonitoreoLoading(false);
+    }
+  };
 
   // Cargar datos iniciales
   useEffect(() => {
     fetchBitacora();
     fetchSimulatedDb();
+    fetchMonitoreoEjecucion();
   }, []);
 
   const fetchBitacora = async () => {
@@ -186,8 +209,14 @@ export function InvoiceAcceptanceDashboard() {
       if (filters.tipoDocumento !== "todos") {
         params.append("tipoDocumento", filters.tipoDocumento);
       }
+      if (filters.cliente && filters.cliente !== "todos") {
+        params.append("cliente", filters.cliente);
+      }
       if (filters.fechaDesde) {
         params.append("fechaDesde", format(filters.fechaDesde, "yyyy-MM-dd"));
+      }
+      if (filters.fechaHasta) {
+        params.append("fechaHasta", format(filters.fechaHasta, "yyyy-MM-dd"));
       }
       if (filters.fechaHasta) {
         params.append("fechaHasta", format(filters.fechaHasta, "yyyy-MM-dd"));
@@ -677,6 +706,20 @@ export function InvoiceAcceptanceDashboard() {
                     </div>
 
                     <div className="space-y-2">
+                      <Label className="text-xs font-semibold">Cliente</Label>
+                      <Select value={filters.cliente || "todos"} onValueChange={(value) => setFilters({ ...filters, cliente: value })}>
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">🌐 Todos los clientes</SelectItem>
+                          <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                          <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE ANTOFAGASTA</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
                       <Label className="text-xs font-semibold">Estado</Label>
                       <Select value={filters.estado} onValueChange={(value) => setFilters({ ...filters, estado: value })}>
                         <SelectTrigger className="h-9 text-sm">
@@ -859,6 +902,132 @@ export function InvoiceAcceptanceDashboard() {
                   <Button variant="link" size="sm" onClick={handleResetFilters} className="mt-2">
                     Limpiar filtros
                   </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* PESTAÑA MONITOREO DE EJECUCIÓN (CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA) */}
+        <TabsContent value="monitoreo" className="space-y-4">
+          <Card className="border-emerald-500/30">
+            <CardHeader className="bg-gradient-to-r from-emerald-950/10 via-background to-background">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge className="bg-emerald-600 text-white font-bold">🏛️ CORP MUNICIPAL DE ANTOFAGASTA</Badge>
+                    <Badge variant="outline" className="border-emerald-500 text-emerald-600 font-semibold">
+                      ⏰ Ejecución Diaria: 12:00 PM (Ventana 11:45 AM - 13:00 PM)
+                    </Badge>
+                  </div>
+                  <CardTitle className="text-xl mt-2 flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-emerald-500" />
+                    Monitoreo de Ejecuciones Diarias (`MON.Monitoreo_Ejecucion`)
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    Control diario del servicio automatizado de Aceptación y Rechazo de Facturas para la Corporación Municipal de Desarrollo Social de Antofagasta. Ejecución programada una vez al día a las 12:00 PM. Si no se ejecuta en la ventana de 11:45 AM a 13:00 PM el estado pasa a ser <strong>CRÍTICO</strong>.
+                  </CardDescription>
+                </div>
+                <Button onClick={fetchMonitoreoEjecucion} variant="outline" size="sm" className="gap-2">
+                  <RefreshCw className={cn("h-4 w-4", monitoreoLoading && "animate-spin")} />
+                  Actualizar Ejecuciones
+                </Button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="pt-6">
+              {monitoreoLoading ? (
+                <div className="py-16 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-emerald-500 mb-2" />
+                  <p className="text-sm text-muted-foreground">Cargando registro de ejecuciones de `MON.Monitoreo_Ejecucion`...</p>
+                </div>
+              ) : monitoreoEjecuciones.length > 0 ? (
+                <div className="space-y-6">
+                  {/* Resumen de Ejecución Más Reciente */}
+                  {monitoreoEjecuciones[0] && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                      <div>
+                        <span className="text-xs text-muted-foreground block font-medium">Última Ejecución</span>
+                        <span className="text-sm font-bold">{format(new Date(monitoreoEjecuciones[0].FechaHoraInicio), "dd/MM/yyyy HH:mm:ss")}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block font-medium">Estado de Ejecución</span>
+                        <Badge className={cn("mt-1", monitoreoEjecuciones[0].EstadoEjecucion === "Exitosa" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600")}>
+                          {monitoreoEjecuciones[0].EstadoEjecucion === "Exitosa" ? "✅ Exitosa (Rango Cumplido)" : `❌ Error: ${monitoreoEjecuciones[0].ErrorDescripcion || 'Fallo de Ejecución'}`}
+                        </Badge>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block font-medium">Total Facturas Procesadas</span>
+                        <span className="text-xl font-black text-emerald-700 dark:text-emerald-400">{monitoreoEjecuciones[0].TotalRegistros || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground block font-medium">Aceptados vs Rechazados</span>
+                        <span className="text-sm font-semibold text-emerald-600">{monitoreoEjecuciones[0].TotalAceptados || 0} Aceptados</span>
+                        <span className="text-xs text-red-500 ml-2">({monitoreoEjecuciones[0].TotalRechazados || 0} Rechazados)</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tabla Completa MON.Monitoreo_Ejecucion */}
+                  <div className="border rounded-lg overflow-x-auto">
+                    <Table>
+                      <TableHeader className="bg-muted/50">
+                        <TableRow>
+                          <TableHead>Fecha Inicio</TableHead>
+                          <TableHead>Fecha Término</TableHead>
+                          <TableHead>Período</TableHead>
+                          <TableHead className="text-center">Total Registros</TableHead>
+                          <TableHead className="text-center">Aceptados</TableHead>
+                          <TableHead className="text-center">Rechazados</TableHead>
+                          <TableHead className="text-center">Pendientes</TableHead>
+                          <TableHead className="text-center">Excepcionados</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Reportes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {monitoreoEjecuciones.map((ej: any, idx: number) => (
+                          <TableRow key={ej.IdEjecucion || idx} className="hover:bg-muted/30">
+                            <TableCell className="font-semibold text-xs">
+                              {format(new Date(ej.FechaHoraInicio), "dd/MM/yyyy HH:mm:ss")}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {ej.FechaHoraTermino ? format(new Date(ej.FechaHoraTermino), "dd/MM/yyyy HH:mm:ss") : "En curso..."}
+                            </TableCell>
+                            <TableCell className="text-xs">{ej.PeriodoActual || "N/A"}</TableCell>
+                            <TableCell className="text-center font-bold">{ej.TotalRegistros ?? 0}</TableCell>
+                            <TableCell className="text-center text-emerald-600 font-semibold">{ej.TotalAceptados ?? 0}</TableCell>
+                            <TableCell className="text-center text-red-600 font-semibold">{ej.TotalRechazados ?? 0}</TableCell>
+                            <TableCell className="text-center text-amber-600 font-semibold">{ej.TotalPendientes ?? 0}</TableCell>
+                            <TableCell className="text-center text-purple-600 font-semibold">{ej.TotalExcepcionados ?? 0}</TableCell>
+                            <TableCell>
+                              <Badge className={cn("text-[10px]", ej.EstadoEjecucion === "Exitosa" ? "bg-emerald-500" : "bg-red-500")}>
+                                {ej.EstadoEjecucion || "Exitosa"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                {ej.RutaReporteDiario && (
+                                  <Badge variant="outline" className="text-[10px] gap-1 cursor-pointer hover:bg-emerald-50" title={ej.RutaReporteDiario}>
+                                    <FileSpreadsheet className="h-3 w-3 text-emerald-600" /> Diario
+                                  </Badge>
+                                )}
+                                {ej.RutaReporteMensual && (
+                                  <Badge variant="outline" className="text-[10px] gap-1 cursor-pointer hover:bg-blue-50" title={ej.RutaReporteMensual}>
+                                    <FileText className="h-3 w-3 text-blue-600" /> Mensual
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-muted-foreground">
+                  No se encontraron ejecuciones registradas en `MON.Monitoreo_Ejecucion`.
                 </div>
               )}
             </CardContent>

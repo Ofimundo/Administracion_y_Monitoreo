@@ -288,7 +288,49 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
   const getClientWithRealData = (client: Client): Client => {
     const isSgcDown = client.services?.includes("sgc") && !sgcPingOk;
     const isOfitecDown = client.services?.includes("ofitec") && !ofitecStatus.disponible;
-    const isFacturasDown = client.services?.includes("facturas") && isFacturasScheduleMissing;
+
+    const isAntofagasta = client.id === "cl_cmds_antofagasta" || client.name.toUpperCase().includes("ANTOFAGASTA");
+
+    let isFacturasDown = false;
+    if (client.services?.includes("facturas")) {
+      const now = new Date();
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+      const hoyStr = format(now, "yyyy-MM-dd");
+
+      if (isAntofagasta) {
+        const esHora1200AntofagastaPasada = currentTimeInMinutes >= (13 * 60);
+        const facturasAntofagastaHoy = (facturasBitacora || []).filter((f: any) => {
+          const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+          if (!isAnt) return false;
+          const parsed = parseLocalStringDate(f.fecha_proceso);
+          return parsed && parsed.dateStr === hoyStr;
+        });
+        const ejecucionOk = facturasAntofagastaHoy.some((f: any) => {
+          const parsed = parseLocalStringDate(f.fecha_proceso);
+          return parsed && parsed.minutes >= (11 * 60 + 45) && parsed.minutes <= (13 * 60);
+        });
+        isFacturasDown = esHora1200AntofagastaPasada && !ejecucionOk;
+      } else {
+        const esHora1400Pasada = currentTimeInMinutes >= (15 * 60);
+        const esHora2330Pasada = currentTimeInMinutes >= (23 * 60 + 59);
+        const facturasStuedemannHoy = (facturasBitacora || []).filter((f: any) => {
+          const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+          if (isAnt) return false;
+          const parsed = parseLocalStringDate(f.fecha_proceso);
+          return parsed && parsed.dateStr === hoyStr;
+        });
+        const ejecucion1400Ok = facturasStuedemannHoy.some((f: any) => {
+          const parsed = parseLocalStringDate(f.fecha_proceso);
+          return parsed && parsed.minutes >= (13 * 60 + 45) && parsed.minutes <= (15 * 60);
+        });
+        const ejecucion2330Ok = facturasStuedemannHoy.some((f: any) => {
+          const parsed = parseLocalStringDate(f.fecha_proceso);
+          return parsed && parsed.minutes >= (23 * 60) && parsed.minutes <= (23 * 60 + 59);
+        });
+        isFacturasDown = (esHora1400Pasada && !ejecucion1400Ok) || (esHora2330Pasada && !ejecucion2330Ok);
+      }
+    }
+
     const isDteDown = client.services?.includes("dte") && isDteScheduleMissing;
 
     if (isSgcDown || isOfitecDown || isFacturasDown || isDteDown) {
@@ -779,6 +821,7 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
           </VisuallyHidden>
           {selectedClient && (
             <ClientDashboard
+              key={selectedClient.id}
               clientId={selectedClient.id}
               onClose={() => {
                 setShowDashboard(false);

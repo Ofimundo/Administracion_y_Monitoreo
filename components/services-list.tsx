@@ -942,6 +942,7 @@ export function ServicesList() {
           </DialogHeader>
           {selectedClient && (
             <ClientDashboard 
+              key={selectedClient.id}
               clientId={selectedClient.id} 
               onClose={() => {
                 setShowClientDashboard(false);

@@ -2241,7 +2241,20 @@ export function DashboardMetrics({
             <div className="bg-white border rounded-lg p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Infraestructura</span>
-                <Server className="h-4 w-4 text-blue-500" />
+                <div className="flex items-center gap-0.5">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    asChild
+                    className="h-5 w-5 text-slate-400 hover:text-blue-600 hover:bg-slate-50"
+                    title="Ir a Infraestructura (http://54.20.80.88:3000/)"
+                  >
+                    <a href="http://54.20.80.88:3000/" target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </Button>
+                  <Server className="h-4 w-4 text-blue-500 ml-1 shrink-0" />
+                </div>
               </div>
               <p className={cn(
                 "text-xl font-black mt-1",
@@ -2250,7 +2263,18 @@ export function DashboardMetrics({
               )}>
                 {infraestructuraZabbix.toFixed(2)}%
               </p>
-              <span className="text-[8px] text-slate-400 block mt-1">Servidores Core y BD</span>
+              <div className="flex items-center justify-between text-[8px] text-slate-400 mt-1">
+                <span>Servidores Core y BD</span>
+                <a 
+                  href="http://54.20.80.88:3000/" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-blue-600 hover:text-blue-700 font-bold flex items-center gap-0.5 hover:underline"
+                  title="Ir a Infraestructura (http://54.20.80.88:3000/)"
+                >
+                  Ver panel <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </div>
             </div>
 
             <div 
@@ -2450,7 +2474,7 @@ export function DashboardMetrics({
             <div>
               <h3 className="text-xs font-bold text-slate-805 tracking-tight uppercase flex items-center gap-1.5">
                 <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
-                Monitoreo de Fichas de Prospecto
+                Pipeline de Negocios
               </h3>
               <p className="text-[9px] text-slate-400">Total Fichas: {prospects.length} | Sincronizado cada minuto</p>
             </div>

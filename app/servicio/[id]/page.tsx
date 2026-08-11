@@ -284,16 +284,12 @@ export default function ServiceDetailPage() {
             sgcOrigenSoftland: 0,
           });
           
-          const singleClient: Client = {
-            id: "cl_ofimundo",
-            name: "Ofimundo S.A. (Softland ERP)",
-            rut: "76.452.910-K",
-            email: "rpa-invoice@ofimundo.cl",
-            phone: "+56 2 2840 9300",
-            errorPercentage: errorPercentage,
-            status: status as any,
-          };
-          setLiveClients([singleClient]);
+          const facturasClients: Client[] = [
+            { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: errorPercentage, status: status as any, services: ["facturas"] },
+            { id: "cl_automovil_club", name: "AUTOMOVIL CLUB DE CHILE", rut: "81.464.600-9", email: "contacto@automovilclub.cl", phone: "+56 2 2500 0000", errorPercentage: 0, status: "success" as any, services: ["facturas"] },
+            { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "71.102.600-2", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as any, services: ["facturas"] }
+          ];
+          setLiveClients(facturasClients);
           setHasStatsFilter(false);
         } else {
           setRawData([]);
@@ -861,15 +857,25 @@ export default function ServiceDetailPage() {
   }, [params.id]);
 
   const handleOpenClientDashboard = (client: Client) => {
-    setSelectedClient(client);
+    let resolvedClient = { ...client };
+    const nameLower = (client.name || "").toLowerCase();
+    if (client.id === "cl_cmds_antofagasta" || nameLower.includes("antofagasta")) {
+      resolvedClient.id = "cl_cmds_antofagasta";
+      resolvedClient.name = "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA";
+    } else if (client.id === "cl_stuedemann" || nameLower.includes("stuedemann")) {
+      resolvedClient.id = "cl_stuedemann";
+      resolvedClient.name = "STUEDEMANN S.A.";
+    }
+    setSelectedClient(resolvedClient);
     setShowClientDashboard(true);
   };
 
   const displayClients = useMemo(() => {
+    if (liveClients.length > 0) return liveClients;
     if (serviceClients.length > 0) return serviceClients;
     const currentService = getServiceById(params.id as string) || services.find(s => s.id === params.id);
     return currentService?.clients || [];
-  }, [serviceClients, params.id]);
+  }, [liveClients, serviceClients, params.id]);
 
   // Mostrar pantalla de "Próximamente" para servicios en desarrollo
   if (comingSoon && params.id !== "facturas") {
@@ -1633,6 +1639,7 @@ export default function ServiceDetailPage() {
             </DialogHeader>
             {selectedClient && (
               <ClientDashboard 
+                key={selectedClient.id}
                 clientId={selectedClient.id} 
                 onClose={() => {
                   setShowClientDashboard(false);
