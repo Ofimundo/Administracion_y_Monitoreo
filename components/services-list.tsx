@@ -1292,22 +1292,7 @@ export function ServicesList() {
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-1.5 mt-1.5 border-t border-slate-200/60 dark:border-slate-800 text-[11px]">
-                  {item.client ? (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] cursor-pointer hover:bg-muted font-medium bg-background px-1 py-0 h-5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/clientes?cliente=${item.client?.id}`);
-                      }}
-                      title={`Ver detalle de ${item.client.name}`}
-                    >
-                      Ver Cliente
-                    </Badge>
-                  ) : (
-                    <span className="text-[9px] text-muted-foreground">General</span>
-                  )}
+                <div className="flex items-center justify-end pt-1.5 mt-1.5 border-t border-slate-200/60 dark:border-slate-800 text-[11px]">
 
                   {item.isComingSoon ? (
                     <Button variant="ghost" size="sm" className="h-6 text-[10px] text-gray-400 cursor-not-allowed px-1" disabled>

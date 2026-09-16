@@ -43,16 +43,9 @@ export function PickingDashboardCharts({ pickingStats }: PickingDashboardChartsP
 
   const totalPickings = pendientesCount + enProcesoCount + finalizadosCount;
 
-  // Conteo por origen (Automático vs Manual)
-  const automaticosCount =
-    pickingStats?.kpis?.automaticos ??
-    pickingStats?.origin?.find((o) => o.origen === "automatico")?.count ??
-    Math.round(totalPickings * 0.76);
-
-  const manualesCount =
-    pickingStats?.kpis?.manuales ??
-    pickingStats?.origin?.find((o) => o.origen === "manual")?.count ??
-    Math.max(0, totalPickings - automaticosCount);
+  // Conteo por origen (Automático vs Manual según solicitudes MI_CUENTA)
+  const automaticosCount = pickingStats?.kpis?.automaticos ?? 0;
+  const manualesCount = pickingStats?.kpis?.manuales ?? 0;
 
   return (
     <div className="space-y-4">

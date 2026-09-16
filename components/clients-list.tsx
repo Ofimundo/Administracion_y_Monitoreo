@@ -49,6 +49,8 @@ import {
   Clock,
   FileSpreadsheet,
   Download,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -638,209 +640,141 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
               <Card
                 key={client.id}
                 className={cn(
-                  "transition-all hover:shadow-lg flex flex-col h-full justify-between",
-                  getStatusColor(clientWithData.status)
+                  "cursor-pointer transition-all hover:shadow-sm flex flex-col justify-between p-2.5 border rounded-lg bg-card text-xs",
+                  clientWithData.status === "error"
+                    ? "border-red-200 bg-red-50/40 hover:bg-red-50/70 dark:bg-red-950/20"
+                    : clientWithData.status === "warning"
+                    ? "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/20"
+                    : "border-emerald-200/80 bg-emerald-50/30 hover:bg-emerald-50/60 dark:bg-emerald-950/20"
                 )}
+                onClick={() => hasTelemetryData && handleOpenDashboard(clientWithData)}
               >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shrink-0",
-                        clientWithData.status === "success" ? "bg-emerald-500" :
-                        clientWithData.status === "warning" ? "bg-amber-500" : "bg-red-500"
-                      )}>
-                        {client.name.charAt(0)}
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg leading-tight line-clamp-2">{client.name}</CardTitle>
-                        {client.rut && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                            <Building className="h-3 w-3" />
-                            {client.rut}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <StatusIndicator 
-                      status={clientWithData.status} 
-                      percentage={clientWithData.errorPercentage} 
-                      size="md" 
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="flex-1 flex flex-col justify-between pt-0 pb-4">
-                  <div className="space-y-3 mt-1 flex-1">
-                    {/* Badge indicador de datos y horario */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {hasTelemetryData ? (
-                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                          📡 Datos en tiempo real
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
-                          ✅ Servicios Activos
-                        </Badge>
+                <div>
+                  <div className="flex items-center justify-between gap-1 text-[10px] font-semibold text-muted-foreground mb-0.5">
+                    <span className="uppercase tracking-wider flex items-center gap-1 truncate text-primary/80">
+                      <Building className="h-2.5 w-2.5 shrink-0" />
+                      {client.rut || "CLIENTE"}
+                    </span>
+                    <Badge
+                      className={cn(
+                        "text-[9px] font-bold py-0 px-1 shrink-0 h-4 flex items-center",
+                        clientWithData.status === "error"
+                          ? "bg-red-100 text-red-700 border-red-200"
+                          : clientWithData.status === "warning"
+                          ? "bg-amber-100 text-amber-700 border-amber-200"
+                          : "bg-emerald-100 text-emerald-700 border-emerald-200"
                       )}
-                      {(client.id === "cl_automovil_club" || client.name.toUpperCase().includes("AUTOMOVIL")) && (
-                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
-                          ⏰ Programado: 10:05 hrs
-                        </Badge>
-                      )}
-                      {(client.id === "cl_cmds_antofagasta" || client.name.toUpperCase().includes("ANTOFAGASTA")) && (
-                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
-                          ⏰ Programado: 12:00 hrs
-                        </Badge>
-                      )}
-                      {(client.id === "cl_corpesca" || client.name.toUpperCase().includes("CORPESCA")) && (
-                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
-                          ⏰ Programado: 22:00 hrs
-                        </Badge>
-                      )}
-                      {(client.id === "cl_stuedemann" || client.name.toUpperCase().includes("STUEDEMANN")) && (
-                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
-                          ⏰ Programado: 14:00 & 23:30 hrs
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <div className="bg-muted/50 rounded-lg p-2 text-center">
-                        <p className="text-2xl font-bold">{clientServices.length}</p>
-                        <p className="text-xs text-muted-foreground">Servicios Activos</p>
-                      </div>
-                      <div className="bg-muted/50 rounded-lg p-2 text-center">
-                        <p className={cn(
-                          "text-2xl font-bold",
-                          clientWithData.errorPercentage === 0 ? "text-emerald-600" :
-                          clientWithData.errorPercentage <= 10 ? "text-amber-600" : "text-red-600"
-                        )}>
-                          {clientWithData.errorPercentage}%
-                        </p>
-                        <p className="text-xs text-muted-foreground">Error técnico</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Tasa de éxito</span>
-                        <span className="font-medium">{successRate}%</span>
-                      </div>
-                      <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div 
-                          className={cn(
-                            "h-full rounded-full transition-all",
-                            successRate >= 90 ? "bg-emerald-500" :
-                            successRate >= 80 ? "bg-amber-500" : "bg-red-500"
-                          )}
-                          style={{ width: `${successRate}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Servicios contratados activos */}
-                    {clientServices.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-1 max-h-[80px] overflow-y-auto">
-                        {clientServices.map(service => (
-                          <Badge 
-                            key={service.id} 
-                            variant="outline" 
-                            className={cn(
-                              "text-[10px] transition-colors",
-                              hasTelemetryData 
-                                ? "bg-muted/30 border-muted-foreground/20 cursor-pointer hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300"
-                                : "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-default"
-                            )}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (hasTelemetryData) {
-                                handleGoToServiceMonitoring(service.id, service.name);
-                              }
-                            }}
-                          >
-                            <Briefcase className="h-2.5 w-2.5 mr-1 text-emerald-500" />
-                            {service.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2 mt-4 pt-3 border-t">
-                    <Button 
-                      variant="outline"
-                      size="sm" 
-                      className={cn("flex-1 gap-1", !hasTelemetryData && "opacity-50 cursor-not-allowed")}
-                      disabled={!hasTelemetryData}
-                      title={hasTelemetryData ? "Ver Dashboard del Cliente" : "Sin telemetría de monitoreo disponible para este cliente"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (hasTelemetryData) handleOpenDashboard(clientWithData);
-                      }}
                     >
-                      <Eye className="h-3 w-3" />
-                      Dashboard
-                    </Button>
-                    
-                    {hasTelemetryData ? (
-                      clientServices.length > 1 ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button 
-                              variant="default"
-                              size="sm" 
-                              className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <LayoutDashboard className="h-3 w-3" />
-                              Monitorear...
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56">
-                            {clientServices.map(service => (
-                              <DropdownMenuItem
-                                key={service.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleGoToServiceMonitoring(service.id, service.name);
-                                }}
-                                className="cursor-pointer"
-                              >
-                                <Briefcase className="h-3.5 w-3.5 mr-2 text-emerald-500" />
-                                <span>{service.name}</span>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : firstService ? (
-                        <Button 
-                          variant="default"
-                          size="sm" 
-                          className="flex-1 gap-1 bg-emerald-600 hover:bg-emerald-700"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleGoToServiceMonitoring(firstService.id, firstService.name);
-                          }}
-                        >
-                          <LayoutDashboard className="h-3 w-3" />
-                          Monitorear
-                          <ArrowRight className="h-3 w-3" />
-                        </Button>
-                      ) : null
-                    ) : (
-                      <Button 
-                        variant="secondary"
-                        size="sm" 
-                        className="flex-1 gap-1 opacity-50 cursor-not-allowed"
-                        disabled
-                        title="Próximamente disponible - Sin datos de monitoreo en vivo"
-                      >
-                        <LayoutDashboard className="h-3 w-3" />
-                        Próximamente
-                      </Button>
+                      {`${clientWithData.errorPercentage}% err`}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    <div className="flex items-center gap-1 min-w-0">
+                      {clientWithData.status === "error" ? (
+                        <AlertCircle className="h-3.5 w-3.5 text-red-600 shrink-0" />
+                      ) : clientWithData.status === "warning" ? (
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      ) : (
+                        <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      )}
+                      <h4 className="font-bold text-xs text-foreground truncate" title={client.name}>
+                        {client.name}
+                      </h4>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px]">
+                    <span className="text-[9.5px] font-medium text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border/60 truncate">
+                      {clientServices.length} {clientServices.length === 1 ? "servicio activo" : "servicios activos"}
+                    </span>
+                    {(client.id === "cl_automovil_club" || client.name.toUpperCase().includes("AUTOMOVIL")) && (
+                      <span className="text-[9.5px] font-medium text-amber-800 bg-amber-50 px-1 rounded border border-amber-200 truncate">
+                        ⏰ 10:05 hrs
+                      </span>
+                    )}
+                    {(client.id === "cl_cmds_antofagasta" || client.name.toUpperCase().includes("ANTOFAGASTA")) && (
+                      <span className="text-[9.5px] font-medium text-amber-800 bg-amber-50 px-1 rounded border border-amber-200 truncate">
+                        ⏰ 12:00 hrs
+                      </span>
+                    )}
+                    {(client.id === "cl_corpesca" || client.name.toUpperCase().includes("CORPESCA")) && (
+                      <span className="text-[9.5px] font-medium text-amber-800 bg-amber-50 px-1 rounded border border-amber-200 truncate">
+                        ⏰ 22:00 hrs
+                      </span>
+                    )}
+                    {(client.id === "cl_stuedemann" || client.name.toUpperCase().includes("STUEDEMANN")) && (
+                      <span className="text-[9.5px] font-medium text-amber-800 bg-amber-50 px-1 rounded border border-amber-200 truncate">
+                        ⏰ 14:00 & 23:30
+                      </span>
                     )}
                   </div>
-                </CardContent>
+                </div>
+
+                <div className="flex items-center justify-between pt-1.5 mt-1.5 border-t border-slate-200/60 dark:border-slate-800 text-[11px]">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn("h-6 text-[10px] font-medium px-1 text-muted-foreground hover:text-foreground", !hasTelemetryData && "opacity-50 cursor-not-allowed")}
+                    disabled={!hasTelemetryData}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hasTelemetryData) handleOpenDashboard(clientWithData);
+                    }}
+                  >
+                    <Eye className="mr-1 h-2.5 w-2.5" />
+                    Dashboard
+                  </Button>
+
+                  {hasTelemetryData ? (
+                    clientServices.length > 1 ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-[10px] font-semibold text-primary hover:bg-primary/10 px-1.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <LayoutDashboard className="mr-1 h-2.5 w-2.5" />
+                            Monitorear...
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          {clientServices.map((service) => (
+                            <DropdownMenuItem
+                              key={service.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleGoToServiceMonitoring(service.id, service.name);
+                              }}
+                              className="cursor-pointer text-xs"
+                            >
+                              <Briefcase className="h-3.5 w-3.5 mr-2 text-primary" />
+                              <span>{service.name}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : firstService ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] font-semibold text-primary hover:bg-primary/10 px-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGoToServiceMonitoring(firstService.id, firstService.name);
+                        }}
+                      >
+                        <LayoutDashboard className="mr-1 h-2.5 w-2.5" />
+                        Monitorear
+                        <ArrowRight className="ml-1 h-2.5 w-2.5" />
+                      </Button>
+                    ) : null
+                  ) : (
+                    <span className="text-[9.5px] text-muted-foreground px-1 py-0.5">Próximamente</span>
+                  )}
+                </div>
               </Card>
             );
           })}

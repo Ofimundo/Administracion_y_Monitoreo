@@ -1350,19 +1350,24 @@ app.get("/api/sgc/picking-stats", async (req, res) => {
     const kpisQuery = `
       DECLARE @MaxDate datetime = (SELECT ISNULL(MAX(Pickc_Fecha_Picking), GETDATE()) FROM SGCX.dbo.Inv_Picking_Cabecera);
       SELECT 
-        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(hour, -24, @MaxDate) THEN Pickc_Folio_Picking END) as vol_24h,
-        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -7, @MaxDate) THEN Pickc_Folio_Picking END) as vol_semana,
-        COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -30, @MaxDate) THEN Pickc_Folio_Picking END) as vol_mes,
-        SUM(CASE WHEN Pickc_Estado = 0 THEN 1 ELSE 0 END) as pendientes,
-        SUM(CASE WHEN Pickc_Estado = 1 THEN 1 ELSE 0 END) as en_proceso,
-        SUM(CASE WHEN Pickc_Estado = 2 THEN 1 ELSE 0 END) as finalizados,
-        SUM(CASE WHEN Pickc_Usuario IS NULL OR LOWER(Pickc_Usuario) IN ('sgc', 'system', 'ws', 'webservice', 'auto', 'automatizador', 'rpa') OR LOWER(Pickc_Usuario) LIKE '%sgc%' THEN 1 ELSE 0 END) as automaticos,
-        SUM(CASE WHEN Pickc_Usuario IS NOT NULL AND LOWER(Pickc_Usuario) NOT IN ('sgc', 'system', 'ws', 'webservice', 'auto', 'automatizador', 'rpa') AND LOWER(Pickc_Usuario) NOT LIKE '%sgc%' THEN 1 ELSE 0 END) as manuales,
-        SUM(CASE WHEN Pickc_Estado = 0 AND Pickc_Fecha_Picking <= DATEADD(hour, -${hours}, GETDATE()) THEN 1 ELSE 0 END) as total_alertas,
-        SUM(CASE WHEN Pickc_Ticket_Mesa_Ayuda IS NOT NULL AND Pickc_Ticket_Mesa_Ayuda > 0 AND Pickc_Fecha_Picking >= DATEADD(month, -3, GETDATE()) THEN 1 ELSE 0 END) as total_tickets
-      FROM SGCX.dbo.Inv_Picking_Cabecera
-      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
-        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
+        COUNT(DISTINCT CASE WHEN c.Pickc_Fecha_Picking >= DATEADD(hour, -24, @MaxDate) THEN c.Pickc_Folio_Picking END) as vol_24h,
+        COUNT(DISTINCT CASE WHEN c.Pickc_Fecha_Picking >= DATEADD(day, -7, @MaxDate) THEN c.Pickc_Folio_Picking END) as vol_semana,
+        COUNT(DISTINCT CASE WHEN c.Pickc_Fecha_Picking >= DATEADD(day, -30, @MaxDate) THEN c.Pickc_Folio_Picking END) as vol_mes,
+        SUM(CASE WHEN c.Pickc_Estado = 0 THEN 1 ELSE 0 END) as pendientes,
+        SUM(CASE WHEN c.Pickc_Estado = 1 THEN 1 ELSE 0 END) as en_proceso,
+        SUM(CASE WHEN c.Pickc_Estado = 2 THEN 1 ELSE 0 END) as finalizados,
+        
+        -- Conteo de Automáticos vs Manuales cruzando con MI_CUENTA.dbo.SOLICITUDES
+        COUNT(DISTINCT CASE WHEN s.CDG_SOLICITUD IS NOT NULL THEN c.Pickc_Folio_Picking END) as manuales,
+        COUNT(DISTINCT CASE WHEN s.CDG_SOLICITUD IS NULL THEN c.Pickc_Folio_Picking END) as automaticos,
+
+        SUM(CASE WHEN c.Pickc_Estado = 0 AND c.Pickc_Fecha_Picking <= DATEADD(hour, -${hours}, GETDATE()) THEN 1 ELSE 0 END) as total_alertas,
+        SUM(CASE WHEN c.Pickc_Ticket_Mesa_Ayuda IS NOT NULL AND c.Pickc_Ticket_Mesa_Ayuda > 0 AND c.Pickc_Fecha_Picking >= DATEADD(month, -3, GETDATE()) THEN 1 ELSE 0 END) as total_tickets
+      FROM SGCX.dbo.Inv_Picking_Cabecera c
+      LEFT JOIN SGCX.OIG.alertas_con_estado a ON a.folio_documento_picking = c.Pickc_Folio_Picking
+      LEFT JOIN MI_CUENTA.dbo.SOLICITUDES s ON CAST(s.CDG_SOLICITUD AS VARCHAR(50)) = CAST(a.folio_documento_picking AS VARCHAR(50))
+      WHERE c.Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND c.Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
     `;
 
     // Query 2: Productividad por estado
