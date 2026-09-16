@@ -72,6 +72,7 @@ import {
   List,
   Flame,
   Briefcase,
+  Building,
 } from "lucide-react";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -1248,8 +1249,8 @@ export function ServicesList() {
                 <div>
                   <div className="flex items-center justify-between gap-1 text-[10px] font-semibold text-muted-foreground mb-0.5">
                     <span className="uppercase tracking-wider flex items-center gap-1 truncate text-primary/80">
-                      <Briefcase className="h-2.5 w-2.5 shrink-0" />
-                      {item.service.name}
+                      <Building className="h-2.5 w-2.5 shrink-0" />
+                      {item.client ? item.client.name : "General"}
                     </span>
                     {item.isComingSoon ? (
                       <Badge variant="outline" className="text-[8px] bg-gray-100 text-gray-600 border-gray-200 shrink-0 px-1 py-0 h-4">
@@ -1274,7 +1275,7 @@ export function ServicesList() {
                         <AlertCircle className="h-3.5 w-3.5 text-red-600 shrink-0" />
                       )}
                       <h4 className="font-bold text-xs text-foreground truncate">
-                        {item.client ? item.client.name : "General"}
+                        {item.service.name}
                       </h4>
                     </div>
                   </div>
@@ -1336,8 +1337,8 @@ export function ServicesList() {
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow>
-                <TableHead className="w-[180px]">Servicio</TableHead>
                 <TableHead className="w-[200px]">Cliente</TableHead>
+                <TableHead className="w-[180px]">Servicio</TableHead>
                 <TableHead className="min-w-[220px]">Descripción</TableHead>
                 <TableHead className="text-center w-[110px]">Error Técnico</TableHead>
                 <TableHead className="text-center w-[110px]">Estado</TableHead>
@@ -1354,8 +1355,9 @@ export function ServicesList() {
                   >
                     <TableCell className="font-medium py-2.5">
                       <div className="flex items-center gap-1.5">
-                        <Briefcase className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span>{item.service.name}</span>
+                        <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span>{item.client ? item.client.name : "General"}</span>
+                        {item.clientDown && <span className="text-[9px] font-bold text-red-600 ml-1">(Sin ejec.)</span>}
                       </div>
                     </TableCell>
 
@@ -1370,8 +1372,7 @@ export function ServicesList() {
                         ) : (
                           <AlertCircle className="h-3.5 w-3.5 text-red-600 shrink-0" />
                         )}
-                        <span>{item.client ? item.client.name : "General"}</span>
-                        {item.clientDown && <span className="text-[9px] font-bold text-red-600 ml-1">(Sin ejec.)</span>}
+                        <span>{item.service.name}</span>
                       </div>
                     </TableCell>
 
@@ -1444,8 +1445,9 @@ export function ServicesList() {
                 onClick={() => !item.isComingSoon && setSelectedService(item.service)}
               >
                 <div>
-                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                    {item.service.name}
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Building className="h-2.5 w-2.5 shrink-0 text-primary/80" />
+                    <span>{item.client ? item.client.name : "General"}</span>
                   </div>
 
                   <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -1457,7 +1459,7 @@ export function ServicesList() {
                       ) : (
                         <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
                       )}
-                      <h4 className="font-bold text-sm text-foreground">{item.client ? item.client.name : "General"}</h4>
+                      <h4 className="font-bold text-sm text-foreground">{item.service.name}</h4>
                     </div>
                     <Badge className={cn("text-[10px] font-bold py-0.5 px-1.5 shrink-0", item.clientDown ? "bg-red-100 text-red-700 border-red-200" : getErrorBadgeColor(item.service, item.errorPercentage))}>
                       {item.isComingSoon ? "Próximamente" : `${item.errorPercentage}% error`}

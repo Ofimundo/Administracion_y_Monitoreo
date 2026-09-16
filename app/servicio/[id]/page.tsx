@@ -61,7 +61,7 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import { ClientDashboard } from "@/components/client-dashboard";
@@ -171,10 +171,10 @@ export default function ServiceDetailPage() {
   });
 
   const [statsDateRange, setStatsDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>(() => {
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
     return {
-      from: new Date(currentYear, 0, 1),
-      to: new Date(currentYear, 11, 31),
+      from: startOfMonth(now),
+      to: endOfMonth(now),
     };
   });
   const [statsClientFilter, setStatsClientFilter] = useState<string>("todos");
@@ -968,10 +968,10 @@ export default function ServiceDetailPage() {
   };
 
   const resetStatsDateFilter = () => {
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
     const defaultRange = {
-      from: new Date(currentYear, 0, 1),
-      to: new Date(currentYear, 11, 31)
+      from: startOfMonth(now),
+      to: endOfMonth(now)
     };
     setStatsDateRange(defaultRange);
     setStatsClientFilter("todos");
@@ -979,7 +979,7 @@ export default function ServiceDetailPage() {
     setHasStatsFilter(false);
     toast({
       title: "Filtro limpiado",
-      description: "Consulta restaurada al rango por defecto",
+      description: "Consulta restaurada al mes en curso",
     });
   };
 
@@ -993,10 +993,10 @@ export default function ServiceDetailPage() {
     loadData();
 
     if (activeServices.includes(serviceId)) {
-      const currentYear = new Date().getFullYear();
+      const now = new Date();
       const defaultRange = {
-        from: new Date(currentYear, 0, 1),
-        to: new Date(currentYear, 11, 31)
+        from: startOfMonth(now),
+        to: endOfMonth(now)
       };
       fetchLiveData(defaultRange);
     }
@@ -1421,7 +1421,9 @@ export default function ServiceDetailPage() {
                       <Select
                         onValueChange={(val) => {
                           const now = new Date();
-                          if (val === "2025") {
+                          if (val === "current-month") {
+                            setStatsDateRange({ from: startOfMonth(now), to: endOfMonth(now) });
+                          } else if (val === "2025") {
                             setStatsDateRange({ from: new Date(2025, 0, 1), to: new Date(2025, 11, 31) });
                           } else if (val === "2026") {
                             setStatsDateRange({ from: new Date(2026, 0, 1), to: new Date(2026, 11, 31) });
@@ -1446,6 +1448,7 @@ export default function ServiceDetailPage() {
                           <SelectValue placeholder="Seleccionar periodo..." />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="current-month">Mes en Curso (Por defecto)</SelectItem>
                           <SelectItem value="2025">Todo el Año 2025</SelectItem>
                           <SelectItem value="2026">Todo el Año 2026</SelectItem>
                           <SelectItem value="all">Rango Amplio (2025 - 2026)</SelectItem>
@@ -1620,26 +1623,7 @@ export default function ServiceDetailPage() {
                           ⚠️ {pickingError}
                         </div>
                       ) : pickingStats ? (
-                        <>
-                          {/* 1. KPIs Cards */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div className="bg-muted/30 rounded-lg p-4 text-center border border-border/50">
-                              <p className="text-2xl font-bold text-foreground">{(pickingStats.kpis?.vol_24h || 0).toLocaleString()}</p>
-                              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-1">📦 Volumen (24h)</p>
-                            </div>
-                            <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-100">
-                              <p className="text-2xl font-bold text-blue-600">{(pickingStats.kpis?.vol_semana || 0).toLocaleString()}</p>
-                              <p className="text-[10px] uppercase font-bold text-blue-600 tracking-wider mt-1">🗓️ Volumen Semanal</p>
-                            </div>
-                            <div className="bg-indigo-50 rounded-lg p-4 text-center border border-indigo-100">
-                              <p className="text-2xl font-bold text-indigo-600">{(pickingStats.kpis?.vol_mes || 0).toLocaleString()}</p>
-                              <p className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider mt-1">📊 Volumen Mensual</p>
-                            </div>
-                          </div>
-
-                          {/* 2. Picking Charts */}
-                          <PickingDashboardCharts pickingStats={pickingStats} />
-                        </>
+                        <PickingDashboardCharts pickingStats={pickingStats} />
                       ) : (
                         <div className="flex justify-center py-10 text-xs text-muted-foreground">
                           No hay estadísticas de picking disponibles.

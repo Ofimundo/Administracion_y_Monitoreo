@@ -1191,15 +1191,15 @@ app.get("/api/sgc/stats", async (req, res) => {
     let fechaDesde = req.query.fechaDesde as string || '';
     let fechaHasta = req.query.fechaHasta as string || '';
 
-    // Si no se especifican fechas, poner un rango por defecto (los últimos 30 días) para evitar que la query sea lenta y falle por timeout
+    // Si no se especifican fechas, poner un rango por defecto (el mes en curso)
     if (!fechaDesde && !fechaHasta) {
       const hoy = new Date();
-      const hace30dias = new Date();
-      hace30dias.setDate(hoy.getDate() - 30);
+      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
       
       const formatFecha = (d: Date) => d.toISOString().split('T')[0];
-      fechaDesde = formatFecha(hace30dias);
-      fechaHasta = formatFecha(hoy);
+      fechaDesde = formatFecha(inicioMes);
+      fechaHasta = formatFecha(finMes);
     }
 
     const fDesdeClean = fechaDesde.replace(/-/g, "");
@@ -1330,15 +1330,15 @@ app.get("/api/sgc/picking-stats", async (req, res) => {
     let fechaHasta = req.query.fechaHasta as string || '';
     const hours = parseInt(req.query.hours as string || '24');
 
-    // Si no se especifican fechas, poner un rango por defecto (los últimos 30 días)
+    // Si no se especifican fechas, poner un rango por defecto (el mes en curso)
     if (!fechaDesde && !fechaHasta) {
       const hoy = new Date();
-      const hace30dias = new Date();
-      hace30dias.setDate(hoy.getDate() - 30);
+      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
       
       const formatFecha = (d: Date) => d.toISOString().split('T')[0];
-      fechaDesde = formatFecha(hace30dias);
-      fechaHasta = formatFecha(hoy);
+      fechaDesde = formatFecha(inicioMes);
+      fechaHasta = formatFecha(finMes);
     }
 
     const fDesdeClean = fechaDesde.replace(/-/g, "");
@@ -1353,9 +1353,16 @@ app.get("/api/sgc/picking-stats", async (req, res) => {
         COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(hour, -24, @MaxDate) THEN Pickc_Folio_Picking END) as vol_24h,
         COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -7, @MaxDate) THEN Pickc_Folio_Picking END) as vol_semana,
         COUNT(DISTINCT CASE WHEN Pickc_Fecha_Picking >= DATEADD(day, -30, @MaxDate) THEN Pickc_Folio_Picking END) as vol_mes,
+        SUM(CASE WHEN Pickc_Estado = 0 THEN 1 ELSE 0 END) as pendientes,
+        SUM(CASE WHEN Pickc_Estado = 1 THEN 1 ELSE 0 END) as en_proceso,
+        SUM(CASE WHEN Pickc_Estado = 2 THEN 1 ELSE 0 END) as finalizados,
+        SUM(CASE WHEN Pickc_Usuario IS NULL OR LOWER(Pickc_Usuario) IN ('sgc', 'system', 'ws', 'webservice', 'auto', 'automatizador', 'rpa') OR LOWER(Pickc_Usuario) LIKE '%sgc%' THEN 1 ELSE 0 END) as automaticos,
+        SUM(CASE WHEN Pickc_Usuario IS NOT NULL AND LOWER(Pickc_Usuario) NOT IN ('sgc', 'system', 'ws', 'webservice', 'auto', 'automatizador', 'rpa') AND LOWER(Pickc_Usuario) NOT LIKE '%sgc%' THEN 1 ELSE 0 END) as manuales,
         SUM(CASE WHEN Pickc_Estado = 0 AND Pickc_Fecha_Picking <= DATEADD(hour, -${hours}, GETDATE()) THEN 1 ELSE 0 END) as total_alertas,
         SUM(CASE WHEN Pickc_Ticket_Mesa_Ayuda IS NOT NULL AND Pickc_Ticket_Mesa_Ayuda > 0 AND Pickc_Fecha_Picking >= DATEADD(month, -3, GETDATE()) THEN 1 ELSE 0 END) as total_tickets
       FROM SGCX.dbo.Inv_Picking_Cabecera
+      WHERE Pickc_Fecha_Picking >= cast('${fDesdeClean}' as date) 
+        AND Pickc_Fecha_Picking <= cast('${fHastaClean}' as date)
     `;
 
     // Query 2: Productividad por estado
