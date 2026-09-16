@@ -404,6 +404,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
       setLoading(true);
       const newLogs: Record<string, LogEntry[]> = {
         facturas: [],
+        "facturas-artesanales": [],
         oficore: [],
         ofitec: [],
         sgc: [],
@@ -425,39 +426,67 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           queryParams = `?fechaHasta=${toStr}`;
         }
 
-        // 1. Fetch facturas
+        // 1. Fetch facturas & facturas artesanales
         try {
           let facturasUrl = `/api/facturas/bitacora?estado=todos${queryParams ? `&${queryParams.slice(1)}` : ""}`;
           if (filters.clientId && filters.clientId !== "todos") {
             facturasUrl += `&cliente=${filters.clientId}`;
+          } else if (filters.serviceId === "facturas-artesanales") {
+            facturasUrl += `&cliente=cl_corpesca`;
           }
+
           const res = await fetch(facturasUrl);
           const data = await res.json();
           if (data.success && data.data) {
-            newLogs.facturas = data.data.map((entry: any, index: number) => {
+            const facturasLogs: LogEntry[] = [];
+            const artesanalesLogs: LogEntry[] = [];
+
+            data.data.forEach((entry: any, index: number) => {
               const type = getLogType(entry.estado, entry.motivo, "facturas");
               const isInfra = isInfraestructuraError(entry.motivo);
               
-              let message = entry.motivo || `Documento ${entry.estado} correctamente`;
+              const isCorpesca = (entry.cliente_id && entry.cliente_id.includes("corpesca")) || 
+                                 (entry.cliente_nombre && entry.cliente_nombre.toUpperCase().includes("CORPESCA")) ||
+                                 (entry.tipo_documento === "Factura Artesanal");
+
+              let message = entry.motivo || (isCorpesca ? `Procesamiento Factura Artesanal ${entry.estado || 'OK'}` : `Documento ${entry.estado || 'Procesado'} correctamente`);
               if (isInfra) {
                 message = `🔴 ERROR DE INFRAESTRUCTURA: ${message}`;
               }
 
-              const clienteNombre = entry.cliente_nombre || (entry.cliente_id === "cl_cmds_antofagasta" || filters.clientId === "cl_cmds_antofagasta" ? "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA" : "STUEDEMANN S.A.");
-              const clienteId = entry.cliente_id || (filters.clientId && filters.clientId !== "todos" ? filters.clientId : (clienteNombre.includes("ANTOFAGASTA") ? "cl_cmds_antofagasta" : "cl_stuedemann"));
+              const clienteNombre = entry.cliente_nombre || (isCorpesca ? "CORPESCA S.A." : (entry.cliente_id === "cl_automovil_club" ? "AUTOMOVIL CLUB DE CHILE" : (entry.cliente_id === "cl_cmds_antofagasta" ? "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA" : "STUEDEMANN S.A.")));
+              const clienteId = entry.cliente_id || (isCorpesca ? "cl_corpesca" : (clienteNombre.includes("AUTOMOVIL") ? "cl_automovil_club" : (clienteNombre.includes("ANTOFAGASTA") ? "cl_cmds_antofagasta" : "cl_stuedemann")));
               
-              return {
+              const folio = entry.folio_documento || entry.folio || "N/A";
+              const pdfStatus = entry.pdf_capturado || "N/A";
+              const xmlStatus = entry.xml_capturado || "N/A";
+              const fechaRec = entry.fecha_recepcion ? format(new Date(entry.fecha_recepcion), "dd/MM/yyyy HH:mm:ss") : null;
+
+              const detailsStr = isCorpesca 
+                ? `[${clienteNombre}] Folio #${folio} · Recepción: ${fechaRec || 'N/A'} · PDF: ${pdfStatus} · XML: ${xmlStatus}`
+                : `[${clienteNombre}] Folio #${folio} · ${entry.razon_social || clienteNombre} · RUT Proveedor: ${entry.rut_proveedor || '-'}`;
+
+              const logItem: LogEntry = {
                 id: `factura_${entry.id_proceso || index}_${index}`,
                 message: message,
-                details: `[${clienteNombre}] Folio #${entry.folio_documento} · ${entry.razon_social} · RUT Proveedor: ${entry.rut_proveedor}`,
+                details: detailsStr,
                 timestamp: entry.fecha_proceso,
                 type: isInfra ? "error" : type,
-                estado: entry.estado,
+                estado: entry.estado || "Aprobado",
                 isInfraestructura: isInfra,
                 cliente_id: clienteId,
                 cliente_nombre: clienteNombre,
               };
+
+              if (isCorpesca) {
+                artesanalesLogs.push(logItem);
+              } else {
+                facturasLogs.push(logItem);
+              }
             });
+
+            newLogs.facturas = facturasLogs;
+            newLogs["facturas-artesanales"] = artesanalesLogs;
           }
         } catch (e) {
           console.error("Error fetching facturas logs:", e);
@@ -769,7 +798,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     };
 
     fetchAllLogs();
-  }, [filters.dateRange.from, filters.dateRange.to]);
+  }, [filters.dateRange.from, filters.dateRange.to, filters.serviceId, filters.clientId]);
 
   const allEvents: TimelineEvent[] = useMemo(() => {
     const events: TimelineEvent[] = [];
@@ -847,8 +876,14 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
         if (filters.clientId === "cl_stuedemann") {
           return detailsLower.includes("stuedemann") || msgLower.includes("stuedemann") || detailsLower.includes("96.502.540") || event.serviceId === "facturas";
         }
+        if (filters.clientId === "cl_automovil_club") {
+          return detailsLower.includes("automovil") || msgLower.includes("automovil") || detailsLower.includes("70.016.920");
+        }
         if (filters.clientId === "cl_cmds_antofagasta") {
           return detailsLower.includes("antofagasta") || msgLower.includes("antofagasta") || detailsLower.includes("70.892.100");
+        }
+        if (filters.clientId === "cl_corpesca") {
+          return detailsLower.includes("corpesca") || msgLower.includes("corpesca") || detailsLower.includes("96.893.820");
         }
         return true;
       });
@@ -1033,7 +1068,9 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                   <SelectContent>
                     <SelectItem value="todos">🌐 Todos los clientes</SelectItem>
                     <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                    <SelectItem value="cl_automovil_club">🚗 AUTOMOVIL CLUB DE CHILE</SelectItem>
                     <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA</SelectItem>
+                    <SelectItem value="cl_corpesca">🐟 CORPESCA S.A.</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

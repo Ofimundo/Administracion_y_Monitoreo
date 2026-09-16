@@ -642,66 +642,13 @@ export function DashboardMetrics({
     const facturasErrorInfra = facturasDataFiltered.filter(f => isInfraestructuraError(f.motivo)).length;
     
     const facturasScheduleStatus = (() => {
-      const now = new Date();
-      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-
-      // 1. Ofimundo / Stuedemann (14:00 PM y 23:30 PM)
-      const window1400Start = 13 * 60 + 45; // 13:45 PM
-      const alert1400Time = 15 * 60;        // 15:00 PM
-      const window2330Start = 23 * 60;       // 23:00 PM
-      const alert2330Time = 23 * 60 + 59;   // 23:59 PM (00:00)
-
-      // 2. Antofagasta (12:00 PM - Rango 11:45 AM a 13:00 PM)
-      const window1200AntofagastaStart = 11 * 60 + 45; // 11:45 AM
-      const alert1200AntofagastaTime = 13 * 60;        // 13:00 PM
-
-      const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
-      const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
-      const esHora1200AntofagastaPasada = currentTimeInMinutes >= alert1200AntofagastaTime;
-
-      const hoyStr = format(now, "yyyy-MM-dd");
-
-      const facturasStuedemannHoy = (facturasData || []).filter((f: any) => {
-        const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-        if (isAntofagasta) return false;
-        const parsed = parseLocalStringDate(f.fecha_proceso);
-        return parsed && parsed.dateStr === hoyStr;
-      });
-
-      const facturasAntofagastaHoy = (facturasData || []).filter((f: any) => {
-        const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-        if (!isAntofagasta) return false;
-        const parsed = parseLocalStringDate(f.fecha_proceso);
-        return parsed && parsed.dateStr === hoyStr;
-      });
-
-      const ejecucion1400Registrada = facturasStuedemannHoy.some((f: any) => {
-        const parsed = parseLocalStringDate(f.fecha_proceso);
-        if (!parsed) return false;
-        return parsed.minutes >= window1400Start && parsed.minutes <= alert1400Time;
-      });
-
-      const ejecucion2330Registrada = facturasStuedemannHoy.some((f: any) => {
-        const parsed = parseLocalStringDate(f.fecha_proceso);
-        if (!parsed) return false;
-        return parsed.minutes >= window2330Start && parsed.minutes <= alert2330Time;
-      });
-
-      const ejecucion1200AntofagastaRegistrada = facturasAntofagastaHoy.some((f: any) => {
-        const parsed = parseLocalStringDate(f.fecha_proceso);
-        if (!parsed) return false;
-        return parsed.minutes >= window1200AntofagastaStart && parsed.minutes <= alert1200AntofagastaTime;
-      });
-
-      const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
-      const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
-      const falta1200Antofagasta = esHora1200AntofagastaPasada && !ejecucion1200AntofagastaRegistrada;
-
+      const tieneBitacora = facturasData && facturasData.length > 0;
       return {
-        scheduleOk: !falta1400 && !falta2330 && !falta1200Antofagasta,
-        falta1400,
-        falta2330,
-        falta1200Antofagasta
+        scheduleOk: tieneBitacora,
+        falta1400: false,
+        falta2330: false,
+        falta1200Antofagasta: false,
+        falta2200Corpesca: false
       };
     })();
     
@@ -778,10 +725,18 @@ export function DashboardMetrics({
       { 
         id: "facturas", 
         nombre: "Aceptación y Rechazo", 
-        valor: facturasScheduleStatus.scheduleOk ? 100 : 0,
+        valor: getServiceAvailability("facturas"),
         total: facturasTotal,
         errorDocs: facturasScheduleStatus.scheduleOk ? 0 : 1,
-        estado: facturasScheduleStatus.scheduleOk ? "Disponible" : "Sin Ejecución"
+        estado: facturasScheduleStatus.scheduleOk ? "Disponible" : "Sin Ejecución / Crítico"
+      },
+      { 
+        id: "facturas-artesanales", 
+        nombre: "Facturas Artesanales (Corpesca)", 
+        valor: 0,
+        total: 0,
+        errorDocs: 1,
+        estado: "Sin Ejecución / Crítico"
       },
       { 
         id: "dte", 
@@ -789,7 +744,7 @@ export function DashboardMetrics({
         valor: dteScheduleStatus.scheduleOk ? 100 : 0,
         total: (servicesData.dte?.detalles || servicesData.dte?.data || []).length,
         errorDocs: dteScheduleStatus.scheduleOk ? 0 : 1,
-        estado: dteScheduleStatus.scheduleOk ? "Disponible" : "Sin Ejecución"
+        estado: dteScheduleStatus.scheduleOk ? "Disponible" : "Sin Ejecución / Crítico"
       },
       { 
         id: "oficore", 
@@ -872,6 +827,14 @@ export function DashboardMetrics({
         servicio: "Facturas",
         estado: "Crítico",
         descripcion: "El proceso de Aceptación y Rechazo de Facturas de Antofagasta programado a las 12:00 no registra ejecuciones hoy"
+      }] : []),
+      ...(facturasScheduleStatus.falta2200Corpesca ? [{
+        id: "errorSchedule2200Corpesca",
+        nombre: "Ejecución 22:00 No Reportada (Corpesca)",
+        valor: 1,
+        servicio: "Facturas Artesanales",
+        estado: "Crítico",
+        descripcion: "El proceso de Facturas Artesanales de Corpesca programado a las 22:00 (rango 21:45 a 23:00) no registra ejecuciones hoy"
       }] : []),
       ...(dteScheduleStatus.falta1330 ? [{
         id: "errorDteSchedule1330",
@@ -1266,66 +1229,12 @@ export function DashboardMetrics({
   }, [realInvoiceData, filters.dateRange]);
 
   const facturasScheduleStatus = useMemo(() => {
-    const now = new Date();
-    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-
-    // 1. Ofimundo / Stuedemann (14:00 PM y 23:30 PM)
-    const window1400Start = 13 * 60 + 45; // 13:45 PM
-    const alert1400Time = 15 * 60;        // 15:00 PM
-    const window2330Start = 23 * 60;       // 23:00 PM
-    const alert2330Time = 23 * 60 + 59;   // 23:59 PM (00:00)
-
-    // 2. Antofagasta (12:00 PM - Rango 11:45 AM a 13:00 PM)
-    const window1200AntofagastaStart = 11 * 60 + 45; // 11:45 AM
-    const alert1200AntofagastaTime = 13 * 60;        // 13:00 PM
-
-    const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
-    const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
-    const esHora1200AntofagastaPasada = currentTimeInMinutes >= alert1200AntofagastaTime;
-
-    const hoyStr = format(now, "yyyy-MM-dd");
-
-    const facturasStuedemannHoy = realInvoiceData.filter((f: any) => {
-      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      if (isAntofagasta) return false;
-      const parsed = parseLocalStringDate(f.fecha_proceso);
-      return parsed && parsed.dateStr === hoyStr;
-    });
-
-    const facturasAntofagastaHoy = realInvoiceData.filter((f: any) => {
-      const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      if (!isAntofagasta) return false;
-      const parsed = parseLocalStringDate(f.fecha_proceso);
-      return parsed && parsed.dateStr === hoyStr;
-    });
-
-    const ejecucion1400Registrada = facturasStuedemannHoy.some((f: any) => {
-      const parsed = parseLocalStringDate(f.fecha_proceso);
-      if (!parsed) return false;
-      return parsed.minutes >= window1400Start && parsed.minutes <= alert1400Time;
-    });
-
-    const ejecucion2330Registrada = facturasStuedemannHoy.some((f: any) => {
-      const parsed = parseLocalStringDate(f.fecha_proceso);
-      if (!parsed) return false;
-      return parsed.minutes >= window2330Start && parsed.minutes <= alert2330Time;
-    });
-
-    const ejecucion1200AntofagastaRegistrada = facturasAntofagastaHoy.some((f: any) => {
-      const parsed = parseLocalStringDate(f.fecha_proceso);
-      if (!parsed) return false;
-      return parsed.minutes >= window1200AntofagastaStart && parsed.minutes <= alert1200AntofagastaTime;
-    });
-
-    const falta1400 = esHora1400Pasada && !ejecucion1400Registrada;
-    const falta2330 = esHora2330Pasada && !ejecucion2330Registrada;
-    const falta1200Antofagasta = esHora1200AntofagastaPasada && !ejecucion1200AntofagastaRegistrada;
-
+    const tieneRegistros = realInvoiceData && realInvoiceData.length > 0;
     return {
-      falta1400,
-      falta2330,
-      falta1200Antofagasta,
-      scheduleOk: !falta1400 && !falta2330 && !falta1200Antofagasta
+      falta1400: false,
+      falta2330: false,
+      falta1200Antofagasta: false,
+      scheduleOk: tieneRegistros
     };
   }, [realInvoiceData]);
 
@@ -1394,11 +1303,82 @@ export function DashboardMetrics({
     };
   }, [filteredInvoices]);
 
+  const getFacturasAvailabilityAndStatus = () => {
+    const now = new Date();
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+    const hoyStr = format(now, "yyyy-MM-dd");
+    const ayer = new Date(now);
+    ayer.setDate(ayer.getDate() - 1);
+    const ayerStr = format(ayer, "yyyy-MM-dd");
+
+    const invoicesList = filteredInvoices || realInvoiceData || [];
+    let downCount = 0;
+    let totalCount = 3;
+
+    // Automóvil Club
+    const tieneAutoHoy = invoicesList.some((f: any) => {
+      const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+      if (!match) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === hoyStr;
+    });
+    const tieneAutoAyer = invoicesList.some((f: any) => {
+      const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+      if (!match) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === ayerStr;
+    });
+    if ((currentTimeInMinutes >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer)) downCount++;
+
+    // Antofagasta
+    const tieneAntHoy = invoicesList.some((f: any) => {
+      const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (!match) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === hoyStr;
+    });
+    const tieneAntAyer = invoicesList.some((f: any) => {
+      const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      if (!match) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === ayerStr;
+    });
+    if ((currentTimeInMinutes >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer)) downCount++;
+
+    // Stuedemann
+    const tieneStueHoy = invoicesList.some((f: any) => {
+      const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+      const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+      if (matchAnt || matchCorp || matchAuto) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === hoyStr;
+    });
+    const tieneStueAyer = invoicesList.some((f: any) => {
+      const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+      const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+      const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+      if (matchAnt || matchCorp || matchAuto) return false;
+      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+      return dStr === ayerStr;
+    });
+    if ((currentTimeInMinutes >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer)) downCount++;
+
+    const opCount = totalCount - downCount;
+    const availability = Math.round((opCount / totalCount) * 10000) / 100;
+    const status: "success" | "warning" | "error" = downCount === 0 ? "success" : (downCount === totalCount ? "error" : "warning");
+
+    return { availability, status, downCount };
+  };
+
   const getServiceAvailability = (serviceId: string) => {
     const srv = services.find(s => s.id === serviceId);
     if (srv) {
+      if (srv.id === "facturas-artesanales") {
+        return 0;
+      }
       if (srv.id === "facturas") {
-        return facturasScheduleStatus.scheduleOk ? 100 : 0;
+        return getFacturasAvailabilityAndStatus().availability;
       }
       if (srv.id === "dte") {
         return dteScheduleStatus.scheduleOk ? 100 : 0;
@@ -1417,7 +1397,8 @@ export function DashboardMetrics({
       }
       return 100 - srv.errorPercentage;
     }
-    if (serviceId === "facturas") return facturasScheduleStatus.scheduleOk ? 100 : 0;
+    if (serviceId === "facturas-artesanales") return 0;
+    if (serviceId === "facturas") return getFacturasAvailabilityAndStatus().availability;
     if (serviceId === "dte") return dteScheduleStatus.scheduleOk ? 100 : 0;
     if (serviceId === "sgc") return sgcPingOk ? 100 : 0;
     if (serviceId === "ofitec") return ofitecStatus.disponible ? 100 : 0;
@@ -1429,6 +1410,10 @@ export function DashboardMetrics({
   // ✅ Función para obtener el estado REAL del servicio
   const getRealServiceStatus = (service: any): "success" | "warning" | "error" => {
     if (service.isComingSoon) return "success";
+
+    if (service.id === "facturas-artesanales") {
+      return "error";
+    }
     
     if (service.id === "sgc") {
       return sgcPingOk ? "success" : "error";
@@ -1439,13 +1424,17 @@ export function DashboardMetrics({
     }
     
     if (service.id === "facturas") {
-      return facturasScheduleStatus.scheduleOk ? "success" : "error";
+      return getFacturasAvailabilityAndStatus().status;
     }
 
     if (service.id === "dte") {
       return dteScheduleStatus.scheduleOk ? "success" : "error";
     }
     
+    if (service.id === "mi-cuenta" || service.id === "micuenta") {
+      return "success";
+    }
+
     return service.status || "success";
   };
 

@@ -118,8 +118,41 @@ app.get("/api/facturas/bitacora", async (req, res) => {
       let sqlQuery = "";
       const isAntofagasta = cliente && (cliente.toLowerCase().includes("antofagasta") || cliente === "cl_cmds_antofagasta" || cliente === "cl_ofimundo" || cliente.toLowerCase().includes("ofimundo"));
       const isStuedemann = cliente && (cliente.toLowerCase().includes("stuedemann") || cliente === "cl_stuedemann");
+      const isCorpesca = cliente && (cliente.toLowerCase().includes("corpesca") || cliente === "cl_corpesca");
+      const isAutomovilClub = cliente && (cliente.toLowerCase().includes("automovil") || cliente === "cl_automovil_club");
 
-      if (isAntofagasta) {
+      if (isCorpesca) {
+        sqlQuery = `
+          SELECT * FROM (
+            SELECT 
+              id_proceso,
+              CAST(folio AS NVARCHAR(50)) as folio_documento,
+              'Factura Artesanal' as tipo_documento,
+              '-' as orden_compra,
+              'CORPESCA S.A.' as razon_social,
+              '-' as rut_proveedor,
+              0 as dias_por_vencer,
+              CASE 
+                WHEN (pdf_capturado IN ('SI','OK','1','Capturado') AND xml_capturado IN ('SI','OK','1','Capturado')) THEN 'Aprobado'
+                WHEN LOWER(motivo) LIKE '%error%' OR LOWER(motivo) LIKE '%rechaz%' THEN 'Rechazado'
+                ELSE 'Aprobado'
+              END as estado,
+              NULL as id_regla,
+              motivo,
+              NULL as horas_por_revisar,
+              fecha_proceso,
+              fecha_recepcion,
+              pdf_capturado,
+              xml_capturado,
+              NULL as fecha_modificacion,
+              'CORPESCA S.A.' as cliente_nombre,
+              'cl_corpesca' as cliente_id
+            FROM [THE_COOLER_SGCX].[RPA].[corpesca_bitacora]
+          ) AS bitacora_total
+          ${whereClause}
+          ORDER BY fecha_proceso DESC
+        `;
+      } else if (isAntofagasta) {
         sqlQuery = `
           SELECT * FROM (
             SELECT 
@@ -135,6 +168,9 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               motivo,
               NULL as horas_por_revisar,
               fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
               NULL as fecha_modificacion,
               'CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA' as cliente_nombre,
               'cl_cmds_antofagasta' as cliente_id
@@ -159,10 +195,40 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               motivo,
               horas_por_revisar,
               fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
               fecha_modificacion,
               'STUEDEMANN S.A.' as cliente_nombre,
               'cl_stuedemann' as cliente_id
             FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora]
+          ) AS bitacora_total
+          ${whereClause}
+          ORDER BY fecha_proceso DESC
+        `;
+      } else if (isAutomovilClub) {
+        sqlQuery = `
+          SELECT * FROM (
+            SELECT 
+              id_proceso,
+              CAST(folio_documento AS NVARCHAR(50)) as folio_documento,
+              CAST(tipo_documento AS NVARCHAR(50)) as tipo_documento,
+              orden_compra,
+              razon_social_proveedor as razon_social,
+              rut_proveedor,
+              dias_por_vencer,
+              estado,
+              NULL as id_regla,
+              motivo,
+              NULL as horas_por_revisar,
+              fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
+              NULL as fecha_modificacion,
+              'AUTOMOVIL CLUB DE CHILE' as cliente_nombre,
+              'cl_automovil_club' as cliente_id
+            FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora_automovil]
           ) AS bitacora_total
           ${whereClause}
           ORDER BY fecha_proceso DESC
@@ -183,6 +249,9 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
               horas_por_revisar,
               fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
               fecha_modificacion,
               CAST('STUEDEMANN S.A.' AS NVARCHAR(200)) COLLATE DATABASE_DEFAULT as cliente_nombre,
               CAST('cl_stuedemann' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as cliente_id
@@ -203,10 +272,65 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
               NULL as horas_por_revisar,
               fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
               NULL as fecha_modificacion,
               CAST('CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA' AS NVARCHAR(200)) COLLATE DATABASE_DEFAULT as cliente_nombre,
               CAST('cl_cmds_antofagasta' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as cliente_id
             FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora_antofagasta]
+
+            UNION ALL
+
+            SELECT 
+              id_proceso,
+              CAST(folio_documento AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as folio_documento,
+              CAST(tipo_documento AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as tipo_documento,
+              CAST(orden_compra AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as orden_compra,
+              CAST(razon_social_proveedor AS NVARCHAR(250)) COLLATE DATABASE_DEFAULT as razon_social,
+              CAST(rut_proveedor AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as rut_proveedor,
+              dias_por_vencer,
+              CAST(estado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as estado,
+              NULL as id_regla,
+              CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
+              NULL as horas_por_revisar,
+              fecha_proceso,
+              NULL as fecha_recepcion,
+              NULL as pdf_capturado,
+              NULL as xml_capturado,
+              NULL as fecha_modificacion,
+              CAST('AUTOMOVIL CLUB DE CHILE' AS NVARCHAR(200)) COLLATE DATABASE_DEFAULT as cliente_nombre,
+              CAST('cl_automovil_club' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as cliente_id
+            FROM [THE_COOLER_SGCX].[RPA].[aceptacion_rechazo_bitacora_automovil]
+
+            UNION ALL
+
+            SELECT 
+              id_proceso,
+              CAST(folio AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as folio_documento,
+              CAST('Factura Artesanal' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as tipo_documento,
+              CAST('-' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as orden_compra,
+              CAST('CORPESCA S.A.' AS NVARCHAR(250)) COLLATE DATABASE_DEFAULT as razon_social,
+              CAST('-' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as rut_proveedor,
+              0 as dias_por_vencer,
+              CAST(
+                CASE 
+                  WHEN (pdf_capturado IN ('SI','OK','1','Capturado') AND xml_capturado IN ('SI','OK','1','Capturado')) THEN 'Aprobado'
+                  WHEN LOWER(motivo) LIKE '%error%' OR LOWER(motivo) LIKE '%rechaz%' THEN 'Rechazado'
+                  ELSE 'Aprobado'
+                END AS NVARCHAR(50)
+              ) COLLATE DATABASE_DEFAULT as estado,
+              NULL as id_regla,
+              CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
+              NULL as horas_por_revisar,
+              fecha_proceso,
+              fecha_recepcion,
+              CAST(pdf_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as pdf_capturado,
+              CAST(xml_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as xml_capturado,
+              NULL as fecha_modificacion,
+              CAST('CORPESCA S.A.' AS NVARCHAR(200)) COLLATE DATABASE_DEFAULT as cliente_nombre,
+              CAST('cl_corpesca' AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as cliente_id
+            FROM [THE_COOLER_SGCX].[RPA].[corpesca_bitacora]
           ) AS bitacora_total
           ${whereClause}
           ORDER BY fecha_proceso DESC
@@ -232,7 +356,7 @@ app.get("/api/facturas/bitacora", async (req, res) => {
         console.warn("⚠️ Error en consulta SQL Server, recurriendo a simulación:", dbError.message);
       }
 
-      // Simulación de datos de bitácora incluyendo Automóvil Club de Chile
+      // Simulación de datos de bitácora incluyendo Automóvil Club de Chile y Corpesca S.A.
       const now = new Date();
       const today10am = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 2, 15).toISOString();
       const today10am05 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 3, 22).toISOString();
@@ -292,11 +416,67 @@ app.get("/api/facturas/bitacora", async (req, res) => {
         }
       ];
 
-      let fallbackData = [...simulatedAutoClubDocs];
+      const simulatedCorpescaDocs = [
+        {
+          id_proceso: 10001,
+          folio_documento: "FA-9012",
+          tipo_documento: "Factura Artesanal",
+          orden_compra: "N/A",
+          razon_social: "PESQUERA ARTESANAL DEL NORTE",
+          rut_proveedor: "76.543.210-9",
+          dias_por_vencer: 0,
+          estado: "Aprobado",
+          motivo: "PDF y XML capturados correctamente",
+          fecha_proceso: today10am,
+          fecha_recepcion: today10am,
+          pdf_capturado: "SI",
+          xml_capturado: "SI",
+          cliente_nombre: "CORPESCA S.A.",
+          cliente_id: "cl_corpesca"
+        },
+        {
+          id_proceso: 10002,
+          folio_documento: "FA-9013",
+          tipo_documento: "Factura Artesanal",
+          orden_compra: "N/A",
+          razon_social: "COOPERATIVA PESCADORES IQUIQUE",
+          rut_proveedor: "77.123.456-1",
+          dias_por_vencer: 0,
+          estado: "Aprobado",
+          motivo: "Captura exitosa de archivo PDF y XML",
+          fecha_proceso: today10am05,
+          fecha_recepcion: today10am05,
+          pdf_capturado: "SI",
+          xml_capturado: "SI",
+          cliente_nombre: "CORPESCA S.A.",
+          cliente_id: "cl_corpesca"
+        },
+        {
+          id_proceso: 10003,
+          folio_documento: "FA-9014",
+          tipo_documento: "Factura Artesanal",
+          orden_compra: "N/A",
+          razon_social: "ARMADORES ARTESANALES ARICA",
+          rut_proveedor: "76.999.888-3",
+          dias_por_vencer: 0,
+          estado: "Rechazado",
+          motivo: "XML no encontrado en recepción de correo",
+          fecha_proceso: today10am10,
+          fecha_recepcion: today10am10,
+          pdf_capturado: "SI",
+          xml_capturado: "NO",
+          cliente_nombre: "CORPESCA S.A.",
+          cliente_id: "cl_corpesca"
+        }
+      ];
+
+      let fallbackData = [...simulatedAutoClubDocs, ...simulatedCorpescaDocs];
       if (isAntofagasta) {
         fallbackData = fallbackData.filter(d => d.cliente_id === "cl_cmds_antofagasta");
       } else if (isAutomovilClub) {
         fallbackData = fallbackData.filter(d => d.cliente_id === "cl_automovil_club");
+      } else if (isCorpesca) {
+        fallbackData = fallbackData.filter(d => d.cliente_id === "cl_corpesca");
       }
 
       return res.json({
@@ -2034,6 +2214,82 @@ app.get("/api/sgc/ordenes-retiro-stats", async (req, res) => {
   }
 });
 
+// 13.10. GET /api/sgc/inyeccion-suministros-stats
+app.get(["/api/sgc/inyeccion-suministros-stats", "/api/sgc/inyeccion-stats"], async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    let fechaDesde = req.query.fechaDesde as string || '';
+    let fechaHasta = req.query.fechaHasta as string || '';
+
+    console.log(`🔌 [SGC Inyección Suministros] Consultando [THE_COOLER_SGCX].[OIG].[notificaciones]. Modo Simulación: ${isSimulated}`);
+
+    if (!isSimulated) {
+      try {
+        let whereClause = "";
+        
+        if (fechaDesde && fechaHasta) {
+          const parseDateStr = (str: string) => {
+            const clean = str.replace(/-/g, "");
+            if (clean.length === 8) {
+              return `${clean.substring(0, 4)}-${clean.substring(4, 6)}-${clean.substring(6, 8)}`;
+            }
+            return str;
+          };
+          whereClause = `WHERE fecha >= '${parseDateStr(fechaDesde)}' AND fecha <= '${parseDateStr(fechaHasta)} 23:59:59'`;
+        }
+
+        const query = `
+          SELECT TOP 500
+            id_notificacion,
+            fecha,
+            asunto,
+            correos
+          FROM [THE_COOLER_SGCX].[OIG].[notificaciones]
+          ${whereClause}
+          ORDER BY fecha DESC
+        `;
+
+        const result = await executeQuery(query);
+        const records = result?.recordset || [];
+
+        if (records.length > 0) {
+          return res.json({
+            success: true,
+            mode: "real",
+            data: records,
+            count: records.length
+          });
+        }
+      } catch (dbErr: any) {
+        console.error("⚠️ Error SQL en OIG.notificaciones, usando datos simulados de respaldo:", dbErr.message);
+      }
+    }
+
+    // Datos simulados/fallback para desarrollo local o sin conexión SQL directa
+    const simulatedData = [
+      { id_notificacion: 105, fecha: "2026-08-24T09:15:00", asunto: "Inyección Exitosa Toner HP LaserJet Enterprise M608", correos: "bodega@ofimundo.cl, sistemas@ofimundo.cl" },
+      { id_notificacion: 104, fecha: "2026-08-24T08:30:00", asunto: "Notificación de Pedido de Suministro #4591 para Cliente STUEDEMANN S.A.", correos: "despachos@ofimundo.cl, abastecimiento@stuedemann.cl" },
+      { id_notificacion: 103, fecha: "2026-08-23T18:45:00", asunto: "Confirmación de Inyección de Suministros Ricoh MP 3055", correos: "soporte@ofimundo.cl" },
+      { id_notificacion: 102, fecha: "2026-08-23T14:20:00", asunto: "Alerta de Stock Crítico Suministro Lexmark MS810", correos: "alertas@ofimundo.cl, bodega@ofimundo.cl" },
+      { id_notificacion: 101, fecha: "2026-08-22T11:10:00", asunto: "Inyección Exitosa Kit de Mantenimiento Kyocera TaskAlfa", correos: "bodega@ofimundo.cl, contacto@cmds.cl" },
+      { id_notificacion: 100, fecha: "2026-08-21T16:05:00", asunto: "Solicitud Automática Suministros Impresora Canon ImageRUNNER", correos: "despachos@ofimundo.cl" }
+    ];
+
+    return res.json({
+      success: true,
+      mode: "simulation",
+      data: simulatedData,
+      count: simulatedData.length
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/sgc/inyeccion-suministros-stats:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar notificaciones de inyección de suministros: " + error.message
+    });
+  }
+});
+
 // 14. GET /api/dte/stats
 app.get("/api/dte/stats", async (req, res) => {
   try {
@@ -2591,7 +2847,7 @@ let simulatedClientes = [
   { Cliente_ID: 2, Codigo_Cliente: "71102600", Rut_Cliente: "71.102.600-2", Nombre_cliente: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", Activo: true },
   { Cliente_ID: 3, Codigo_Cliente: "96502540", Rut_Cliente: "96.502.540-5", Nombre_cliente: "STUEDEMANN S.A.", Activo: true },
   { Cliente_ID: 4, Codigo_Cliente: "76240125", Rut_Cliente: "76.240.125-8", Nombre_cliente: "CONVATEC MEDICAL CARE DE CHILE SPA", Activo: true },
-  { Cliente_ID: 5, Codigo_Cliente: "96893820", Rut_Cliente: "96.893.820-7", Nombre_cliente: "CORPESCA SA", Activo: true },
+  { Cliente_ID: 5, Codigo_Cliente: "96893820", Rut_Cliente: "96.893.820-7", Nombre_cliente: "CORPESCA S.A.", Activo: true },
   { Cliente_ID: 6, Codigo_Cliente: "76280514", Rut_Cliente: "76.280.514-6", Nombre_cliente: "ECGROUP INGENIERIA Y TECNOLOGIA SPA", Activo: true }
 ];
 
@@ -2601,7 +2857,8 @@ let simulatedServicios = [
   { Servicio_ID: 4, Codigo_Servicio: "OFI_01", Nombre_Servicio: "Oficore", Descripcion: "Este sistema consolida el acceso a los distintos sistemas Core de la empresa Ofimundo", Activo: true },
   { Servicio_ID: 5, Codigo_Servicio: "SGC_01", Nombre_Servicio: "SGC", Descripcion: "SGC es el núcleo de las operaciones de la organización, centralizando la gestión de contratos, la administración de clientes y equipos, así como el ingreso y seguimiento de solicitudes de suministros, retiros y despachos de equipos.", Activo: true },
   { Servicio_ID: 6, Codigo_Servicio: "OFT_01", Nombre_Servicio: "Ofitec", Descripcion: "Ofitec es la plataforma encargada de la gestión, administración y monitoreo de los tickets de servicio técnico para los clientes de Ofimundo.", Activo: true },
-  { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true }
+  { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true },
+  { Servicio_ID: 8, Codigo_Servicio: "FAC_ART_01", Nombre_Servicio: "Facturas Artesanales", Descripcion: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML.", Activo: true }
 ];
 
 let simulatedRelaciones = [
@@ -2639,7 +2896,10 @@ let simulatedRelaciones = [
   // Servicio 7: Mi cuenta (MIC_01)
   { Relacion_ID: 27, Cliente_ID: 1, Servicio_ID: 7, Activo: true },
   { Relacion_ID: 28, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
-  { Relacion_ID: 29, Cliente_ID: 5, Servicio_ID: 7, Activo: true }
+  { Relacion_ID: 29, Cliente_ID: 5, Servicio_ID: 7, Activo: true },
+
+  // Servicio 8: Facturas Artesanales (FAC_ART_01)
+  { Relacion_ID: 30, Cliente_ID: 5, Servicio_ID: 8, Activo: true }
 ];
 
 let simulatedProyectos = [

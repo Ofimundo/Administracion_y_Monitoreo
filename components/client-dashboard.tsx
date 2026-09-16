@@ -180,6 +180,7 @@ const isInfraestructuraError = (motivo: string): boolean => {
 // Mapa de servicios a sus rutas de API
 const SERVICE_API_MAP: Record<string, string> = {
   "facturas": "/api/facturas/bitacora?estado=todos",
+  "facturas-artesanales": "/api/facturas/bitacora?estado=todos",
   "oficore": "/api/oficore/stats",
   "ofitec": "/api/ofitec/stats",
   "sgc": "/api/sgc/stats",
@@ -329,7 +330,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
   const [availableTipos, setAvailableTipos] = useState<string[]>([]);
   
   const exportFields = useMemo(() => {
-    if (selectedServiceId === "facturas") {
+    if (selectedServiceId === "facturas" || selectedServiceId === "facturas-artesanales") {
       return [
         { id: "fecha", label: "Fecha", default: true, description: "Fecha de procesamiento del documento" },
         { id: "tipoDocumento", label: "Tipo Documento", default: true, description: "Tipo de documento (33, 34, 61)" },
@@ -510,6 +511,10 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
             let targetClientParam = "cl_cmds_antofagasta";
             if (clientIdStr.includes("stuedemann") || clientNameLower.includes("stuedemann") || clientRutStr.includes("96.502.540")) {
               targetClientParam = "cl_stuedemann";
+            } else if (clientIdStr.includes("corpesca") || clientNameLower.includes("corpesca") || clientRutStr.includes("96.893.820")) {
+              targetClientParam = "cl_corpesca";
+            } else if (clientIdStr.includes("automovil") || clientNameLower.includes("automovil") || clientRutStr.includes("70.016.920")) {
+              targetClientParam = "cl_automovil_club";
             } else if (clientIdStr.includes("antofagasta") || clientNameLower.includes("antofagasta") || clientRutStr.includes("70.892.100") || clientRutStr.includes("71.102.600") || clientIdStr.includes("ofimundo") || clientNameLower.includes("ofimundo")) {
               targetClientParam = "cl_cmds_antofagasta";
             } else if (clientId) {
@@ -523,7 +528,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
             const responseData = await res.json();
             
             if (responseData.success) {
-              if (selectedServiceId === "facturas") {
+              if (selectedServiceId === "facturas" || selectedServiceId === "facturas-artesanales") {
                 rawData = responseData.data || [];
               } else if (selectedServiceId === "oficore") {
                 rawData = responseData.detalles || [];
@@ -550,6 +555,20 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
                 const cname = String(item.cliente_nombre || "").toLowerCase();
                 if (!cid && !cname) return true;
                 return cid.includes("stuedemann") || cname.includes("stuedemann");
+              });
+            } else if (targetClientParam === "cl_corpesca") {
+              rawData = rawData.filter((item: any) => {
+                const cid = String(item.cliente_id || "").toLowerCase();
+                const cname = String(item.cliente_nombre || "").toLowerCase();
+                if (!cid && !cname) return true;
+                return cid.includes("corpesca") || cname.includes("corpesca") || cid.includes("96.893.820");
+              });
+            } else if (targetClientParam === "cl_automovil_club") {
+              rawData = rawData.filter((item: any) => {
+                const cid = String(item.cliente_id || "").toLowerCase();
+                const cname = String(item.cliente_nombre || "").toLowerCase();
+                if (!cid && !cname) return true;
+                return cid.includes("automovil") || cname.includes("automovil") || cid.includes("70.016.920");
               });
             }
           }
@@ -880,7 +899,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
   }, [displayData]);
 
   const kpiCards = useMemo(() => {
-    if (selectedServiceId === "facturas") {
+    if (selectedServiceId === "facturas" || selectedServiceId === "facturas-artesanales") {
       return [
         { label: "Total Documentos", value: stats.totalTransactions.toLocaleString(), color: "text-foreground", bg: "bg-blue-100", iconColor: "text-blue-600", icon: Activity },
         { label: "Aprobados", value: stats.approved.toLocaleString(), color: "text-emerald-600", bg: "bg-emerald-100", iconColor: "text-emerald-600", icon: CheckCircle },
@@ -1000,7 +1019,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
   }, [selectedServiceId, sgcSubModule, stats, displayData, filteredData]);
 
   const chartLegends = useMemo(() => {
-    if (selectedServiceId === "facturas") {
+    if (selectedServiceId === "facturas" || selectedServiceId === "facturas-artesanales") {
       return { aprobadas: "Aprobadas", rechazadas: "Rechazadas", manuales: "Manuales", pendientes: "Pendientes" };
     }
     if (selectedServiceId === "oficore") {
@@ -1178,6 +1197,44 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
       };
     }
 
+    // Si viene de Corpesca
+    if (
+      String(clientId).includes("corpesca") || 
+      String(clientId).includes("96.893.820") ||
+      (clientInfo.name && clientInfo.name.toUpperCase().includes("CORPESCA")) ||
+      (clientInfo.rut && clientInfo.rut.includes("96.893.820"))
+    ) {
+      return {
+        id: "cl_corpesca",
+        name: "CORPESCA S.A.",
+        rut: "96.893.820-7",
+        email: "contacto@corpesca.cl",
+        phone: "+56 57 251 6000",
+        errorPercentage: 0,
+        status: "success" as const,
+        services: ["facturas-artesanales"]
+      };
+    }
+
+    // Si viene de Automóvil Club
+    if (
+      String(clientId).includes("automovil") || 
+      String(clientId).includes("70.016.920") ||
+      (clientInfo.name && clientInfo.name.toUpperCase().includes("AUTOMOVIL")) ||
+      (clientInfo.rut && clientInfo.rut.includes("70.016.920"))
+    ) {
+      return {
+        id: "cl_automovil_club",
+        name: "AUTOMOVIL CLUB DE CHILE",
+        rut: "70.016.920-K",
+        email: "contacto@automovilclub.cl",
+        phone: "+56 2 2431 1300",
+        errorPercentage: 0,
+        status: "success" as const,
+        services: ["facturas"]
+      };
+    }
+
     // Fallback universal: si clientInfo tiene un nombre válido (no es la plantilla por defecto), usarlo
     if (clientInfo && clientInfo.name && clientInfo.name !== "Cliente") {
       return {
@@ -1186,8 +1243,8 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
         rut: clientInfo.rut || "",
         email: (clientInfo as any).email || "contacto@cliente.cl",
         phone: (clientInfo as any).phone || "+56 2 2840 9300",
-        errorPercentage: clientInfo.errorPercentage || 0,
-        status: clientInfo.status || "success",
+        errorPercentage: (clientInfo as any).errorPercentage || 0,
+        status: (clientInfo as any).status || "success",
         services: (clientInfo as any).services || ["facturas"]
       };
     }
@@ -1213,6 +1270,14 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
     // Fallback: Si no retorna servicios por id, retornar el servicio de facturas por defecto
     return services.filter(s => s.id === "facturas");
   }, [clientId]);
+
+  useEffect(() => {
+    if (clientServices && clientServices.length > 0) {
+      if (!clientServices.some(s => s.id === selectedServiceId)) {
+        setSelectedServiceId(clientServices[0].id);
+      }
+    }
+  }, [clientServices, selectedServiceId]);
 
   const hasApiEndpoint = true;
 
@@ -1526,7 +1591,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {selectedServiceId === "facturas" ? (
+              {selectedServiceId === "facturas" || selectedServiceId === "facturas-artesanales" ? (
                 <div className="space-y-2">
                   <Label className="text-sm font-semibold flex items-center gap-2">
                     <FileText className="h-4 w-4 text-emerald-500" />
@@ -1548,7 +1613,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
                 </div>
               ) : null}
 
-              <div className={cn("space-y-2", selectedServiceId !== "facturas" && "col-span-2")}>
+              <div className={cn("space-y-2", (selectedServiceId !== "facturas" && selectedServiceId !== "facturas-artesanales") && "col-span-2")}>
                 <Label className="text-sm font-semibold flex items-center gap-2">
                   <Activity className="h-4 w-4 text-emerald-500" />
                   Estado

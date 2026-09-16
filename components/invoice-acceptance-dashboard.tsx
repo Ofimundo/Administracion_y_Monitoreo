@@ -68,17 +68,22 @@ import * as XLSX from "xlsx";
 
 interface BitacoraEntry {
   id_proceso?: number;
-  folio_documento: number;
-  tipo_documento: number;
+  folio_documento: number | string;
+  tipo_documento: number | string;
   orden_compra: string | null;
   razon_social: string;
   rut_proveedor: string;
   dias_por_vencer: number;
-  estado: "Aprobado" | "Rechazado" | "Pendiente" | "Manual" | "Pendiente Espera" | null;
+  estado: "Aprobado" | "Rechazado" | "Pendiente" | "Manual" | "Pendiente Espera" | string | null;
   id_regla: number | null;
   motivo: string | null;
   horas_por_revisar: number | null;
   fecha_proceso: string;
+  fecha_recepcion?: string | null;
+  pdf_capturado?: string | null;
+  xml_capturado?: string | null;
+  cliente_nombre?: string;
+  cliente_id?: string;
   fecha_modificacion: string | null;
 }
 
@@ -275,6 +280,7 @@ export function InvoiceAcceptanceDashboard() {
   const handleResetFilters = () => {
     setFilters({
       search: "",
+      cliente: "todos",
       estado: "todos",
       tipoDocumento: "todos",
       fechaDesde: null,
@@ -669,7 +675,7 @@ export function InvoiceAcceptanceDashboard() {
                     Bitácora de Control y Decisiones RPA
                   </CardTitle>
                   <CardDescription>
-                    Listado de la tabla `RPA.aceptacion_rechazo_bitacora`. Utiliza los filtros para buscar documentos específicos.
+                    Listado de las tablas de bitácora RPA (`aceptacion_rechazo_bitacora` y `corpesca_bitacora`). Utiliza los filtros para buscar documentos específicos.
                   </CardDescription>
                 </div>
                 <Button
@@ -687,6 +693,20 @@ export function InvoiceAcceptanceDashboard() {
                   )}
                 </Button>
               </div>
+
+              {filters.cliente === "cl_corpesca" && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs mt-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge className="bg-blue-600 text-white font-bold">🐟 CORPESCA S.A.</Badge>
+                    <Badge variant="outline" className="border-amber-500 text-amber-600 font-semibold dark:text-amber-400">
+                      ⏰ Ejecución Diaria: 22:00 PM (Ventana 21:45 PM - 23:00 PM)
+                    </Badge>
+                  </div>
+                  <span className="text-muted-foreground">
+                    Si no se ejecuta en la ventana de <strong>21:45 PM a 23:00 PM</strong>, el estado pasa a ser <strong>CRÍTICO</strong>.
+                  </span>
+                </div>
+              )}
 
               {/* Panel de filtros */}
               {showFilters && (
@@ -714,7 +734,9 @@ export function InvoiceAcceptanceDashboard() {
                         <SelectContent>
                           <SelectItem value="todos">🌐 Todos los clientes</SelectItem>
                           <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                          <SelectItem value="cl_automovil_club">🚗 AUTOMOVIL CLUB DE CHILE</SelectItem>
                           <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE ANTOFAGASTA</SelectItem>
+                          <SelectItem value="cl_corpesca">🐟 CORPESCA S.A.</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -854,8 +876,8 @@ export function InvoiceAcceptanceDashboard() {
                         <TableHead>Folio</TableHead>
                         <TableHead>RUT Proveedor</TableHead>
                         <TableHead>Razón Social</TableHead>
-                        <TableHead>OC</TableHead>
-                        <TableHead className="text-center">Días</TableHead>
+                        <TableHead>OC / Detalles</TableHead>
+                        <TableHead className="text-center">PDF / XML / Días</TableHead>
                         <TableHead>Estado</TableHead>
                         <TableHead>Fecha Proceso</TableHead>
                         <TableHead className="text-right">Acción</TableHead>
@@ -865,18 +887,31 @@ export function InvoiceAcceptanceDashboard() {
                       {bitacora.map((entry) => (
                         <TableRow key={entry.id_proceso || `${entry.tipo_documento}-${entry.folio_documento}`}>
                           <TableCell className="font-semibold">
-                            {entry.tipo_documento === 33 ? "33" : entry.tipo_documento === 34 ? "34" : "61"}
+                            {typeof entry.tipo_documento === 'string' ? entry.tipo_documento : (entry.tipo_documento === 33 ? "33" : entry.tipo_documento === 34 ? "34" : "61")}
                           </TableCell>
                           <TableCell className="font-semibold">#{entry.folio_documento}</TableCell>
                           <TableCell className="text-xs">{entry.rut_proveedor}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{entry.razon_social}</TableCell>
-                          <TableCell>{entry.orden_compra || "—"}</TableCell>
-                          <TableCell className={cn(
-                            "text-center font-semibold",
-                            entry.dias_por_vencer <= 2 ? "text-red-500" :
-                            entry.dias_por_vencer <= 5 ? "text-amber-500" : "text-emerald-500"
-                          )}>
-                            {entry.dias_por_vencer}
+                          <TableCell className="text-xs">{entry.orden_compra || "—"}</TableCell>
+                          <TableCell className="text-center">
+                            {entry.pdf_capturado || entry.xml_capturado ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <Badge variant={entry.pdf_capturado === "SI" || entry.pdf_capturado === "OK" ? "default" : "destructive"} className="text-[10px] px-1.5 py-0.5">
+                                  PDF: {entry.pdf_capturado || "NO"}
+                                </Badge>
+                                <Badge variant={entry.xml_capturado === "SI" || entry.xml_capturado === "OK" ? "default" : "destructive"} className="text-[10px] px-1.5 py-0.5">
+                                  XML: {entry.xml_capturado || "NO"}
+                                </Badge>
+                              </div>
+                            ) : (
+                              <span className={cn(
+                                "font-semibold text-xs",
+                                entry.dias_por_vencer <= 2 ? "text-red-500" :
+                                entry.dias_por_vencer <= 5 ? "text-amber-500" : "text-emerald-500"
+                              )}>
+                                {entry.dias_por_vencer} d
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell>{getStatusBadge(entry.estado)}</TableCell>
                           <TableCell className="text-xs">
@@ -884,7 +919,7 @@ export function InvoiceAcceptanceDashboard() {
                           </TableCell>
                           <TableCell className="text-right">
                             <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(entry)}>
-                              Ver Reglas
+                              Ver Detalles
                             </Button>
                           </TableCell>
                         </TableRow>

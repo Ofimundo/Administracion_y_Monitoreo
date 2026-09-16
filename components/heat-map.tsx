@@ -278,67 +278,67 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
 
             const now = new Date();
             const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
-
-            // 1. Ofimundo / Stuedemann (14:00 PM y 23:30 PM)
-            const window1400Start = 13 * 60 + 45; // 13:45 PM
-            const alert1400Time = 15 * 60;        // 15:00 PM
-            const window2330Start = 23 * 60;       // 23:00 PM
-            const alert2330Time = 23 * 60 + 59;   // 23:59 PM (00:00)
-
-            // 2. Antofagasta (12:00 PM - Rango 11:45 AM a 13:00 PM)
-            const window1200AntofagastaStart = 11 * 60 + 45; // 11:45 AM
-            const alert1200AntofagastaTime = 13 * 60;        // 13:00 PM
-
-            const esHora1400Pasada = currentTimeInMinutes >= alert1400Time;
-            const esHora2330Pasada = currentTimeInMinutes >= alert2330Time;
-            const esHora1200AntofagastaPasada = currentTimeInMinutes >= alert1200AntofagastaTime;
-
             const hoyStr = format(now, "yyyy-MM-dd");
+            const ayer = new Date(now);
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = format(ayer, "yyyy-MM-dd");
 
-            const facturasStuedemannHoy = data.filter((f: any) => {
-              const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-              if (isAntofagasta) return false;
+            // 1. Automóvil Club (10:05 AM)
+            const tieneAutoHoy = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
               const parsed = parseLocalStringDate(f.fecha_proceso);
               return parsed && parsed.dateStr === hoyStr;
             });
+            const tieneAutoAyer = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            const isAutoDown = (currentTimeInMinutes >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer);
 
-            const facturasAntofagastaHoy = data.filter((f: any) => {
-              const isAntofagasta = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-              if (!isAntofagasta) return false;
+            // 2. Corp. Municipal de Antofagasta (12:00 PM)
+            const tieneAntHoy = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
               const parsed = parseLocalStringDate(f.fecha_proceso);
               return parsed && parsed.dateStr === hoyStr;
             });
-
-            const ejec1400 = facturasStuedemannHoy.some((f: any) => {
+            const tieneAntAyer = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
               const parsed = parseLocalStringDate(f.fecha_proceso);
-              if (!parsed) return false;
-              return parsed.minutes >= window1400Start && parsed.minutes <= alert1400Time;
+              return parsed && parsed.dateStr === ayerStr;
             });
+            const isAntDown = (currentTimeInMinutes >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer);
 
-            const ejec2330 = facturasStuedemannHoy.some((f: any) => {
+            // 3. Stuedemann S.A. (14:00 PM / 23:30 PM)
+            const tieneStueHoy = data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
               const parsed = parseLocalStringDate(f.fecha_proceso);
-              if (!parsed) return false;
-              return parsed.minutes >= window2330Start && parsed.minutes <= alert2330Time;
+              return parsed && parsed.dateStr === hoyStr;
             });
-
-            const ejec1200Antofagasta = facturasAntofagastaHoy.some((f: any) => {
+            const tieneStueAyer = data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
               const parsed = parseLocalStringDate(f.fecha_proceso);
-              if (!parsed) return false;
-              return parsed.minutes >= window1200AntofagastaStart && parsed.minutes <= alert1200AntofagastaTime;
+              return parsed && parsed.dateStr === ayerStr;
             });
+            const isStueDown = (currentTimeInMinutes >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer);
 
-            const falta1400 = esHora1400Pasada && !ejec1400;
-            const falta2330 = esHora2330Pasada && !ejec2330;
-            const falta1200Antofagasta = esHora1200AntofagastaPasada && !ejec1200Antofagasta;
-            const faltaSchedule = falta1400 || falta2330 || falta1200Antofagasta;
+            let downCount = 0;
+            if (isAutoDown) downCount++;
+            if (isAntDown) downCount++;
+            if (isStueDown) downCount++;
 
-            if (faltaSchedule) {
-              errorPercentage = 100;
-              status = "error";
-            } else {
-              errorPercentage = totalRequests > 0 ? Math.round((errorDocs / totalRequests) * 100) : 0;
-              status = errorPercentage === 100 ? "error" : (errorPercentage > 40 ? "error" : errorPercentage > 0 ? "warning" : "success");
-            }
+            errorPercentage = Math.round((downCount / 3) * 100);
+            status = downCount === 0 ? "success" : (downCount === 3 ? "error" : "warning");
           } 
           else if (service.id === "oficore" && allData.oficore?.detalles) {
             const details = allData.oficore.detalles;
@@ -415,6 +415,42 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
               status = "success";
             }
           }
+          else if (service.id === "facturas-artesanales") {
+            const data = allData.facturas?.data || [];
+            totalRequests = data.filter((f: any) => {
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              return matchCorp;
+            }).length;
+
+            const now = new Date();
+            const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+            const hoyStr = format(now, "yyyy-MM-dd");
+            const ayer = new Date(now);
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = format(ayer, "yyyy-MM-dd");
+
+            const tieneCorpHoy = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneCorpAyer = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            const isCorpDown = (currentTimeInMinutes >= 23 * 60 && !tieneCorpHoy) || (!tieneCorpHoy && !tieneCorpAyer);
+
+            errorPercentage = isCorpDown ? 100 : 0;
+            status = isCorpDown ? "error" : "success";
+          }
+          else if (service.id === "mi-cuenta" || service.id === "micuenta") {
+            const miCuentaOk = allData["mi-cuenta"] ? (allData["mi-cuenta"].success !== false) : true;
+            errorPercentage = 0;
+            status = "success";
+          }
           else {
             // Fallback en caso de fallo de API
             errorPercentage = service.errorPercentage;
@@ -422,15 +458,106 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
             totalRequests = Math.floor(Math.random() * 500) + 100;
           }
 
+          let finalClients = enrichedClients.map(client => ({
+            ...client,
+            errorPercentage,
+            status,
+          }));
+
+          if (service.id === "facturas" && allData.facturas?.data) {
+            const data = allData.facturas.data;
+            const now = new Date();
+            const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+            const hoyStr = format(now, "yyyy-MM-dd");
+            const ayer = new Date(now);
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = format(ayer, "yyyy-MM-dd");
+
+            const tieneAutoHoy = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneAutoAyer = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            const isAutoDown = (currentTimeInMinutes >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer);
+
+            const tieneAntHoy = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneAntAyer = data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            const isAntDown = (currentTimeInMinutes >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer);
+
+            const tieneStueHoy = data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneStueAyer = data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            const isStueDown = (currentTimeInMinutes >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer);
+
+            finalClients = enrichedClients.map(client => {
+              const nameLower = client.name.toLowerCase();
+              const isAuto = client.id === "cl_automovil_club" || nameLower.includes("automovil");
+              const isAnt = client.id === "cl_cmds_antofagasta" || nameLower.includes("antofagasta");
+              const isStue = client.id === "cl_stuedemann" || nameLower.includes("stuedemann");
+
+              let cStatus: "success" | "warning" | "error" = "success";
+              let cErr = 0;
+
+              if (isAuto && isAutoDown) {
+                cStatus = "error";
+                cErr = 100;
+              } else if (isAnt && isAntDown) {
+                cStatus = "error";
+                cErr = 100;
+              } else if (isStue && isStueDown) {
+                cStatus = "error";
+                cErr = 100;
+              }
+
+              return {
+                ...client,
+                errorPercentage: cErr,
+                status: cStatus,
+              };
+            });
+          } else if (service.id === "facturas-artesanales") {
+            finalClients = enrichedClients.map(client => ({
+              ...client,
+              errorPercentage: status === "error" ? 100 : 0,
+              status,
+            }));
+          }
+
           return {
             ...service,
             errorPercentage,
             status,
-            clients: enrichedClients.map(client => ({
-              ...client,
-              errorPercentage,
-              status,
-            })),
+            clients: finalClients,
             metrics: {
               totalRequests,
               errorRate: errorPercentage,
@@ -990,22 +1117,6 @@ export function HeatMap({ onSelectService }: HeatMapProps) {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Vista lista</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        variant={viewMode === "map" ? "default" : "ghost"} 
-                        size="sm"
-                        className="h-8 px-2"
-                        onClick={() => setViewMode("map")}
-                      >
-                        <Map className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Vista mapa de calor</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>

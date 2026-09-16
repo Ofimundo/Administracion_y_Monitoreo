@@ -290,50 +290,70 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
     const isOfitecDown = client.services?.includes("ofitec") && !ofitecStatus.disponible;
 
     const isAntofagasta = client.id === "cl_cmds_antofagasta" || client.name.toUpperCase().includes("ANTOFAGASTA");
+    const isCorpesca = client.id === "cl_corpesca" || client.name.toUpperCase().includes("CORPESCA");
+    const isAutomovil = client.id === "cl_automovil_club" || client.name.toUpperCase().includes("AUTOMOVIL");
 
     let isFacturasDown = false;
-    if (client.services?.includes("facturas")) {
+    if (client.services?.includes("facturas") || client.services?.includes("facturas-artesanales")) {
       const now = new Date();
       const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
       const hoyStr = format(now, "yyyy-MM-dd");
 
-      if (isAntofagasta) {
-        const esHora1200AntofagastaPasada = currentTimeInMinutes >= (13 * 60);
-        const facturasAntofagastaHoy = (facturasBitacora || []).filter((f: any) => {
-          const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-          if (!isAnt) return false;
+      const ayer = new Date(now);
+      ayer.setDate(ayer.getDate() - 1);
+      const ayerStr = format(ayer, "yyyy-MM-dd");
+
+      const checkClientScheduleDown = (filterFn: (f: any) => boolean, alertTimeMinutes: number) => {
+        const esHoraPasada = currentTimeInMinutes >= alertTimeMinutes;
+        const ejecucionHoy = (facturasBitacora || []).some((f: any) => {
+          if (!filterFn(f)) return false;
           const parsed = parseLocalStringDate(f.fecha_proceso);
           return parsed && parsed.dateStr === hoyStr;
         });
-        const ejecucionOk = facturasAntofagastaHoy.some((f: any) => {
+        const ejecucionAyer = (facturasBitacora || []).some((f: any) => {
+          if (!filterFn(f)) return false;
           const parsed = parseLocalStringDate(f.fecha_proceso);
-          return parsed && parsed.minutes >= (11 * 60 + 45) && parsed.minutes <= (13 * 60);
+          return parsed && parsed.dateStr === ayerStr;
         });
-        isFacturasDown = esHora1200AntofagastaPasada && !ejecucionOk;
+
+        if (esHoraPasada && !ejecucionHoy) return true;
+        if (!ejecucionHoy && !ejecucionAyer) return true;
+        return false;
+      };
+
+      if (isCorpesca) {
+        // Horario 22:00 PM (Alerta 23:00 PM)
+        isFacturasDown = checkClientScheduleDown(
+          (f: any) => (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA")),
+          23 * 60
+        );
+      } else if (isAntofagasta) {
+        // Horario 12:00 PM (Alerta 13:00 PM)
+        isFacturasDown = checkClientScheduleDown(
+          (f: any) => (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA")),
+          13 * 60
+        );
+      } else if (isAutomovil) {
+        // Horario 10:05 AM (Alerta 11:00 AM)
+        isFacturasDown = checkClientScheduleDown(
+          (f: any) => (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL")),
+          11 * 60
+        );
       } else {
-        const esHora1400Pasada = currentTimeInMinutes >= (15 * 60);
-        const esHora2330Pasada = currentTimeInMinutes >= (23 * 60 + 59);
-        const facturasStuedemannHoy = (facturasBitacora || []).filter((f: any) => {
-          const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-          if (isAnt) return false;
-          const parsed = parseLocalStringDate(f.fecha_proceso);
-          return parsed && parsed.dateStr === hoyStr;
-        });
-        const ejecucion1400Ok = facturasStuedemannHoy.some((f: any) => {
-          const parsed = parseLocalStringDate(f.fecha_proceso);
-          return parsed && parsed.minutes >= (13 * 60 + 45) && parsed.minutes <= (15 * 60);
-        });
-        const ejecucion2330Ok = facturasStuedemannHoy.some((f: any) => {
-          const parsed = parseLocalStringDate(f.fecha_proceso);
-          return parsed && parsed.minutes >= (23 * 60) && parsed.minutes <= (23 * 60 + 59);
-        });
-        isFacturasDown = (esHora1400Pasada && !ejecucion1400Ok) || (esHora2330Pasada && !ejecucion2330Ok);
+        // Stuedemann: Horario 14:00 PM (Alerta 15:30 PM) y 23:30 PM (Alerta 23:59 PM)
+        isFacturasDown = checkClientScheduleDown(
+          (f: any) => {
+            const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+            const isCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+            const isAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+            return !isAnt && !isCorp && !isAuto;
+          },
+          15 * 60 + 30
+        );
       }
     }
 
-    const isDteDown = client.services?.includes("dte") && isDteScheduleMissing;
-
-    if (isSgcDown || isOfitecDown || isFacturasDown || isDteDown) {
+    if (isSgcDown || isOfitecDown || isFacturasDown) {
       return {
         ...client,
         status: "error",
@@ -590,12 +610,18 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
               client.id === "cl_ofimundo" || 
               client.id === "cl_stuedemann" || 
               client.id === "cl_cmds_antofagasta" ||
+              client.id === "cl_corpesca" ||
+              client.id === "cl_automovil_club" ||
               client.name.toLowerCase().includes("ofimundo") || 
               client.name.toLowerCase().includes("stuedemann") || 
               client.name.toLowerCase().includes("antofagasta") ||
+              client.name.toLowerCase().includes("corpesca") ||
+              client.name.toLowerCase().includes("automovil") ||
               (client.rut || "").includes("76.452.910") || 
               (client.rut || "").includes("96.502.540") ||
-              (client.rut || "").includes("70.892.100");
+              (client.rut || "").includes("70.892.100") ||
+              (client.rut || "").includes("96.893.820") ||
+              (client.rut || "").includes("70.016.920");
             
             const rawClientWithData = getClientWithRealData(client);
             const clientWithData = hasTelemetryData ? rawClientWithData : {
@@ -645,16 +671,38 @@ export function ClientsList({ onSelectClient }: ClientsListProps) {
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col justify-between pt-0 pb-4">
                   <div className="space-y-3 mt-1 flex-1">
-                    {/* Badge indicador de datos */}
-                    {hasTelemetryData ? (
-                      <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 w-fit">
-                        📡 Datos en tiempo real
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 w-fit">
-                        ✅ Servicios Activos
-                      </Badge>
-                    )}
+                    {/* Badge indicador de datos y horario */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {hasTelemetryData ? (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          📡 Datos en tiempo real
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+                          ✅ Servicios Activos
+                        </Badge>
+                      )}
+                      {(client.id === "cl_automovil_club" || client.name.toUpperCase().includes("AUTOMOVIL")) && (
+                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
+                          ⏰ Programado: 10:05 hrs
+                        </Badge>
+                      )}
+                      {(client.id === "cl_cmds_antofagasta" || client.name.toUpperCase().includes("ANTOFAGASTA")) && (
+                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
+                          ⏰ Programado: 12:00 hrs
+                        </Badge>
+                      )}
+                      {(client.id === "cl_corpesca" || client.name.toUpperCase().includes("CORPESCA")) && (
+                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
+                          ⏰ Programado: 22:00 hrs
+                        </Badge>
+                      )}
+                      {(client.id === "cl_stuedemann" || client.name.toUpperCase().includes("STUEDEMANN")) && (
+                        <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
+                          ⏰ Programado: 14:00 & 23:30 hrs
+                        </Badge>
+                      )}
+                    </div>
 
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <div className="bg-muted/50 rounded-lg p-2 text-center">

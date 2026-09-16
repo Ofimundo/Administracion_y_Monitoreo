@@ -28,6 +28,9 @@ export interface Log {
   type: "success" | "error" | "warning" | "info" | "comingSoon";
   details?: string;
   estado?: string;
+  isInfraestructura?: boolean;
+  cliente_id?: string;
+  cliente_nombre?: string;
 }
 
 export type ServiceStatus = "success" | "warning" | "error";
@@ -49,7 +52,9 @@ export interface MetricDataPoint {
 // Clientes globales (para poder ver sus servicios contratados)
 export const clients: Client[] = [
   { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: 0, status: "success", services: ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"] },
+  { id: "cl_automovil_club", name: "AUTOMOVIL CLUB DE CHILE", rut: "70.016.920-K", email: "contacto@automovilclub.cl", phone: "+56 2 2431 1300", errorPercentage: 0, status: "success", services: ["facturas"] },
   { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success", services: ["facturas"] },
+  { id: "cl_corpesca", name: "CORPESCA S.A.", rut: "96.893.820-7", email: "contacto@corpesca.cl", phone: "+56 57 251 6000", errorPercentage: 0, status: "success", services: ["facturas-artesanales"] },
 ];
 
 // Servicios que están próximamente (muestran mensaje especial)
@@ -77,6 +82,21 @@ const baseServices: Service[] = [
     logs: [
       { id: "1", message: "Servicio inicializado correctamente", timestamp: new Date().toISOString(), type: "success" },
       { id: "2", message: "Procesamiento de facturas completado", timestamp: new Date().toISOString(), type: "success" },
+    ],
+    isComingSoon: false,
+  },
+  {
+    id: "facturas-artesanales",
+    name: "Facturas Artesanales",
+    description: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML, y resolución de motivos.",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_corpesca", name: "CORPESCA S.A.", rut: "96.893.820-7", email: "contacto@corpesca.cl", phone: "+56 57 251 6000", errorPercentage: 0, status: "success" }
+    ],
+    logs: [
+      { id: "1", message: "Servicio de Facturas Artesanales Corpesca activo", timestamp: new Date().toISOString(), type: "success" },
+      { id: "2", message: "Procesamiento de bitácora corpesca al día", timestamp: new Date().toISOString(), type: "success" }
     ],
     isComingSoon: false,
   },
@@ -272,9 +292,15 @@ export { services };
 
 // Función para obtener servicios de un cliente
 export const getClientServices = (clientId: string): Service[] => {
-  const client = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")));
+  const client = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")) || (c.id && c.id.includes("corpesca") && clientId.includes("corpesca")) || (c.id && c.id.includes("automovil") && clientId.includes("automovil")));
   if (!client || !client.services) {
     if (clientId === "cl_cmds_antofagasta" || clientId.includes("antofagasta")) {
+      return services.filter(s => s.id === "facturas");
+    }
+    if (clientId === "cl_corpesca" || clientId.includes("corpesca")) {
+      return services.filter(s => s.id === "facturas-artesanales");
+    }
+    if (clientId === "cl_automovil_club" || clientId.includes("automovil")) {
       return services.filter(s => s.id === "facturas");
     }
     return services.filter(s => s.id === "facturas");
@@ -284,7 +310,7 @@ export const getClientServices = (clientId: string): Service[] => {
 
 // Función para obtener cliente por ID con datos completos
 export const getClientById = (clientId: string): Client | undefined => {
-  const found = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")));
+  const found = clients.find(c => c.id === clientId || (c.id && c.id.includes("antofagasta") && clientId.includes("antofagasta")) || (c.id && c.id.includes("corpesca") && clientId.includes("corpesca")) || (c.id && c.id.includes("automovil") && clientId.includes("automovil")));
   if (found) return found;
   if (clientId === "cl_cmds_antofagasta" || clientId.includes("antofagasta")) {
     return {
@@ -293,6 +319,30 @@ export const getClientById = (clientId: string): Client | undefined => {
       rut: "70.892.100-9",
       email: "contacto@cmds.cl",
       phone: "+56 55 288 7000",
+      errorPercentage: 0,
+      status: "success",
+      services: ["facturas"]
+    };
+  }
+  if (clientId === "cl_corpesca" || clientId.includes("corpesca")) {
+    return {
+      id: "cl_corpesca",
+      name: "CORPESCA S.A.",
+      rut: "96.893.820-7",
+      email: "contacto@corpesca.cl",
+      phone: "+56 57 251 6000",
+      errorPercentage: 0,
+      status: "success",
+      services: ["facturas-artesanales"]
+    };
+  }
+  if (clientId === "cl_automovil_club" || clientId.includes("automovil")) {
+    return {
+      id: "cl_automovil_club",
+      name: "AUTOMOVIL CLUB DE CHILE",
+      rut: "70.016.920-K",
+      email: "contacto@automovilclub.cl",
+      phone: "+56 2 2431 1300",
       errorPercentage: 0,
       status: "success",
       services: ["facturas"]
@@ -374,7 +424,8 @@ const serviceIdMap: Record<string, string> = {
   "OFI_01": "oficore",
   "SGC_01": "sgc",
   "OFT_01": "ofitec",
-  "MIC_01": "mi-cuenta"
+  "MIC_01": "mi-cuenta",
+  "FAC_ART_01": "facturas-artesanales"
 };
 
 // Variables mutables para prospectos y proyectos
@@ -494,32 +545,39 @@ export async function initializeDatabaseData(): Promise<boolean> {
         }
       });
 
-      // Si algún servicio no tiene clientes asociados por relaciones pero hay clientes en DB, asociar los clientes relevantes
+      // Filtrar clientes asociados por servicio para asegurar que Oficore, Ofitec, SGC y Mi Cuenta tengan únicamente a STUEDEMANN S.A.
       dbServices.forEach(service => {
-        if (!service.clients || service.clients.length === 0) {
-          service.clients = dbClients.map(c => ({
-            id: c.id,
-            name: c.name,
-            rut: c.rut,
-            email: c.email,
-            phone: c.phone,
-            errorPercentage: 0,
-            status: "success"
-          }));
+        if (service.id === "oficore" || service.id === "ofitec" || service.id === "sgc" || service.id === "mi-cuenta") {
+          service.clients = (service.clients || []).filter(c => c.id === "cl_stuedemann" || c.name.toUpperCase().includes("STUEDEMANN") || c.name.toUpperCase().includes("OFIMUNDO"));
+          if (service.clients.length === 0) {
+            service.clients = [{
+              id: "cl_stuedemann",
+              name: "STUEDEMANN S.A.",
+              rut: "96.502.540-5",
+              email: "contacto@stuedemann.cl",
+              phone: "+56 2 2840 9300",
+              errorPercentage: 0,
+              status: "success"
+            }];
+          }
         }
       });
 
-      // Asegurar cliente estático (Antofagasta)
+      // Asegurar clientes estáticos (Antofagasta y Corpesca)
       const staticClients = [
-        { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as const, services: ["facturas"] }
+        { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "70.892.100-9", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as const, services: ["facturas"] },
+        { id: "cl_corpesca", name: "CORPESCA S.A.", rut: "96.893.820-7", email: "contacto@corpesca.cl", phone: "+56 57 251 6000", errorPercentage: 0, status: "success" as const, services: ["facturas-artesanales"] }
       ];
       staticClients.forEach(sc => {
-        const existingIndex = dbClients.findIndex(c => c.id === sc.id || c.name.toUpperCase().includes("ANTOFAGASTA"));
+        const keyword = sc.id === "cl_cmds_antofagasta" ? "ANTOFAGASTA" : "CORPESCA";
+        const existingIndex = dbClients.findIndex(c => c.id === sc.id || c.name.toUpperCase().includes(keyword));
         if (existingIndex !== -1) {
           dbClients[existingIndex].id = sc.id;
-          if (!dbClients[existingIndex].services?.includes("facturas")) {
-            dbClients[existingIndex].services = [...(dbClients[existingIndex].services || []), "facturas"];
-          }
+          sc.services.forEach(srv => {
+            if (!dbClients[existingIndex].services?.includes(srv)) {
+              dbClients[existingIndex].services = [...(dbClients[existingIndex].services || []), srv];
+            }
+          });
         } else {
           dbClients.push(sc);
         }
@@ -535,6 +593,22 @@ export async function initializeDatabaseData(): Promise<boolean> {
             rut: "70.892.100-9",
             email: "contacto@cmds.cl",
             phone: "+56 55 288 7000",
+            errorPercentage: 0,
+            status: "success"
+          });
+        }
+      }
+
+      const facturasArtSrv = dbServices.find(s => s.id === "facturas-artesanales");
+      if (facturasArtSrv) {
+        if (!facturasArtSrv.clients) facturasArtSrv.clients = [];
+        if (!facturasArtSrv.clients.some(c => c.name.includes("CORPESCA"))) {
+          facturasArtSrv.clients.push({
+            id: "cl_corpesca",
+            name: "CORPESCA S.A.",
+            rut: "96.893.820-7",
+            email: "contacto@corpesca.cl",
+            phone: "+56 57 251 6000",
             errorPercentage: 0,
             status: "success"
           });

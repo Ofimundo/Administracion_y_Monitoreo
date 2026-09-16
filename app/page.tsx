@@ -345,12 +345,11 @@ export default function HomePage() {
     setSelectedClient(null);
   }, []);
 
-  // ✅ Configuración de tabs - Dashboard primero
+  // ✅ Configuración de tabs - Dashboard primero (Mapa de Calor consolidado en Servicios)
   const tabsConfig = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: DashboardMetrics, hasServiceCallback: false, hasClientCallback: false },
-    { id: "heatmap", label: "Mapa de Calor", icon: Flame, component: HeatMap, hasServiceCallback: true, hasClientCallback: false },
-    { id: "soporte", label: "Soporte", icon: Ticket, component: SupportTab, hasServiceCallback: false, hasClientCallback: false },
     { id: "services", label: "Servicios", icon: Briefcase, component: ServicesList, hasServiceCallback: false, hasClientCallback: false },
+    { id: "soporte", label: "Soporte", icon: Ticket, component: SupportTab, hasServiceCallback: false, hasClientCallback: false },
     { id: "clients", label: "Clientes", icon: Users, component: ClientsList, hasServiceCallback: false, hasClientCallback: true },
     { id: "timeline", label: "Línea de Tiempo", icon: Clock, component: EventsTimeline, hasServiceCallback: true, hasClientCallback: false },
     { id: "comparison", label: "Comparador Clientes", icon: UserCircle, component: ClientComparison, hasServiceCallback: false, hasClientCallback: false },
@@ -429,7 +428,7 @@ export default function HomePage() {
                   if (tab.id === "dashboard") {
                     props.onNavigateToServices = () => setActiveTab("services");
                     props.onNavigateToTimeline = () => setActiveTab("timeline");
-                    props.onNavigateToHeatMap = () => setActiveTab("heatmap");
+                    props.onNavigateToHeatMap = () => setActiveTab("services");
                     props.onNavigateToClients = () => setActiveTab("clients");
                     props.onNavigateToSupport = () => setActiveTab("soporte");
                   }

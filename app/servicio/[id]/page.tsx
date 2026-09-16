@@ -70,8 +70,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { ContratosDashboardView } from "@/components/contratos-dashboard-view";
 import { EquiposDashboardView } from "@/components/equipos-dashboard-view";
 import { DespachosDashboardView } from "@/components/despachos-dashboard-view";
+import { InyeccionSuministrosDashboardView } from "@/components/inyeccion-suministros-dashboard-view";
 import { FileSpreadsheet, Download, Package, Ticket as TicketIcon } from "lucide-react";
 import * as XLSX from "xlsx";
+import { type DateRange } from "react-day-picker";
 
 const EXPORT_FIELDS_MI_CUENTA = [
   { id: "folio", label: "N° Solicitud", default: true },
@@ -97,26 +99,55 @@ const isServiceComingSoon = (serviceId: string): boolean => {
   return COMING_SOON_SERVICES.includes(serviceId);
 };
 
+const parseLocalStringDate = (dateStr: string) => {
+  if (!dateStr) return null;
+  const [dPart, tPart] = String(dateStr).replace(" ", "T").split("T");
+  if (!dPart) return null;
+  let minutes = 0;
+  if (tPart) {
+    const times = tPart.split(":");
+    if (times.length >= 2) {
+      minutes = parseInt(times[0], 10) * 60 + parseInt(times[1], 10);
+    }
+  }
+  return { dateStr: dPart, minutes };
+};
 
+type StatsData = {
+  uptime: string;
+  lastActivity: string;
+  totalTransactions: number;
+  infrastructureErrors: number;
+  infrastructureErrorPercentage: number;
+  approvedCount: number;
+  rejectedCount: number;
+  manualCount: number;
+  pendingCount: number;
+  enProceso: number;
+  finalizado: number;
+  anulado: number;
+  incompleto: number;
+  reAbierto: number;
+  servTecnico: number;
+  cancelado: number;
+  sgcFacturas: number;
+  sgcGuias: number;
+  sgcNotasCredito: number;
+  sgcNotasDebito: number;
+  sgcOrigenSgc: number;
+  sgcOrigenSoftland: number;
+};
 
 export default function ServiceDetailPage() {
-  const params = useParams();
+  const params = useParams() as { id: string };
   const router = useRouter();
   const { toast } = useToast();
 
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [showClientDashboard, setShowClientDashboard] = useState(false);
-  const [serviceName, setServiceName] = useState("");
-  const [serviceDescription, setServiceDescription] = useState("");
-  const [serviceStatus, setServiceStatus] = useState<"success" | "warning" | "error">("success");
-  const [serviceClients, setServiceClients] = useState<Client[]>([]);
+  const [date, setDate] = useState<DateRange | undefined>(undefined);
   const [mounted, setMounted] = useState(false);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-  
-  // Estadísticas basadas en datos reales
-  const [statsData, setStatsData] = useState({
+  const [statsData, setStatsData] = useState<StatsData>({
     uptime: "100%",
-    lastActivity: "Cargando...",
+    lastActivity: "No hay datos",
     totalTransactions: 0,
     infrastructureErrors: 0,
     infrastructureErrorPercentage: 0,
@@ -138,7 +169,7 @@ export default function ServiceDetailPage() {
     sgcOrigenSgc: 0,
     sgcOrigenSoftland: 0,
   });
-  
+
   const [statsDateRange, setStatsDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>(() => {
     const currentYear = new Date().getFullYear();
     return {
@@ -149,10 +180,16 @@ export default function ServiceDetailPage() {
   const [statsClientFilter, setStatsClientFilter] = useState<string>("todos");
   const [showStatsDateFilter, setShowStatsDateFilter] = useState(false);
   const [hasStatsFilter, setHasStatsFilter] = useState(false);
-  
-  const [loading, setLoading] = useState(false);
+
   const [rawData, setRawData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [showClientModal, setShowClientModal] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [serviceStatus, setServiceStatus] = useState<"success" | "warning" | "error">("success");
   const [liveClients, setLiveClients] = useState<Client[]>([]);
+  const [activeTab, setActiveTab] = useState("stats");
+  const [showClientDashboard, setShowClientDashboard] = useState(false);
   const [dbMode, setDbMode] = useState<"simulation" | "real">("simulation");
   const [apiError, setApiError] = useState<string | null>(null);
   
@@ -162,7 +199,7 @@ export default function ServiceDetailPage() {
   const [alertHours, setAlertHours] = useState(24);
   const [pickingError, setPickingError] = useState<string | null>(null);
   const [pickingPeriod, setPickingPeriod] = useState<"day" | "week" | "month">("day");
-  const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking" | "contratos" | "equipos" | "despachos">("docs");
+  const [sgcSubTab, setSgcSubTab] = useState<"docs" | "picking" | "contratos" | "equipos" | "despachos" | "inyeccion">("docs");
   const [isSgcMenuOpen, setIsSgcMenuOpen] = useState(false);
 
   // Estados para Monitoreo de Contratos SGC
@@ -175,6 +212,16 @@ export default function ServiceDetailPage() {
   const [equiposLoading, setEquiposLoading] = useState(false);
   const [equiposError, setEquiposError] = useState<string | null>(null);
 
+  // Estados para Monitoreo de Despachos SGC
+  const [despachosStats, setDespachosStats] = useState<any>(null);
+  const [despachosLoading, setDespachosLoading] = useState(false);
+  const [despachosError, setDespachosError] = useState<string | null>(null);
+
+  // Estados para Monitoreo de Inyección de Suministros SGC (OIG.notificaciones)
+  const [inyeccionStats, setInyeccionStats] = useState<any[]>([]);
+  const [inyeccionLoading, setInyeccionLoading] = useState(false);
+  const [inyeccionError, setInyeccionError] = useState<string | null>(null);
+
   // Estados para Portal Mi Cuenta
   const [miCuentaPeticionesCliente, setMiCuentaPeticionesCliente] = useState<any[]>([]);
   const [showExportModalMiCuenta, setShowExportModalMiCuenta] = useState(false);
@@ -182,11 +229,6 @@ export default function ServiceDetailPage() {
     EXPORT_FIELDS_MI_CUENTA.filter(f => f.default).map(f => f.id)
   );
   const [selectAllMiCuenta, setSelectAllMiCuenta] = useState(true);
-
-  // Estados para Monitoreo de Despachos SGC
-  const [despachosStats, setDespachosStats] = useState<any>(null);
-  const [despachosLoading, setDespachosLoading] = useState(false);
-  const [despachosError, setDespachosError] = useState<string | null>(null);
 
   const serviceStatic = services.find((s) => s.id === params.id);
   const comingSoon = serviceStatic ? isServiceComingSoon(serviceStatic.id) : false;
@@ -200,11 +242,11 @@ export default function ServiceDetailPage() {
     clientFilter?: string
   ) => {
     const serviceId = params.id as string;
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
+    const activeServices = ["facturas", "facturas-artesanales", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
     if (!activeServices.includes(serviceId)) return;
     
     try {
-      setLoading(true);
+      setIsLoading(true);
       setPermissionError(null);
       setApiError(null);
 
@@ -225,18 +267,23 @@ export default function ServiceDetailPage() {
       }
 
       // ============================================================
-      // FACTURAS - CORREGIDO CON FUERZA A VERDE
+      // FACTURAS & FACTURAS ARTESANALES
       // ============================================================
-      if (serviceId === "facturas") {
-        const res = await fetch(`/api/facturas/bitacora?estado=todos${queryParams ? '&' + queryParams.slice(1) : ''}`);
+      if (serviceId === "facturas" || serviceId === "facturas-artesanales") {
+        const isFacturasArtesanales = serviceId === "facturas-artesanales";
+        const fetchUrl = isFacturasArtesanales 
+          ? `/api/facturas/bitacora?cliente=cl_corpesca${queryParams ? '&' + queryParams.slice(1) : ''}`
+          : `/api/facturas/bitacora?estado=todos${queryParams ? '&' + queryParams.slice(1) : ''}`;
+
+        const res = await fetch(fetchUrl);
         const data = await res.json();
         if (data.success && data.data && Array.isArray(data.data)) {
           setRawData(data.data);
           setDbMode("real");
           
           const totalDocs = data.data.length;
-          const aprobadas = data.data.filter((f: any) => f.estado === "Aprobado").length;
-          const rechazadas = data.data.filter((f: any) => f.estado === "Rechazado").length;
+          const aprobadas = data.data.filter((f: any) => f.estado === "Aprobado" || (f.pdf_capturado === "SI" && f.xml_capturado === "SI")).length;
+          const rechazadas = data.data.filter((f: any) => f.estado === "Rechazado" || (f.pdf_capturado === "NO" || f.xml_capturado === "NO")).length;
           const manuales = data.data.filter((f: any) => f.estado === "Manual").length;
           const pendientes = data.data.filter((f: any) => f.estado === "Pendiente" || f.estado === "Pendiente Espera").length;
           
@@ -244,10 +291,115 @@ export default function ServiceDetailPage() {
           const erroresInfra = data.data.filter((f: any) => isInfraestructuraError(f.motivo)).length;
           const errorPercentage = totalDocs > 0 ? Math.round((erroresInfra / totalDocs) * 100) : 0;
           
-          // ✅ FORZAR: Si no hay errores reales de infraestructura, el estado es "success" (verde)
           let status: "success" | "warning" | "error" = "success";
           
-          // ✅ Solo si hay errores REALES de infraestructura y son significativos
+          // Validar horario y frecuencia de ejecución Corpesca / Facturas Artesanales (22:00 PM - Rango 21:45 a 23:00)
+          let finalErrorPercentage = errorPercentage;
+          let finalRejectedCount = rechazadas;
+          let finalInfraErrors = erroresInfra;
+          let isAutoDown = false;
+          let isAntDown = false;
+          let isStueDown = false;
+
+          if (isFacturasArtesanales) {
+            const now = new Date();
+            const currentMin = now.getHours() * 60 + now.getMinutes();
+            const hoyStr = format(now, "yyyy-MM-dd");
+            const ayer = new Date(now);
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = format(ayer, "yyyy-MM-dd");
+
+            const esHora2200Pasada = currentMin >= 23 * 60;
+            const tieneHoy = data.data.some((f: any) => {
+              const d = new Date(f.fecha_proceso);
+              const dStr = format(d, "yyyy-MM-dd");
+              return dStr === hoyStr;
+            });
+            const tieneAyer = data.data.some((f: any) => {
+              const d = new Date(f.fecha_proceso);
+              const dStr = format(d, "yyyy-MM-dd");
+              return dStr === ayerStr;
+            });
+
+            // Si no ejecutó hoy y ya pasaron las 23:00, o si no ha ejecutado ni hoy ni ayer (bot detenido en días anteriores)
+            const faltaEjecucion = (esHora2200Pasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
+
+            if (faltaEjecucion) {
+              status = "error";
+              finalErrorPercentage = 100;
+              if (finalRejectedCount === 0) finalRejectedCount = 1;
+              if (finalInfraErrors === 0) finalInfraErrors = 1;
+            }
+          } else {
+            // Aceptación y Rechazo de Facturas (Stuedemann, Automóvil Club, Antofagasta)
+            const now = new Date();
+            const currentMin = now.getHours() * 60 + now.getMinutes();
+            const hoyStr = format(now, "yyyy-MM-dd");
+            const ayer = new Date(now);
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = format(ayer, "yyyy-MM-dd");
+
+            // 1. Automóvil Club de Chile (10:05 AM)
+            const tieneAutoHoy = data.data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneAutoAyer = data.data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            isAutoDown = (currentMin >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer);
+
+            // 2. Corp Municipal de Antofagasta (12:00 PM)
+            const tieneAntHoy = data.data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneAntAyer = data.data.some((f: any) => {
+              const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              if (!match) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            isAntDown = (currentMin >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer);
+
+            // 3. Stuedemann S.A. (14:00 PM / 23:30 PM)
+            const tieneStueHoy = data.data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === hoyStr;
+            });
+            const tieneStueAyer = data.data.some((f: any) => {
+              const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+              const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+              const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+              if (matchAnt || matchCorp || matchAuto) return false;
+              const parsed = parseLocalStringDate(f.fecha_proceso);
+              return parsed && parsed.dateStr === ayerStr;
+            });
+            isStueDown = (currentMin >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer);
+
+            let downCount = 0;
+            if (isAutoDown) downCount++;
+            if (isAntDown) downCount++;
+            if (isStueDown) downCount++;
+
+            if (downCount > 0) {
+              finalInfraErrors = erroresInfra + downCount;
+              finalErrorPercentage = Math.round((downCount / 3) * 100);
+              status = downCount === 3 ? "error" : "warning";
+            }
+          }
+          
           if (erroresInfra > 0 && errorPercentage > 5) {
             if (errorPercentage > 40) {
               status = "error";
@@ -255,22 +407,21 @@ export default function ServiceDetailPage() {
               status = "warning";
             }
           }
-          // ✅ Si no hay errores o son menores al 5%, se mantiene en "success" (verde)
           
           setServiceStatus(status);
           
           setStatsData({
-            uptime: status === "error" ? "0%" : "100%",
+            uptime: status === "error" ? "0%" : `${Math.max(0, 100 - finalErrorPercentage)}%`,
             lastActivity: totalDocs > 0 ? format(new Date(data.data[0]?.fecha_proceso || new Date()), "dd/MM/yyyy HH:mm") : "No hay datos",
             totalTransactions: totalDocs,
-            infrastructureErrors: erroresInfra,
-            infrastructureErrorPercentage: errorPercentage,
+            infrastructureErrors: finalInfraErrors,
+            infrastructureErrorPercentage: finalErrorPercentage,
             approvedCount: aprobadas,
-            rejectedCount: rechazadas,
+            rejectedCount: finalRejectedCount,
             manualCount: manuales,
             pendingCount: pendientes,
             enProceso: 0,
-            finalizado: 0,
+            finalizado: aprobadas,
             anulado: 0,
             incompleto: 0,
             reAbierto: 0,
@@ -284,10 +435,12 @@ export default function ServiceDetailPage() {
             sgcOrigenSoftland: 0,
           });
           
-          const facturasClients: Client[] = [
-            { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: errorPercentage, status: status as any, services: ["facturas"] },
-            { id: "cl_automovil_club", name: "AUTOMOVIL CLUB DE CHILE", rut: "81.464.600-9", email: "contacto@automovilclub.cl", phone: "+56 2 2500 0000", errorPercentage: 0, status: "success" as any, services: ["facturas"] },
-            { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "71.102.600-2", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: 0, status: "success" as any, services: ["facturas"] }
+          const facturasClients: Client[] = isFacturasArtesanales ? [
+            { id: "cl_corpesca", name: "CORPESCA S.A.", rut: "96.893.820-7", email: "contacto@corpesca.cl", phone: "+56 57 251 6000", errorPercentage: finalErrorPercentage, status: status as any, services: ["facturas-artesanales"] }
+          ] : [
+            { id: "cl_stuedemann", name: "STUEDEMANN S.A.", rut: "96.502.540-5", email: "contacto@stuedemann.cl", phone: "+56 2 2840 9300", errorPercentage: isStueDown ? 100 : 0, status: (isStueDown ? "error" : "success") as any, services: ["facturas"] },
+            { id: "cl_automovil_club", name: "AUTOMOVIL CLUB DE CHILE", rut: "81.464.600-9", email: "contacto@automovilclub.cl", phone: "+56 2 2500 0000", errorPercentage: isAutoDown ? 100 : 0, status: (isAutoDown ? "error" : "success") as any, services: ["facturas"] },
+            { id: "cl_cmds_antofagasta", name: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA", rut: "71.102.600-2", email: "contacto@cmds.cl", phone: "+56 55 288 7000", errorPercentage: isAntDown ? 100 : 0, status: (isAntDown ? "error" : "success") as any, services: ["facturas"] }
           ];
           setLiveClients(facturasClients);
           setHasStatsFilter(false);
@@ -483,14 +636,17 @@ export default function ServiceDetailPage() {
           setEquiposError(null);
           setDespachosLoading(true);
           setDespachosError(null);
+          setInyeccionLoading(true);
+          setInyeccionError(null);
           
           const connector = queryParams ? "&" : "?";
-          const [res, pickingRes, contratosRes, equiposRes, despachosRes] = await Promise.all([
+          const [res, pickingRes, contratosRes, equiposRes, despachosRes, inyeccionRes] = await Promise.all([
             fetch(`/api/sgc/stats${queryParams}`),
             fetch(`/api/sgc/picking-stats${queryParams}${connector}hours=${alertHours}`),
             fetch(`/api/sgc/contratos-stats${queryParams}`),
             fetch(`/api/sgc/equipos-stats${queryParams}`),
-            fetch(`/api/sgc/despachos-stats${queryParams}`)
+            fetch(`/api/sgc/despachos-stats${queryParams}`),
+            fetch(`/api/sgc/inyeccion-suministros-stats${queryParams}`)
           ]);
           
           const data = await res.json();
@@ -498,6 +654,7 @@ export default function ServiceDetailPage() {
           const cData = await contratosRes.json();
           const eqData = await equiposRes.json();
           const dData = await despachosRes.json();
+          const inyData = await inyeccionRes.json();
           
           setPickingLoading(false);
           if (pData.success) {
@@ -525,6 +682,13 @@ export default function ServiceDetailPage() {
             setDespachosStats(dData);
           } else {
             setDespachosError(dData.message || "⚠️ Error al obtener estadísticas de despachos");
+          }
+
+          setInyeccionLoading(false);
+          if (inyData.success) {
+            setInyeccionStats(inyData.data || []);
+          } else {
+            setInyeccionError(inyData.message || "⚠️ Error al obtener notificaciones de inyección de suministros");
           }
           
           if (res.status === 403 || !data.success) {
@@ -789,7 +953,7 @@ export default function ServiceDetailPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
   
@@ -820,28 +984,13 @@ export default function ServiceDetailPage() {
   };
 
   useEffect(() => {
-    const activeServices = ["facturas", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
+    const activeServices = ["facturas", "facturas-artesanales", "oficore", "ofitec", "sgc", "dte", "mi-cuenta"];
     const serviceId = params.id as string;
 
     const loadData = async () => {
-      const currentService = getServiceById(serviceId) || services.find(s => s.id === serviceId);
-      if (currentService) {
-        setServiceName(currentService.name);
-        setServiceDescription(currentService.description);
-        setServiceClients(currentService.clients || []);
-      }
       await initializeDatabaseData();
     };
     loadData();
-
-    const unsubscribe = subscribeToData(() => {
-      const currentService = getServiceById(serviceId) || services.find(s => s.id === serviceId);
-      if (currentService) {
-        setServiceName(currentService.name);
-        setServiceDescription(currentService.description);
-        setServiceClients(currentService.clients || []);
-      }
-    });
 
     if (activeServices.includes(serviceId)) {
       const currentYear = new Date().getFullYear();
@@ -849,11 +998,8 @@ export default function ServiceDetailPage() {
         from: new Date(currentYear, 0, 1),
         to: new Date(currentYear, 11, 31)
       };
-      setStatsDateRange(defaultRange);
       fetchLiveData(defaultRange);
     }
-
-    return () => unsubscribe();
   }, [params.id]);
 
   const handleOpenClientDashboard = (client: Client) => {
@@ -865,6 +1011,9 @@ export default function ServiceDetailPage() {
     } else if (client.id === "cl_stuedemann" || nameLower.includes("stuedemann")) {
       resolvedClient.id = "cl_stuedemann";
       resolvedClient.name = "STUEDEMANN S.A.";
+    } else if (client.id === "cl_corpesca" || nameLower.includes("corpesca")) {
+      resolvedClient.id = "cl_corpesca";
+      resolvedClient.name = "CORPESCA S.A.";
     }
     setSelectedClient(resolvedClient);
     setShowClientDashboard(true);
@@ -872,10 +1021,9 @@ export default function ServiceDetailPage() {
 
   const displayClients = useMemo(() => {
     if (liveClients.length > 0) return liveClients;
-    if (serviceClients.length > 0) return serviceClients;
     const currentService = getServiceById(params.id as string) || services.find(s => s.id === params.id);
     return currentService?.clients || [];
-  }, [liveClients, serviceClients, params.id]);
+  }, [liveClients, params.id]);
 
   // Mostrar pantalla de "Próximamente" para servicios en desarrollo
   if (comingSoon && params.id !== "facturas") {
@@ -942,10 +1090,10 @@ export default function ServiceDetailPage() {
     );
   }
 
-  const displayName = params.id === "facturas" ? "Aceptación y Rechazo de Facturas" : serviceName;
+  const displayName = params.id === "facturas" ? "Aceptación y Rechazo de Facturas" : (serviceStatic?.name || "Servicio");
   const displayDescription = params.id === "facturas" 
     ? "El proyecto tiene como objetivo automatizar el flujo de aceptación y rechazo de facturas electrónicas registradas en el sistema, permitiendo una gestión eficiente y reduciendo la intervención manual."
-    : serviceDescription;
+    : (serviceStatic?.description || "Detalle y monitoreo del servicio.");
 
   if (!mounted) {
     return (
@@ -977,28 +1125,88 @@ export default function ServiceDetailPage() {
   const isTicketService = isOficore || isOfitec;
 
   const getDisplayStatus = () => {
-    // ✅ FORZAR: Para facturas, siempre mostrar "success" si no hay errores reales de infraestructura
     if (params.id === "facturas") {
-      const erroresInfra = rawData.filter((f: any) => isInfraestructuraError(f.motivo)).length;
-      const totalDocs = rawData.length;
-      const errorPercentage = totalDocs > 0 ? Math.round((erroresInfra / totalDocs) * 100) : 0;
-      
-      // ✅ Si no hay errores reales o son menores al 5%, mostrar verde
-      if (erroresInfra === 0 || errorPercentage <= 5) {
-        return "success";
-      }
-      return serviceStatus;
+      const now = new Date();
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+      const hoyStr = format(now, "yyyy-MM-dd");
+
+      let okCount = 0;
+      let totalCount = 3;
+
+      const tieneStue = rawData.some((f: any) => {
+        const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        const isCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+        const isAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (isAnt || isCorp || isAuto) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (tieneStue || currentTimeInMinutes < (15 * 60 + 30)) okCount++;
+
+      const tieneAuto = rawData.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (!match) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (tieneAuto || currentTimeInMinutes < (11 * 60)) okCount++;
+
+      const tieneAnt = rawData.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        if (!match) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (tieneAnt || currentTimeInMinutes < (13 * 60)) okCount++;
+
+      if (okCount === totalCount) return "success";
+      if (okCount === 0) return "error";
+      return "warning";
     }
     return serviceStatus;
   };
 
   const getDisplayPercentage = () => {
     if (params.id === "facturas") {
-      const erroresInfra = rawData.filter((f: any) => isInfraestructuraError(f.motivo)).length;
-      const totalDocs = rawData.length;
-      return totalDocs > 0 ? Math.round((erroresInfra / totalDocs) * 100) : 0;
+      const now = new Date();
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+      const hoyStr = format(now, "yyyy-MM-dd");
+
+      let downCount = 0;
+      let totalCount = 3;
+
+      const tieneStue = rawData.some((f: any) => {
+        const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        const isCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+        const isAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (isAnt || isCorp || isAuto) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (currentTimeInMinutes >= (15 * 60 + 30) && !tieneStue) downCount++;
+
+      const tieneAuto = rawData.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (!match) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (currentTimeInMinutes >= (11 * 60) && !tieneAuto) downCount++;
+
+      const tieneAnt = rawData.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        if (!match) return false;
+        const parsed = parseLocalStringDate(f.fecha_proceso);
+        return parsed && parsed.dateStr === hoyStr;
+      });
+      if (currentTimeInMinutes >= (13 * 60) && !tieneAnt) downCount++;
+
+      return Math.round((downCount / totalCount) * 100);
     }
-    return 0;
+    if (serviceStatus === "error") {
+      return 100;
+    }
+    return statsData.infrastructureErrorPercentage || 0;
   };
 
   return (
@@ -1071,7 +1279,9 @@ export default function ServiceDetailPage() {
                                   ? "Monitoreo de Equipos en Parque SGC"
                                   : sgcSubTab === "despachos"
                                     ? "Monitoreo de Despachos SGC"
-                                    : "Dashboard de Órdenes de Retiro SGC") 
+                                    : sgcSubTab === "inyeccion"
+                                      ? "Inyección de Suministros SGC"
+                                      : "Dashboard de Órdenes de Retiro SGC") 
                           : "Estadísticas de Documentos"}
                     </CardTitle>
                     {isSgcService && (
@@ -1089,6 +1299,7 @@ export default function ServiceDetailPage() {
                             {sgcSubTab === "contratos" && "Contratos"}
                             {sgcSubTab === "equipos" && "Equipos en Parque"}
                             {sgcSubTab === "despachos" && "Despachos"}
+                            {sgcSubTab === "inyeccion" && "Inyección de Suministros"}
                           </span>
                           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200 text-emerald-600", isSgcMenuOpen && "transform rotate-180")} />
                         </Button>
@@ -1101,7 +1312,7 @@ export default function ServiceDetailPage() {
                               onClick={() => setIsSgcMenuOpen(false)} 
                             />
                             
-                            <div className="absolute right-0 sm:left-0 mt-1.5 w-56 rounded-xl shadow-lg bg-background border border-border/80 z-50 py-1.5 origin-top-left animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="absolute right-0 sm:left-0 mt-1.5 w-60 rounded-xl shadow-lg bg-background border border-border/80 z-50 py-1.5 origin-top-left animate-in fade-in slide-in-from-top-2 duration-200">
                               <div className="px-3 py-1 mb-1 border-b border-border/50">
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                                   Vistas de Monitoreo
@@ -1112,7 +1323,8 @@ export default function ServiceDetailPage() {
                                 { id: "picking", label: "Monitoreo de Picking", desc: "Dashboard de picking en tiempo real" },
                                 { id: "contratos", label: "Contratos", desc: "Monitoreo y estado de contratos" },
                                 { id: "equipos", label: "Equipos en Parque", desc: "Ubicación y datos de equipos" },
-                                { id: "despachos", label: "Despachos", desc: "Control y seguimiento de despachos" }
+                                { id: "despachos", label: "Despachos", desc: "Control y seguimiento de despachos" },
+                                { id: "inyeccion", label: "Inyección de Suministros", desc: "Monitoreo de notificaciones e inyección de suministros" }
                               ].map((item) => (
                                 <button
                                   key={item.id}
@@ -1197,7 +1409,9 @@ export default function ServiceDetailPage() {
                         <SelectContent>
                           <SelectItem value="todos">🌐 Todos los Clientes (Consolidado General)</SelectItem>
                           <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
+                          <SelectItem value="cl_automovil_club">🚗 AUTOMOVIL CLUB DE CHILE</SelectItem>
                           <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA</SelectItem>
+                          <SelectItem value="cl_corpesca">🐟 CORPESCA S.A.</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1451,11 +1665,18 @@ export default function ServiceDetailPage() {
                       loading={equiposLoading}
                       error={equiposError}
                     />
-                  ) : (
+                  ) : sgcSubTab === "despachos" ? (
                     <DespachosDashboardView
                       stats={despachosStats}
                       loading={despachosLoading}
                       error={despachosError}
+                    />
+                  ) : (
+                    <InyeccionSuministrosDashboardView
+                      data={inyeccionStats}
+                      loading={inyeccionLoading}
+                      error={inyeccionError}
+                      onRefresh={() => fetchLiveData(date ? { from: date.from, to: date.to } : undefined)}
                     />
                   )
                 ) : params.id === "dte" ? (
@@ -1479,31 +1700,151 @@ export default function ServiceDetailPage() {
                       <p className="text-xs text-blue-500">⏱️ Duración Promedio</p>
                     </div>
                   </div>
+                ) : params.id === "facturas-artesanales" ? (
+                  <div className="space-y-4">
+                    {serviceStatus === "error" && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                          <span className="font-semibold text-red-600 dark:text-red-400">
+                            🚨 Alerta Crítica: El servicio no registra ejecuciones activas. Última actividad registrada: {statsData.lastActivity}.
+                          </span>
+                        </div>
+                        <Badge variant="destructive" className="font-bold w-fit">PROCESO DETENIDO / EJECUCIÓN OMITIDA</Badge>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-muted/30 rounded-lg p-4 text-center border border-border/50">
+                        <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground font-semibold mt-1">🤖 Total Registros Bitácora</p>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg p-4 text-center border border-emerald-200 dark:bg-emerald-950/20">
+                        <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{statsData.approvedCount.toLocaleString()}</p>
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-1">✅ Captura Exitosa (PDF & XML)</p>
+                      </div>
+                      <div className="bg-red-50 rounded-lg p-4 text-center border border-red-200 dark:bg-red-950/20">
+                        <p className="text-2xl font-bold text-red-500 dark:text-red-400">{statsData.rejectedCount.toLocaleString()}</p>
+                        <p className="text-xs text-red-500 dark:text-red-400 font-semibold mt-1">❌ Faltantes / Errores</p>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-200 dark:bg-blue-950/20">
+                        <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">22:00 PM</p>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold">⏰ Horario (21:45 - 23:00)</p>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <div className="bg-muted/30 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
-                      <p className="text-xs text-emerald-600">✅ Aprobados</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-red-500">{statsData.rejectedCount.toLocaleString()}</p>
-                      <p className="text-xs text-red-500">❌ Rechazados</p>
-                    </div>
-                    <div className="bg-amber-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-amber-500">{statsData.manualCount.toLocaleString()}</p>
-                      <p className="text-xs text-amber-500">⚠️ Manuales</p>
-                    </div>
-                    <div className="bg-blue-50 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-blue-500">{statsData.pendingCount.toLocaleString()}</p>
-                      <p className="text-xs text-blue-500">⏳ Pendientes</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-4 text-center border-2 border-red-200">
-                      <p className="text-2xl font-bold text-red-600">{statsData.infrastructureErrors.toLocaleString()}</p>
-                      <p className="text-xs text-red-600">🔧 Errores Infraestructura</p>
+                  <div className="space-y-4">
+                    {params.id === "facturas" && (
+                      (() => {
+                        const now = new Date();
+                        const currentMin = now.getHours() * 60 + now.getMinutes();
+                        const hoyStr = format(now, "yyyy-MM-dd");
+                        const ayer = new Date(now);
+                        ayer.setDate(ayer.getDate() - 1);
+                        const ayerStr = format(ayer, "yyyy-MM-dd");
+
+                        const alerts: { client: string; reason: string }[] = [];
+
+                        const tieneAutoHoy = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAutoAyer = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        if ((currentMin >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer)) {
+                          alerts.push({ client: "AUTOMOVIL CLUB DE CHILE", reason: "Programado a las 10:05 AM. El servicio no ha registrado ejecuciones en el día de hoy ni en las últimas 24 horas." });
+                        }
+
+                        const tieneAntHoy = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAntAyer = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        if ((currentMin >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer)) {
+                          alerts.push({ client: "CORP MUNICIPAL DE ANTOFAGASTA", reason: "Programado a las 12:00 PM (ventana 11:45 AM - 13:00 PM). El servicio no ha registrado ejecuciones hoy ni en las últimas 24 horas." });
+                        }
+
+                        const tieneStueHoy = rawData.some((f: any) => {
+                          const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (matchAnt || matchCorp || matchAuto) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneStueAyer = rawData.some((f: any) => {
+                          const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (matchAnt || matchCorp || matchAuto) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        if ((currentMin >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer)) {
+                          alerts.push({ client: "STUEDEMANN S.A.", reason: "Programados 14:00 PM y 23:30 PM. El servicio no ha registrado ejecuciones hoy ni en las últimas 24 horas." });
+                        }
+
+                        if (alerts.length === 0) return null;
+
+                        return (
+                          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
+                                <AlertTriangle className="h-5 w-5 text-red-500" />
+                                🚨 Alerta Crítica: {alerts.length} cliente(s) con omisión de ejecución programada
+                              </div>
+                              <Badge variant="destructive" className="font-bold">SERVICIOS INACTIVOS</Badge>
+                            </div>
+                            <div className="space-y-1.5 pt-1">
+                              {alerts.map((al, idx) => (
+                                <div key={idx} className="text-xs text-red-600 dark:text-red-300 flex items-start gap-2 bg-red-500/5 p-2 rounded border border-red-500/10">
+                                  <span className="font-bold whitespace-nowrap">• {al.client}:</span>
+                                  <span>{al.reason}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className="bg-muted/30 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-foreground">{statsData.totalTransactions.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">📄 Total Documentos</p>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-emerald-600">{statsData.approvedCount.toLocaleString()}</p>
+                        <p className="text-xs text-emerald-600">✅ Aprobados</p>
+                      </div>
+                      <div className="bg-red-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-red-500">{statsData.rejectedCount.toLocaleString()}</p>
+                        <p className="text-xs text-red-500">❌ Rechazados</p>
+                      </div>
+                      <div className="bg-amber-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-amber-500">{statsData.manualCount.toLocaleString()}</p>
+                        <p className="text-xs text-amber-500">⚠️ Manuales</p>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg p-4 text-center">
+                        <p className="text-2xl font-bold text-blue-500">{statsData.pendingCount.toLocaleString()}</p>
+                        <p className="text-xs text-blue-500">⏳ Pendientes</p>
+                      </div>
+                      <div className="bg-red-50 rounded-lg p-4 text-center border-2 border-red-200">
+                        <p className="text-2xl font-bold text-red-600">{statsData.infrastructureErrors.toLocaleString()}</p>
+                        <p className="text-xs text-red-600">🔧 Errores Infraestructura</p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1558,16 +1899,118 @@ export default function ServiceDetailPage() {
                         client.id === "cl_ofimundo" || 
                         client.id === "cl_stuedemann" || 
                         client.id === "cl_cmds_antofagasta" ||
+                        client.id === "cl_corpesca" ||
+                        client.id === "cl_automovil_club" ||
                         nameLower.includes("ofimundo") || 
                         nameLower.includes("stuedemann") || 
                         nameLower.includes("antofagasta") ||
+                        nameLower.includes("corpesca") ||
+                        nameLower.includes("automovil") ||
                         (client.rut || "").includes("76.452.910") || 
                         (client.rut || "").includes("96.502.540") ||
-                        (client.rut || "").includes("70.892.100");
+                        (client.rut || "").includes("70.892.100") ||
+                        (client.rut || "").includes("96.893.820") ||
+                        (client.rut || "").includes("70.016.920");
                       const isNoMonitoringClient = !hasTelemetryData;
+                      const now = new Date();
+                      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+                      const hoyStr = format(now, "yyyy-MM-dd");
 
-                      const displayStatus = isNoMonitoringClient ? "success" : (client.status || "success");
-                      const displayErr = isNoMonitoringClient ? 0 : (client.errorPercentage || 0);
+                      const isAuto = params.id === "facturas" && (client.id === "cl_automovil_club" || nameLower.includes("automovil"));
+                      const isAnt = params.id === "facturas" && (client.id === "cl_cmds_antofagasta" || nameLower.includes("antofagasta"));
+                      const isCorp = (params.id === "facturas-artesanales" || params.id === "facturas") && (client.id === "cl_corpesca" || nameLower.includes("corpesca"));
+                      const isStue = params.id === "facturas" && (client.id === "cl_stuedemann" || nameLower.includes("stuedemann"));
+
+                      let isClientDown = false;
+                      let clientAlertReason = "";
+                      const ayer = new Date(now);
+                      ayer.setDate(ayer.getDate() - 1);
+                      const ayerStr = format(ayer, "yyyy-MM-dd");
+
+                      if (isAuto) {
+                        const alertTime = 11 * 60;
+                        const esPasada = currentTimeInMinutes >= alertTime;
+                        const tieneHoy = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAyer = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        isClientDown = (esPasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
+                        if (isClientDown) {
+                          clientAlertReason = "🚨 Ejecución Omitida: Programado a las 10:05 AM. El servicio no ha registrado ejecuciones en el día de hoy ni en las últimas 24 horas.";
+                        }
+                      } else if (isAnt) {
+                        const alertTime = 13 * 60;
+                        const esPasada = currentTimeInMinutes >= alertTime;
+                        const tieneHoy = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAyer = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        isClientDown = (esPasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
+                        if (isClientDown) {
+                          clientAlertReason = "🚨 Ejecución Omitida: Programado a las 12:00 PM (ventana 11:45 AM - 13:00 PM). El servicio no ha registrado ejecuciones hoy ni en las últimas 24 horas.";
+                        }
+                      } else if (isCorp) {
+                        const alertTime = 23 * 60;
+                        const esPasada = currentTimeInMinutes >= alertTime;
+                        const tieneHoy = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAyer = rawData.some((f: any) => {
+                          const match = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          if (!match) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        isClientDown = (esPasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
+                        if (isClientDown) {
+                          clientAlertReason = "🚨 Ejecución Omitida: Programado a las 22:00 PM. El servicio no ha registrado ejecuciones hoy ni en las últimas 24 horas.";
+                        }
+                      } else if (isStue) {
+                        const alert1400Time = 15 * 60 + 30;
+                        const esPasada = currentTimeInMinutes >= alert1400Time;
+                        const tieneHoy = rawData.some((f: any) => {
+                          const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (matchAnt || matchCorp || matchAuto) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === hoyStr;
+                        });
+                        const tieneAyer = rawData.some((f: any) => {
+                          const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                          const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                          const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                          if (matchAnt || matchCorp || matchAuto) return false;
+                          const parsed = parseLocalStringDate(f.fecha_proceso);
+                          return parsed && parsed.dateStr === ayerStr;
+                        });
+                        isClientDown = (esPasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
+                        if (isClientDown) {
+                          clientAlertReason = "🚨 Ejecución Omitida: Programados 14:00 PM y 23:30 PM. El servicio no ha registrado ejecuciones hoy ni en las últimas 24 horas.";
+                        }
+                      }
+
+                      const displayStatus = isNoMonitoringClient ? "success" : (isClientDown ? "error" : "success");
+                      const displayErr = isNoMonitoringClient ? 0 : (isClientDown ? 100 : 0);
 
                       return (
                         <div 
@@ -1575,18 +2018,22 @@ export default function ServiceDetailPage() {
                           className={cn(
                             "p-4 rounded-lg border transition-all",
                             isNoMonitoringClient ? "border-border bg-card cursor-default" : "cursor-pointer hover:shadow-md border-border hover:border-primary/50",
-                            selectedClient?.id === client.id && !isNoMonitoringClient && "border-primary bg-primary/5"
+                            selectedClient?.id === client.id && !isNoMonitoringClient && "border-primary bg-primary/5",
+                            isClientDown && "border-red-300 dark:border-red-800 bg-red-50/30 dark:bg-red-950/10"
                           )} 
                           onClick={() => !isNoMonitoringClient && handleOpenClientDashboard(client)}
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white bg-emerald-500">
+                              <div className={cn(
+                                "w-10 h-10 rounded-full flex items-center justify-center font-bold text-white",
+                                isClientDown ? "bg-red-500" : "bg-emerald-500"
+                              )}>
                                 {client.name.charAt(0)}
                               </div>
                               <div>
                                 <p className="font-semibold text-foreground">{client.name}</p>
-                                <p className="text-sm text-muted-foreground">
+                                <p className={cn("text-sm", isClientDown ? "text-red-500 font-semibold" : "text-muted-foreground")}>
                                   {isNoMonitoringClient ? "0% errores infraestructura" : `${displayErr}% errores infraestructura`}
                                 </p>
                               </div>
@@ -1604,6 +2051,13 @@ export default function ServiceDetailPage() {
                               )}
                             </div>
                           </div>
+
+                          {isClientDown && clientAlertReason && (
+                            <div className="mt-3 p-2.5 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-600 dark:text-red-400 flex items-center gap-2 font-medium">
+                              <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                              <span>{clientAlertReason}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

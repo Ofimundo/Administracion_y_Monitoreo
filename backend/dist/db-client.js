@@ -77,7 +77,6 @@ async function executeProcedure(procedureName, inputs = {}) {
     }
 }
 function isSimulationMode() {
-    const mode = process.env.DB_MODE || 'simulation';
-    console.log(`🔧 Modo de conexión: ${mode === 'real' ? 'REAL (SQL Server)' : 'SIMULACIÓN'}`);
+    const mode = process.env.DB_MODE || 'real';
     return mode !== 'real';
 }
