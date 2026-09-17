@@ -50,6 +50,7 @@ export default function HomePage() {
   const [showClientDashboard, setShowClientDashboard] = useState(false);
   // ✅ CAMBIADO: Dashboard como pestaña activa por defecto
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [supportInitialArea, setSupportInitialArea] = useState<string>("todos");
   const [isInitialized, setIsInitialized] = useState(false);
   const mountedRef = useRef(true);
 
@@ -390,14 +391,14 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background max-w-full overflow-x-hidden">
       <Header />
 
-      <main className="container mx-auto px-4 py-6">
+      <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-6 max-w-7xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="relative mb-6">
-            <ScrollArea className="w-full whitespace-nowrap">
-              <TabsList className="inline-flex w-auto min-w-full md:min-w-0 h-auto p-1 bg-muted rounded-lg gap-1">
+            <ScrollArea className="w-full whitespace-nowrap overflow-x-auto pb-1">
+              <TabsList className="inline-flex w-max min-w-full md:min-w-0 h-auto p-1 bg-muted rounded-lg gap-1">
                 {tabsConfig.map((tab) => (
                   <TabsTrigger 
                     key={tab.id}
@@ -430,7 +431,13 @@ export default function HomePage() {
                     props.onNavigateToTimeline = () => setActiveTab("timeline");
                     props.onNavigateToHeatMap = () => setActiveTab("services");
                     props.onNavigateToClients = () => setActiveTab("clients");
-                    props.onNavigateToSupport = () => setActiveTab("soporte");
+                    props.onNavigateToSupport = (area?: string) => {
+                      setSupportInitialArea(area || "Tecnología");
+                      setActiveTab("soporte");
+                    };
+                  }
+                  if (tab.id === "soporte") {
+                    props.initialArea = supportInitialArea;
                   }
                   return <tab.component {...props} />;
                 })()}

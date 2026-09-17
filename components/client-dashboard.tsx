@@ -198,7 +198,7 @@ const getTipoNombre = (tipo: string): string => {
 // Generar datos de muestra REALISTAS para cada servicio
 const generateRealisticSampleData = (serviceId: string, count: number = 876) => {
   const data = [];
-  const startDate = new Date(2026, 4, 1);
+  const now = new Date();
   
   let distribution: { estado: string; porcentaje: number }[];
   
@@ -268,8 +268,9 @@ const generateRealisticSampleData = (serviceId: string, count: number = 876) => 
   ];
   
   for (let i = 0; i < count; i++) {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() - Math.floor(Math.random() * 30));
+    const date = new Date(now);
+    // Generar fechas concentradas en el mes en curso (últimos 15 días)
+    date.setDate(now.getDate() - Math.floor(Math.random() * 16));
     date.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
     
     let rand = Math.random();
@@ -326,7 +327,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [availableTipos, setAvailableTipos] = useState<string[]>([]);
   
   const exportFields = useMemo(() => {
@@ -636,12 +637,6 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
             initialFiltered = initialFiltered.filter((item: any) => normalizeDate(item.fecha_proceso) <= hasta);
           }
 
-          // Fallback: Si el filtro por fecha inicial deja 0 registros pero el backend nos entregó datos,
-          // mostramos los datos reales del backend para garantizar que el dashboard muestre información.
-          if (initialFiltered.length === 0 && normalizedData.length > 0) {
-            initialFiltered = [...normalizedData];
-          }
-          
           setAllData(normalizedData);
           setFilteredData(initialFiltered);
           
@@ -1532,7 +1527,7 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
                       from.setDate(now.getDate() - 90);
                       setFilters(prevFilter => ({ ...prevFilter, fechaDesde: from, fechaHasta: now }));
                     } else if (val === "year2026") {
-                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: new Date(2026, 0, 1), fechaHasta: new Date(2026, 11, 31) }));
+                      setFilters(prevFilter => ({ ...prevFilter, fechaDesde: startOfYear(now), fechaHasta: endOfYear(now) }));
                     } else if (val === "all") {
                       setFilters(prevFilter => ({ ...prevFilter, fechaDesde: null, fechaHasta: null }));
                     }
@@ -1542,11 +1537,11 @@ export function ClientDashboard({ clientId, onClose, onNavigateToTimeline }: Cli
                     <SelectValue placeholder="Periodos rápidos..." />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="year2026">📅 Año en Curso</SelectItem>
                     <SelectItem value="current-month">📅 Mes Actual</SelectItem>
                     <SelectItem value="prev-month">📅 Mes Anterior</SelectItem>
                     <SelectItem value="last30">📅 Últimos 30 días</SelectItem>
                     <SelectItem value="last90">📅 Últimos 90 días</SelectItem>
-                    <SelectItem value="year2026">📅 Todo el Año 2026</SelectItem>
                     <SelectItem value="all">🌐 Sin Límite (Histórico)</SelectItem>
                   </SelectContent>
                 </Select>

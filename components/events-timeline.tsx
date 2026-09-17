@@ -42,6 +42,7 @@ import {
   Wifi,
   Database,
   Link,
+  ChevronDown,
 } from "lucide-react";
 import { format, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
@@ -145,8 +146,36 @@ const ERRORES_INFRAESTRUCTURA = [
   "ENOTFOUND",
   
   // Errores HTTP de servidor
-  "502", "503", "504", "500"
+  "502", "503", "504", "500",
+  
+  // Errores de ejecución programada / Omisión de horarios
+  "omisión de ejecución",
+  "omision de ejecucion",
+  "ejecución no realizada",
+  "ejecucion no realizada",
+  "no ha registrado ejecuciones",
+  "no registró ejecuciones",
+  "ejecución programada no realizada",
+  "no se ejecutó en el horario",
+  "ejecución omitida"
 ];
+
+const parseLocalStringDate = (fechaStr: string) => {
+  if (!fechaStr) return null;
+  const match = String(fechaStr).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  if (match) {
+    return {
+      dateStr: match[1],
+      minutes: parseInt(match[2], 10) * 60 + parseInt(match[3], 10)
+    };
+  }
+  const dDate = new Date(fechaStr);
+  if (isNaN(dDate.getTime())) return null;
+  return {
+    dateStr: format(dDate, "yyyy-MM-dd"),
+    minutes: dDate.getHours() * 60 + dDate.getMinutes()
+  };
+};
 
 // ✅ PALABRAS QUE INDICAN QUE NO ES UN ERROR DE INFRAESTRUCTURA
 // Si un mensaje contiene estas palabras, NO es infraestructura
@@ -298,7 +327,7 @@ const DEFAULT_FILTERS: Filters = {
 
 export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
   const router = useRouter();
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [realLogs, setRealLogs] = useState<Record<string, LogEntry[]>>({
     facturas: [],
@@ -309,6 +338,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     "mi-cuenta": [],
   });
   const [loading, setLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(100);
 
   // Generadores locales de simulación
   const generateMockFacturasLogs = (): LogEntry[] => [
@@ -798,7 +828,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     };
 
     fetchAllLogs();
-  }, [filters.dateRange.from, filters.dateRange.to, filters.serviceId, filters.clientId]);
+  }, [filters.dateRange.from, filters.dateRange.to]);
 
   const allEvents: TimelineEvent[] = useMemo(() => {
     const events: TimelineEvent[] = [];
@@ -835,6 +865,202 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           isComingSoon: true,
         });
       }
+    }
+
+    // ✅ VERIFICAR OMISIÓN DE EJECUCIONES PROGRAMADAS POR HORARIOS FIJOS
+    const now = new Date();
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+    const hoyStr = format(now, "yyyy-MM-dd");
+    const ayer = new Date(now);
+    ayer.setDate(ayer.getDate() - 1);
+    const ayerStr = format(ayer, "yyyy-MM-dd");
+
+    const facturasLogs = realLogs["facturas"] || [];
+    const facturasArtesanalesLogs = realLogs["facturas-artesanales"] || [];
+    const dteLogs = realLogs["dte"] || [];
+    const allFacturaLogsCombined = [...facturasLogs, ...facturasArtesanalesLogs];
+
+    // 1. Automóvil Club de Chile (10:05 AM)
+    const tieneAutoHoy = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("automovil") || (log.message || "").toLowerCase().includes("automovil");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === hoyStr;
+    });
+    const tieneAutoAyer = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("automovil") || (log.message || "").toLowerCase().includes("automovil");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === ayerStr;
+    });
+    if ((currentMin >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer)) {
+      const sObj = services.find(s => s.id === "facturas") || services[0];
+      events.push({
+        id: `schedule-auto-${hoyStr}`,
+        serviceName: "Facturas",
+        serviceId: "facturas",
+        log: {
+          id: `schedule-auto-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada (10:05 AM) - AUTOMÓVIL CLUB DE CHILE",
+          details: "El proceso automático de Aceptación y Rechazo de Facturas programado a las 10:05 AM para Automóvil Club de Chile no ha registrado ejecuciones en el día de hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 0, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura",
+          cliente_id: "cl_automovil_club"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
+    }
+
+    // 2. Corp Municipal de Desarrollo Social de Antofagasta (12:00 PM)
+    const tieneAntHoy = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("antofagasta") || (log.message || "").toLowerCase().includes("antofagasta");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === hoyStr;
+    });
+    const tieneAntAyer = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("antofagasta") || (log.message || "").toLowerCase().includes("antofagasta");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === ayerStr;
+    });
+    if ((currentMin >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer)) {
+      const sObj = services.find(s => s.id === "facturas") || services[0];
+      events.push({
+        id: `schedule-ant-${hoyStr}`,
+        serviceName: "Facturas",
+        serviceId: "facturas",
+        log: {
+          id: `schedule-ant-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada (12:00 PM) - CORP MUNICIPAL DE ANTOFAGASTA",
+          details: "El proceso automático de Aceptación y Rechazo de Facturas programado a las 12:00 PM para Corp Municipal de Antofagasta no ha registrado ejecuciones en el día de hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura",
+          cliente_id: "cl_cmds_antofagasta"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
+    }
+
+    // 3. Stuedemann S.A. (14:00 PM / 23:30 PM)
+    const tieneStueHoy = allFacturaLogsCombined.some(log => {
+      const dLower = (log.details || "").toLowerCase();
+      const mLower = (log.message || "").toLowerCase();
+      if (dLower.includes("antofagasta") || mLower.includes("antofagasta") || dLower.includes("corpesca") || mLower.includes("corpesca") || dLower.includes("automovil") || mLower.includes("automovil")) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === hoyStr;
+    });
+    const tieneStueAyer = allFacturaLogsCombined.some(log => {
+      const dLower = (log.details || "").toLowerCase();
+      const mLower = (log.message || "").toLowerCase();
+      if (dLower.includes("antofagasta") || mLower.includes("antofagasta") || dLower.includes("corpesca") || mLower.includes("corpesca") || dLower.includes("automovil") || mLower.includes("automovil")) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === ayerStr;
+    });
+    if ((currentMin >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer)) {
+      const sObj = services.find(s => s.id === "facturas") || services[0];
+      events.push({
+        id: `schedule-stue-${hoyStr}`,
+        serviceName: "Facturas",
+        serviceId: "facturas",
+        log: {
+          id: `schedule-stue-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada (14:00 PM / 23:30 PM) - STUEDEMANN S.A.",
+          details: "El proceso automático de Aceptación y Rechazo de Facturas programado a las 14:00 PM y 23:30 PM para Stuedemann S.A. no ha registrado ejecuciones en el día de hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 30, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura",
+          cliente_id: "cl_stuedemann"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
+    }
+
+    // 4. Corpesca S.A. (Facturas Artesanales 22:00 PM)
+    const tieneCorpescaHoy = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("corpesca") || (log.message || "").toLowerCase().includes("corpesca");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === hoyStr;
+    });
+    const tieneCorpescaAyer = allFacturaLogsCombined.some(log => {
+      const match = (log.details || "").toLowerCase().includes("corpesca") || (log.message || "").toLowerCase().includes("corpesca");
+      if (!match) return false;
+      const parsed = parseLocalStringDate(log.timestamp);
+      return parsed && parsed.dateStr === ayerStr;
+    });
+    if ((currentMin >= 23 * 60 && !tieneCorpescaHoy) || (!tieneCorpescaHoy && !tieneCorpescaAyer)) {
+      const sObj = services.find(s => s.id === "facturas-artesanales") || services[0];
+      events.push({
+        id: `schedule-corpesca-${hoyStr}`,
+        serviceName: "Facturas Artesanales",
+        serviceId: "facturas-artesanales",
+        log: {
+          id: `schedule-corpesca-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada (22:00 PM) - CORPESCA S.A.",
+          details: "El proceso de Facturas Artesanales programado a las 22:00 PM (ventana 21:45 PM - 23:00 PM) para Corpesca S.A. no registró ejecuciones hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 0, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura",
+          cliente_id: "cl_corpesca"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
+    }
+
+    // 5. DTE (13:30 PM & 23:00 PM)
+    const tieneDte1330 = dteLogs.some(log => {
+      const parsed = parseLocalStringDate(log.timestamp);
+      if (!parsed || parsed.dateStr !== hoyStr) return false;
+      return parsed.minutes >= (12 * 60 + 45) && parsed.minutes <= (15 * 60);
+    });
+    if (currentMin >= (15 * 60) && !tieneDte1330) {
+      const sObj = services.find(s => s.id === "dte") || services[0];
+      events.push({
+        id: `schedule-dte-1330-${hoyStr}`,
+        serviceName: "DTE",
+        serviceId: "dte",
+        log: {
+          id: `schedule-dte-1330-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada DTE (13:30 PM)",
+          details: "El servicio automático DTE programado a las 13:30 PM no ha registrado ejecuciones el día de hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
+    }
+
+    const tieneDte2300 = dteLogs.some(log => {
+      const parsed = parseLocalStringDate(log.timestamp);
+      if (!parsed || parsed.dateStr !== hoyStr) return false;
+      return parsed.minutes >= (22 * 60 + 30) && parsed.minutes <= (23 * 60 + 59);
+    });
+    if (currentMin >= (23 * 60 + 59) && !tieneDte2300) {
+      const sObj = services.find(s => s.id === "dte") || services[0];
+      events.push({
+        id: `schedule-dte-2300-${hoyStr}`,
+        serviceName: "DTE",
+        serviceId: "dte",
+        log: {
+          id: `schedule-dte-2300-${hoyStr}`,
+          message: "🚨 ERROR CRÍTICO: Omisión de Ejecución Programada DTE (23:00 PM)",
+          details: "El servicio automático DTE programado a las 23:00 PM no ha registrado ejecuciones el día de hoy.",
+          timestamp: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 0).toISOString(),
+          type: "error",
+          estado: "Error Infraestructura"
+        },
+        service: sObj,
+        isComingSoon: false
+      });
     }
     
     return events.sort((a, b) => new Date(b.log.timestamp).getTime() - new Date(a.log.timestamp).getTime());
@@ -905,10 +1131,71 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     return result;
   }, [allEvents, filters]);
 
+  const [expandedServices, setExpandedServices] = useState<Record<string, boolean>>({});
+  const [serviceVisibleCounts, setServiceVisibleCounts] = useState<Record<string, number>>({});
+
+  const toggleServiceExpand = (serviceId: string) => {
+    setExpandedServices(prev => ({
+      ...prev,
+      [serviceId]: !prev[serviceId]
+    }));
+  };
+
+  const loadMoreForService = (serviceId: string) => {
+    setServiceVisibleCounts(prev => ({
+      ...prev,
+      [serviceId]: (prev[serviceId] || 50) + 50
+    }));
+  };
+
+  const groupedServices = useMemo(() => {
+    const activeServices = services.filter(s => !isServiceComingSoon(s.id));
+    const map = new Map<string, { service?: Service; events: TimelineEvent[]; name: string }>();
+
+    for (const s of activeServices) {
+      map.set(s.id, { service: s, events: [], name: s.name });
+    }
+
+    for (const ev of filteredEvents) {
+      if (ev.isComingSoon) continue;
+      const existing = map.get(ev.serviceId);
+      if (existing) {
+        existing.events.push(ev);
+      } else {
+        const sObj = services.find(s => s.id === ev.serviceId);
+        if (sObj && !isServiceComingSoon(sObj.id)) {
+          map.set(ev.serviceId, { service: sObj, events: [ev], name: sObj.name });
+        }
+      }
+    }
+
+    const list: { serviceId: string; serviceName: string; serviceObj?: Service; events: TimelineEvent[] }[] = [];
+    map.forEach((val, serviceId) => {
+      if (filters.serviceId === "all" || filters.serviceId === serviceId) {
+        list.push({
+          serviceId,
+          serviceName: val.name,
+          serviceObj: val.service,
+          events: val.events,
+        });
+      }
+    });
+
+    return list;
+  }, [filteredEvents, services, filters.serviceId]);
+
+  useEffect(() => {
+    setVisibleCount(100);
+  }, [filters]);
+
+  const displayedEvents = useMemo(() => {
+    return filteredEvents.slice(0, visibleCount);
+  }, [filteredEvents, visibleCount]);
+
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (filters.search) count++;
-    if (filters.types.length !== 5) count++;
+    if (filters.types.length !== 4) count++;
     if (filters.serviceId !== "all") count++;
     if (filters.clientId !== "todos") count++;
     if (filters.dateRange.from || filters.dateRange.to) count++;
@@ -986,19 +1273,6 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
     return Server;
   };
 
-  if (loading) {
-    return (
-      <Card className="h-full border-0 shadow-sm">
-        <CardContent className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-3"></div>
-            <p className="text-sm text-muted-foreground">Cargando eventos...</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card className="h-full border-0 shadow-sm overflow-hidden">
       <CardHeader className="pb-2 border-b bg-white/50 backdrop-blur-sm sticky top-0 z-10">
@@ -1013,9 +1287,13 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
             </Badge>
           </div>
           <Button
+            type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={(e) => {
+              e.preventDefault();
+              setShowFilters(!showFilters);
+            }}
             className={cn("h-8 px-3 text-xs gap-1.5 transition-all", showFilters && "bg-muted")}
           >
             <Filter className="h-3.5 w-3.5" />
@@ -1041,55 +1319,56 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
+              <div className="min-w-0">
                 <Label className="text-xs font-medium mb-1.5 block">Servicio</Label>
                 <Select value={filters.serviceId} onValueChange={(value) => setFilters({ ...filters, serviceId: value })}>
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm w-full min-w-0 overflow-hidden [&>span]:truncate [&>span]:block [&>span]:w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los servicios</SelectItem>
-                    {services.map(service => (
+                    {services.filter(service => !isServiceComingSoon(service.id)).map(service => (
                       <SelectItem key={service.id} value={service.id}>
                         {service.name}
-                        {isServiceComingSoon(service.id) && " 🚀"}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <Label className="text-xs font-medium mb-1.5 block">Cliente</Label>
                 <Select value={filters.clientId} onValueChange={(value) => setFilters({ ...filters, clientId: value })}>
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm w-full min-w-0 overflow-hidden [&>span]:truncate [&>span]:block [&>span]:w-full">
                     <SelectValue placeholder="Todos los clientes" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="todos">🌐 Todos los clientes</SelectItem>
                     <SelectItem value="cl_stuedemann">🏢 STUEDEMANN S.A.</SelectItem>
                     <SelectItem value="cl_automovil_club">🚗 AUTOMOVIL CLUB DE CHILE</SelectItem>
-                    <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA</SelectItem>
+                    <SelectItem value="cl_cmds_antofagasta">🏛️ CORP MUNICIPAL DE ANTOFAGASTA</SelectItem>
                     <SelectItem value="cl_corpesca">🐟 CORPESCA S.A.</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <Label className="text-xs font-medium mb-1.5 block">Rango de fechas</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal h-9 text-sm">
-                      <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                      {filters.dateRange.from ? (
-                        filters.dateRange.to ? (
-                          `${format(filters.dateRange.from, "dd/MM/yy")} - ${format(filters.dateRange.to, "dd/MM/yy")}`
+                    <Button type="button" variant="outline" className="w-full min-w-0 justify-start text-left font-normal h-9 text-sm overflow-hidden">
+                      <CalendarIcon className="mr-2 h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {filters.dateRange.from ? (
+                          filters.dateRange.to ? (
+                            `${format(filters.dateRange.from, "dd/MM/yy")} - ${format(filters.dateRange.to, "dd/MM/yy")}`
+                          ) : (
+                            format(filters.dateRange.from, "dd/MM/yy")
+                          )
                         ) : (
-                          format(filters.dateRange.from, "dd/MM/yy")
-                        )
-                      ) : (
-                        "Todas las fechas"
-                      )}
+                          "Todas las fechas"
+                        )}
+                      </span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -1113,13 +1392,16 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
                   { value: "error", label: "Error", emoji: "❌" },
                   { value: "warning", label: "Alerta", emoji: "⚠️" },
                   { value: "info", label: "Info", emoji: "ℹ️" },
-                  { value: "comingSoon", label: "En Desarrollo", emoji: "🚀" },
                 ].map(type => (
                   <Button
                     key={type.value}
+                    type="button"
                     variant={filters.types.includes(type.value) ? "default" : "outline"}
                     size="sm"
-                    onClick={() => toggleType(type.value)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      toggleType(type.value);
+                    }}
                     className={cn(
                       "h-7 text-xs gap-1.5 rounded-full px-3",
                       filters.types.includes(type.value) && "bg-emerald-600 hover:bg-emerald-700"
@@ -1134,7 +1416,7 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
 
             {activeFiltersCount > 0 && (
               <div className="flex justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={resetFilters} className="h-8 text-xs text-red-500 hover:text-red-600">
+                <Button type="button" variant="ghost" size="sm" onClick={(e) => { e.preventDefault(); resetFilters(); }} className="h-8 text-xs text-red-500 hover:text-red-600">
                   <X className="mr-1 h-3 w-3" />
                   Limpiar filtros
                 </Button>
@@ -1144,113 +1426,180 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
         )}
       </CardHeader>
 
-      <CardContent className="p-0 max-h-[520px] overflow-y-auto">
+      <CardContent className="p-0 max-h-[600px] overflow-y-auto">
         <div className="divide-y divide-gray-100">
-          {filteredEvents.length > 0 ? (
-            filteredEvents.map((event, index) => {
-              const style = getEventStyle(event);
-              const Icon = style.icon;
-              const isLast = index === filteredEvents.length - 1;
-              const isInfra = isInfraestructuraLog(event.log);
-              const InfraIconComponent = isInfra ? getInfraIcon(event.log) : null;
-              
-              return (
-                <div
-                  key={event.id}
-                  className={cn(
-                    "group relative transition-all duration-200 hover:bg-muted/20",
-                    !event.isComingSoon && "cursor-pointer",
-                    !isLast && "border-b border-gray-100",
-                    isInfra && "hover:bg-red-50/50"
-                  )}
-                  onClick={() => {
-                    if (!event.isComingSoon) {
-                      router.push(`/servicio/${event.serviceId}`);
-                      if (onSelectService) {
-                        onSelectService(event.service);
-                      }
-                    }
-                  }}
-                >
-                  <div className="relative flex gap-3 p-4 pl-6">
-                    <div className={cn(
-                      "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all group-hover:scale-105",
-                      isInfra ? "bg-red-100 border-2 border-red-400 animate-pulse" : 
-                      event.isComingSoon ? "bg-gray-100" : "bg-white shadow-sm border",
-                      isInfra && "shadow-lg shadow-red-200"
-                    )}>
-                      {isInfra && InfraIconComponent ? (
-                        <InfraIconComponent className="h-4 w-4 text-red-600" />
-                      ) : (
-                        <Icon className={cn("h-4 w-4", style.iconColor)} />
-                      )}
-                    </div>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-3"></div>
+              <p className="text-sm text-muted-foreground">Cargando eventos...</p>
+            </div>
+          ) : groupedServices.length > 0 ? (
+            <div className="divide-y divide-slate-100">
+              {groupedServices.map((group) => {
+                const isExpanded = !!expandedServices[group.serviceId];
+                const totalEvents = group.events.length;
+                const limit = serviceVisibleCounts[group.serviceId] || 50;
+                const displayedServiceEvents = group.events.slice(0, limit);
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-foreground">
-                            {event.serviceName}
-                          </span>
-                          {isInfra ? (
-                            <Badge className="bg-red-600 text-white border-red-700 font-bold text-[10px] px-2 py-0">
-                              🚨 ERROR INFRAESTRUCTURA
-                            </Badge>
-                          ) : (
-                            <Badge className={cn("text-[10px] px-2 py-0 font-normal border", style.badge)}>
-                              {event.isComingSoon ? "En desarrollo" : event.log.type === "success" ? "Aprobado" : event.log.type === "error" ? "Error" : event.log.type === "warning" ? "Alerta" : "Información"}
-                            </Badge>
-                          )}
+                const successCount = group.events.filter(e => e.log.type === "success").length;
+                const errorCount = group.events.filter(e => e.log.type === "error" || isInfraestructuraLog(e.log)).length;
+                const warningCount = group.events.filter(e => e.log.type === "warning").length;
+
+                return (
+                  <div key={group.serviceId} className="border-b border-slate-100 last:border-b-0">
+                    {/* Encabezado del Servicio con Botón para desplegar detalles */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50/70 hover:bg-slate-100/70 transition-colors gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center text-purple-700 shadow-xs shrink-0">
+                          <Activity className="h-5 w-5" />
                         </div>
-                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
-                          <Clock className="h-3 w-3 text-slate-400" />
-                          <span className="font-semibold text-slate-700">{formatExactDateTime(event.log.timestamp)}</span>
-                          {formatRelativeTime(event.log.timestamp) && (
-                            <span className="text-slate-400">({formatRelativeTime(event.log.timestamp)})</span>
-                          )}
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                            {group.serviceName}
+                            <Badge variant="outline" className="text-xs bg-white text-slate-600 border-slate-200 font-semibold">
+                              {totalEvents} {totalEvents === 1 ? "evento" : "eventos"}
+                            </Badge>
+                          </h4>
+                          <div className="flex items-center gap-2 mt-1 text-xs flex-wrap">
+                            {successCount > 0 && (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                                <CheckCircle className="h-3 w-3" /> {successCount} OK
+                              </span>
+                            )}
+                            {errorCount > 0 && (
+                              <span className="inline-flex items-center gap-1 text-red-600 font-medium">
+                                <XCircle className="h-3 w-3" /> {errorCount} Error
+                              </span>
+                            )}
+                            {warningCount > 0 && (
+                              <span className="inline-flex items-center gap-1 text-amber-600 font-medium">
+                                <AlertTriangle className="h-3 w-3" /> {warningCount} Alerta
+                              </span>
+                            )}
+                            {totalEvents === 0 && (
+                              <span className="text-slate-400">Sin eventos registrados</span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      <p className={cn(
-                        "text-sm leading-relaxed",
-                        isInfra ? "text-red-700 font-bold" : "text-foreground/90"
-                      )}>
-                        {event.log.message}
-                      </p>
-                      
-                      {(event.log as any).details && (
-                        <p className={cn(
-                          "text-xs mt-1.5 font-mono",
-                          isInfra ? "text-red-600" : "text-muted-foreground"
-                        )}>
-                          {(event.log as any).details}
-                        </p>
-                      )}
-
-                      {isInfra && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 text-[10px] animate-pulse">
-                            ⚠️ Requiere atención inmediata
-                          </Badge>
-                          <span className="text-[10px] text-red-500 font-medium">
-                            Error de infraestructura detectado
-                          </span>
-                        </div>
-                      )}
-
-                      {!event.isComingSoon && !isInfra && (
-                        <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-[10px] text-emerald-600 flex items-center gap-1">
-                            <Zap className="h-2.5 w-2.5" />
-                            Haz clic para ver detalles del servicio
-                          </span>
-                        </div>
-                      )}
+                      <Button
+                        type="button"
+                        variant={isExpanded ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => toggleServiceExpand(group.serviceId)}
+                        className="text-xs font-semibold gap-2 border-slate-300 shadow-xs shrink-0 self-start sm:self-center bg-white hover:bg-slate-100 text-slate-700"
+                      >
+                        {isExpanded ? "Ocultar detalle" : "Ver detalle de estados"}
+                        <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", isExpanded && "rotate-180")} />
+                      </Button>
                     </div>
+
+                    {/* Detalle Desplegable de Estados del Servicio */}
+                    {isExpanded && (
+                      <div className="bg-white border-t border-slate-100 divide-y divide-gray-100 pl-4 sm:pl-8">
+                        {totalEvents === 0 ? (
+                          <div className="py-8 text-center text-xs text-muted-foreground">
+                            No hay registros de eventos para este servicio con los filtros seleccionados.
+                          </div>
+                        ) : (
+                          <>
+                            {displayedServiceEvents.map((event, index) => {
+                              const style = getEventStyle(event);
+                              const Icon = style.icon;
+                              const isLast = index === displayedServiceEvents.length - 1;
+                              const isInfra = isInfraestructuraLog(event.log);
+                              const InfraIconComponent = isInfra ? getInfraIcon(event.log) : null;
+
+                              return (
+                                <div
+                                  key={event.id}
+                                  className={cn(
+                                    "group relative transition-all duration-200 hover:bg-muted/20 cursor-pointer",
+                                    !isLast && "border-b border-gray-100",
+                                    isInfra && "hover:bg-red-50/50"
+                                  )}
+                                  onClick={() => {
+                                    router.push(`/servicio/${event.serviceId}`);
+                                    if (onSelectService && event.service) {
+                                      onSelectService(event.service);
+                                    }
+                                  }}
+                                >
+                                  <div className="relative flex gap-3 p-3.5 pl-4">
+                                    <div className={cn(
+                                      "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:scale-105",
+                                      isInfra ? "bg-red-100 border-2 border-red-400 animate-pulse" : "bg-white shadow-xs border"
+                                    )}>
+                                      {isInfra && InfraIconComponent ? (
+                                        <InfraIconComponent className="h-3.5 w-3.5 text-red-600" />
+                                      ) : (
+                                        <Icon className={cn("h-3.5 w-3.5", style.iconColor)} />
+                                      )}
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs font-bold text-foreground">
+                                            {event.serviceName}
+                                          </span>
+                                          <Badge className={cn("text-[10px] px-2 py-0 font-normal border", style.badge)}>
+                                            {event.log.type === "success" ? "Aprobado" : event.log.type === "error" ? "Error" : event.log.type === "warning" ? "Alerta" : "Información"}
+                                          </Badge>
+                                        </div>
+                                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground whitespace-nowrap">
+                                          <Clock className="h-3 w-3 text-slate-400" />
+                                          <span className="font-semibold text-slate-700">{formatExactDateTime(event.log.timestamp)}</span>
+                                        </div>
+                                      </div>
+
+                                      <p className={cn(
+                                        "text-xs leading-relaxed",
+                                        event.log.type === "error" ? "text-red-700 font-bold" : "text-foreground/90"
+                                      )}>
+                                        {event.log.message}
+                                      </p>
+                                      
+                                      {(event.log as any).details && (
+                                        <p className={cn(
+                                          "text-[11px] mt-1 font-mono",
+                                          event.log.type === "error" ? "text-red-600" : "text-muted-foreground"
+                                        )}>
+                                          {(event.log as any).details}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {totalEvents > limit && (
+                              <div className="p-3 text-center border-t border-slate-100 bg-slate-50/50">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    loadMoreForService(group.serviceId);
+                                  }}
+                                  className="text-xs font-semibold text-emerald-700 border-emerald-200 hover:bg-emerald-50 h-7 gap-1.5 bg-white shadow-xs"
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                  Cargar más estados ({totalEvents - limit} restantes)
+                                </Button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">

@@ -99,7 +99,7 @@ import {
   User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format, subDays, parseISO, startOfDay, endOfDay, isWithinInterval } from "date-fns";
+import { format, subDays, parseISO, startOfDay, endOfDay, startOfMonth, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { services, clients, subscribeToData, generateMetricsData, type MetricDataPoint, prospectos } from "@/lib/services-data";
@@ -223,7 +223,7 @@ export function DashboardMetrics({
   onNavigateToServices?: () => void;
   onNavigateToTimeline?: () => void;
   onNavigateToClients?: () => void;
-  onNavigateToSupport?: () => void;
+  onNavigateToSupport?: (area?: string) => void;
 }) {
   const router = useRouter();
   const [allData, setAllData] = useState<MetricDataPoint[]>([]);
@@ -560,10 +560,6 @@ export function DashboardMetrics({
       const results: any = {};
 
       let queryParams = "";
-      const now = new Date();
-      const defaultFrom = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyyMMdd");
-      const defaultFromIso = format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd");
-
       if (dateRange?.from) {
         const fromStr = format(dateRange.from, "yyyyMMdd");
         queryParams += `?fechaDesde=${fromStr}`;
@@ -571,16 +567,20 @@ export function DashboardMetrics({
           const toStr = format(dateRange.to, "yyyyMMdd");
           queryParams += `&fechaHasta=${toStr}`;
         }
-      } else {
-        queryParams += `?fechaDesde=${defaultFrom}`;
+      } else if (dateRange?.to) {
+        const toStr = format(dateRange.to, "yyyyMMdd");
+        queryParams += `?fechaHasta=${toStr}`;
       }
 
       for (const serviceId of serviceIds) {
         try {
           let url = "";
           if (serviceId === "facturas") {
-            const fromStr = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : defaultFromIso;
-            url = `/api/facturas/bitacora?estado=todos&fechaDesde=${fromStr}`;
+            url = `/api/facturas/bitacora?estado=todos`;
+            if (dateRange?.from) {
+              const fromStr = format(dateRange.from, "yyyy-MM-dd");
+              url += `&fechaDesde=${fromStr}`;
+            }
             if (dateRange?.to) {
               const toStr = format(dateRange.to, "yyyy-MM-dd");
               url += `&fechaHasta=${toStr}`;
@@ -1939,7 +1939,7 @@ export function DashboardMetrics({
 
   const infraestructuraZabbix = porcentajeInfra;
 
-  // ✅ TICKETS TECNOLOGÍA: Monitoreo por fecha del día e incidentes del área de tecnología
+  // ✅ TICKETS TECNOLOGÍA: Monitoreo por fecha diaria e incidentes del área de tecnología (Tickets Únicos del Día)
   const monitoredDateStr = useMemo(() => {
     if (filters.dateRange.from) {
       const fromStr = format(filters.dateRange.from, "dd/MM/yyyy");
@@ -1951,27 +1951,70 @@ export function DashboardMetrics({
     return format(new Date(), "dd/MM/yyyy");
   }, [filters.dateRange]);
 
-  const tecnologiaTicketsCount = useMemo(() => {
+  // Evaluador para verificar si un ticket pertenece al Área de Tecnología
+  const isTechnologyArea = (areaName?: string): boolean => {
+    if (!areaName || !areaName.trim()) return true; // Área predeterminada para tickets de soporte Oficore
+    const norm = areaName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    // Excluir expresamente tickets pertenecientes a otras áreas no-tecnológicas
+    if (
+      (norm.includes("mesa") || norm.includes("ayuda") || norm === "mda") && !norm.includes("tecnolog") ||
+      (norm.includes("control") && norm.includes("gestion")) ||
+      (norm.includes("servicio") && !norm.includes("tecnico") && !norm.includes("tecnolog")) ||
+      norm.includes("gerencia") ||
+      norm.includes("experiencia")
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // Obtener tickets únicos de tecnología dentro del rango de fechas diario sin contar duplicados por historial
+  const uniqueTecnologiaTickets = useMemo(() => {
     const details = oficoreData || [];
-    
-    // Determinar la fecha/rango que se está monitoreando
+    if (!details || details.length === 0) return [];
+
     const targetFrom = filters.dateRange.from ? startOfDay(filters.dateRange.from) : startOfDay(new Date());
     const targetTo = filters.dateRange.to ? endOfDay(filters.dateRange.to) : endOfDay(new Date());
-    
-    const targetTickets = details.filter((t: any) => {
-      // Filtrar por área de tecnología
-      const area = t.area_nombre || "";
-      const isTech = area.toUpperCase().includes("TECNOLOG");
-      if (!isTech) return false;
-      
-      // Filtrar por fecha dentro del rango del día
-      if (!t.fecha_detalle) return false;
-      const ticketDate = parseISO(t.fecha_detalle);
-      return ticketDate >= targetFrom && ticketDate <= targetTo;
+
+    // Agrupar tickets únicos por id_incidencia tomando el registro más reciente por fecha_detalle
+    const ticketMap = new Map<number, any>();
+
+    const sorted = [...details].sort((a, b) => {
+      const timeA = a.fecha_detalle ? new Date(a.fecha_detalle).getTime() : 0;
+      const timeB = b.fecha_detalle ? new Date(b.fecha_detalle).getTime() : 0;
+      return timeB - timeA;
     });
-    
-    return targetTickets.length;
+
+    sorted.forEach(item => {
+      const id = item.id_incidencia;
+      if (id === undefined || id === null) return;
+      if (!ticketMap.has(id)) {
+        ticketMap.set(id, item);
+      }
+    });
+
+    const result: any[] = [];
+    ticketMap.forEach(ticket => {
+      // Verificar pertenencia al área de tecnología
+      if (!isTechnologyArea(ticket.area_nombre)) return;
+
+      // Verificar si la fecha está dentro del rango seleccionado
+      if (ticket.fecha_detalle) {
+        const d = new Date(ticket.fecha_detalle);
+        if (!isNaN(d.getTime())) {
+          if (d >= targetFrom && d <= targetTo) {
+            result.push(ticket);
+          }
+        }
+      }
+    });
+
+    return result;
   }, [oficoreData, filters.dateRange]);
+
+  const tecnologiaTicketsCount = uniqueTecnologiaTickets.length;
 
   const ticketsPorDia = useMemo(() => {
     return detalleTickets.map(t => {
@@ -2268,7 +2311,7 @@ export function DashboardMetrics({
 
             <div 
               className="bg-white border rounded-lg p-3 shadow-xs cursor-pointer hover:shadow-md transition-all hover:scale-[1.02]"
-              onClick={onNavigateToSupport}
+              onClick={() => onNavigateToSupport?.("Tecnología")}
             >
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Tickets Tecnología</span>
@@ -2847,18 +2890,7 @@ export function DashboardMetrics({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {oficoreData
-                      .filter((t: any) => {
-                        const area = t.area_nombre || "";
-                        const isTech = area.toUpperCase().includes("TECNOLOG");
-                        if (!isTech) return false;
-                        if (!t.fecha_detalle) return false;
-                        const ticketDate = parseISO(t.fecha_detalle);
-                        const targetFrom = filters.dateRange.from ? startOfDay(filters.dateRange.from) : startOfDay(new Date());
-                        const targetTo = filters.dateRange.to ? endOfDay(filters.dateRange.to) : endOfDay(new Date());
-                        return ticketDate >= targetFrom && ticketDate <= targetTo;
-                      })
-                      .map((t: any) => (
+                    {uniqueTecnologiaTickets.map((t: any) => (
                         <tr key={t.id_incidencia} className="hover:bg-slate-50/50">
                           <td className="p-3 font-semibold text-blue-600">{t.id_incidencia}</td>
                           <td className="p-3 font-medium">{t.codigo_cliente}</td>

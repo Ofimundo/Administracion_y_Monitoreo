@@ -848,74 +848,166 @@ app.post("/api/facturas/accion-manual", async (req, res) => {
 // 11. GET /api/oficore/stats
 app.get("/api/oficore/stats", async (req, res) => {
   try {
-    const currentYear = new Date().getFullYear();
-    const fechaDesde = (req.query.fechaDesde as string) || `${currentYear}-01-01`;
-    const fechaHasta = (req.query.fechaHasta as string) || `${currentYear}-12-31`;
+    const now = new Date();
+    const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const fechaDesde = (req.query.fechaDesde as string) || currentMonthStart;
+    const fechaHasta = (req.query.fechaHasta as string) || format(now, "yyyy-MM-dd");
 
     const fDesdeClean = fechaDesde.replace(/-/g, "");
     const fHastaClean = fechaHasta.replace(/-/g, "");
 
-    console.log(`🔌 [OFICORE] Consultando incidencias REALES desde base de datos. Desde: ${fDesdeClean}, Hasta: ${fHastaClean}`);
+    const isSimulated = isSimulationMode();
 
-    const qDetalleTecnicos = `
-      SELECT 
-        incb.id_incidencia, 
-        incb.codigo_cliente, 
-        incb.contacto_nombre,
-        incb.id_area,
-        COALESCE(
-          ar.descripcion_area,
-          (SELECT TOP 1 ar_user.descripcion_area 
-           FROM MDA.area_usuario au 
-           INNER JOIN MDA.area_responsable ar_user ON (au.id_area = ar_user.id_area) 
-           WHERE au.usuario_codigo = ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), incb.usuario_codigo)
-          ),
-          'TECNOLOGÍA'
-        ) as area_nombre,
-        indt.fecha_detalle, 
-        indt.id_accion, 
-        ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), ISNULL(NULLIF(LTRIM(RTRIM(incb.usuario_codigo)), ''), 'Sin Asignar')) as tecnico,
-        acc.descripcion as estado_descripcion
-      FROM MDA.incidencia incb
-      INNER JOIN MDA.incidencia_detalle as indt ON (indt.id_incidencia = incb.id_incidencia)
-      LEFT JOIN MDA.accion acc ON (acc.id_accion = indt.id_accion)
-      LEFT JOIN MDA.area_responsable ar ON (ar.id_area = incb.id_area)
-      WHERE cast(indt.fecha_detalle as date) >= cast('${fDesdeClean}' as date) 
-      AND cast(indt.fecha_detalle as date) <= cast('${fHastaClean}' as date)
-      ORDER BY indt.fecha_detalle DESC
-    `;
+    if (!isSimulated) {
+      try {
+        console.log(`🔌 [OFICORE] Consultando incidencias REALES desde base de datos. Desde: ${fDesdeClean}, Hasta: ${fHastaClean}`);
 
-    console.log(`🔌 [OFICORE] Query:`, qDetalleTecnicos);
+        const qDetalleTecnicos = `
+          SELECT 
+            incb.id_incidencia, 
+            incb.codigo_cliente, 
+            incb.contacto_nombre,
+            incb.id_area,
+            COALESCE(
+              ar.descripcion_area,
+              (SELECT TOP 1 ar_user.descripcion_area 
+               FROM MDA.area_usuario au 
+               INNER JOIN MDA.area_responsable ar_user ON (au.id_area = ar_user.id_area) 
+               WHERE au.usuario_codigo = ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), incb.usuario_codigo)
+              ),
+              'TECNOLOGÍA'
+            ) as area_nombre,
+            indt.fecha_detalle, 
+            indt.id_accion, 
+            ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), ISNULL(NULLIF(LTRIM(RTRIM(incb.usuario_codigo)), ''), 'Sin Asignar')) as tecnico,
+            acc.descripcion as estado_descripcion
+          FROM MDA.incidencia incb
+          INNER JOIN MDA.incidencia_detalle as indt ON (indt.id_incidencia = incb.id_incidencia)
+          LEFT JOIN MDA.accion acc ON (acc.id_accion = indt.id_accion)
+          LEFT JOIN MDA.area_responsable ar ON (ar.id_area = incb.id_area)
+          WHERE cast(indt.fecha_detalle as date) >= cast('${fDesdeClean}' as date) 
+          AND cast(indt.fecha_detalle as date) <= cast('${fHastaClean}' as date)
+          ORDER BY indt.fecha_detalle DESC
+        `;
 
-    const resDetalles = await executeQuery(qDetalleTecnicos);
-    
-    console.log(`✅ [OFICORE] ${resDetalles.recordset?.length || 0} registros encontrados en base de datos REAL`);
+        console.log(`🔌 [OFICORE] Query:`, qDetalleTecnicos);
 
-    const allRecords = resDetalles.recordset || [];
-    const totalTickets = allRecords.length;
-    const ticketsResueltos = allRecords.filter((r: any) => r.id_accion === 5).length;
-    const ticketsPendientes = totalTickets - ticketsResueltos;
+        const resDetalles = await executeQuery(qDetalleTecnicos);
+        const allRecords = resDetalles.recordset || [];
 
-    const estadosCount: Record<string, number> = {};
-    allRecords.forEach((r: any) => {
-      const key = r.id_accion?.toString() || 'null';
-      estadosCount[key] = (estadosCount[key] || 0) + 1;
-    });
+        if (allRecords.length > 0) {
+          console.log(`✅ [OFICORE] ${allRecords.length} registros encontrados en base de datos REAL`);
+          const totalTickets = allRecords.length;
+          const ticketsResueltos = allRecords.filter((r: any) => r.id_accion === 5).length;
+          const ticketsPendientes = totalTickets - ticketsResueltos;
 
-    console.log(`📊 [OFICORE] Estadísticas: Total=${totalTickets}, Resueltos=${ticketsResueltos}, Pendientes=${ticketsPendientes}`);
+          const estadosCount: Record<string, number> = {};
+          allRecords.forEach((r: any) => {
+            const key = r.id_accion?.toString() || 'null';
+            estadosCount[key] = (estadosCount[key] || 0) + 1;
+          });
+
+          return res.json({
+            success: true,
+            mode: "real",
+            stats: {
+              ingresadas: totalTickets,
+              resueltas: ticketsResueltos,
+              pendientes: ticketsPendientes,
+            },
+            detalles: allRecords,
+            count: totalTickets,
+            estados: estadosCount,
+            source: "SQL Server REAL - MDA.incidencia con MDA.accion"
+          });
+        }
+      } catch (dbErr: any) {
+        console.warn("⚠️ Error en consulta SQL Server de Oficore, recurriendo a simulación:", dbErr.message);
+      }
+    }
+
+    // Datos Simulados / Fallback con tickets en distintas áreas para validación completa
+    const nowIso = new Date().toISOString();
+    const simulatedDetalles = [
+      {
+        id_incidencia: 5001,
+        codigo_cliente: "CL-101",
+        contacto_nombre: "Juan Pérez (Empresas Alfa)",
+        id_area: 1,
+        area_nombre: "Mesa De Ayuda",
+        fecha_detalle: nowIso,
+        id_accion: 3,
+        tecnico: "Carlos Mendoza",
+        estado_descripcion: "Asignado"
+      },
+      {
+        id_incidencia: 5002,
+        codigo_cliente: "CL-102",
+        contacto_nombre: "María González (Servicios Beta)",
+        id_area: 2,
+        area_nombre: "Control Gestión",
+        fecha_detalle: nowIso,
+        id_accion: 4,
+        tecnico: "Ana Silva",
+        estado_descripcion: "Gestionando"
+      },
+      {
+        id_incidencia: 5003,
+        codigo_cliente: "CL-103",
+        contacto_nombre: "Roberto Gómez (Logística Gamma)",
+        id_area: 3,
+        area_nombre: "Tecnología",
+        fecha_detalle: nowIso,
+        id_accion: 5,
+        tecnico: "Luis Torres",
+        estado_descripcion: "Resuelto"
+      },
+      {
+        id_incidencia: 5004,
+        codigo_cliente: "CL-104",
+        contacto_nombre: "Claudia Rojas (Distribuidora Delta)",
+        id_area: 4,
+        area_nombre: "Servicio",
+        fecha_detalle: nowIso,
+        id_accion: 1,
+        tecnico: "Sin Asignar",
+        estado_descripcion: "Recibido"
+      },
+      {
+        id_incidencia: 5005,
+        codigo_cliente: "CL-105",
+        contacto_nombre: "Pedro Morales (Corporación Epsilon)",
+        id_area: 5,
+        area_nombre: "Gerencia",
+        fecha_detalle: nowIso,
+        id_accion: 4,
+        tecnico: "Felipe Soto",
+        estado_descripcion: "Gestionando"
+      },
+      {
+        id_incidencia: 5006,
+        codigo_cliente: "CL-106",
+        contacto_nombre: "Sofia Castro (Inversiones Zeta)",
+        id_area: 6,
+        area_nombre: "Experiencia",
+        fecha_detalle: nowIso,
+        id_accion: 5,
+        tecnico: "Valentina Rivas",
+        estado_descripcion: "Resuelto"
+      }
+    ];
 
     return res.json({
       success: true,
-      mode: "real",
+      mode: "simulation",
       stats: {
-        ingresadas: totalTickets,
-        resueltas: ticketsResueltos,
-        pendientes: ticketsPendientes,
+        ingresadas: simulatedDetalles.length,
+        resueltas: 2,
+        pendientes: 4,
       },
-      detalles: allRecords,
-      count: totalTickets,
-      estados: estadosCount,
-      source: "SQL Server REAL - MDA.incidencia con MDA.accion"
+      detalles: simulatedDetalles,
+      count: simulatedDetalles.length,
+      source: "Modo Simulación / Fallback"
     });
   } catch (error: any) {
     console.error("❌ Error en API /api/oficore/stats:", error);
@@ -3500,7 +3592,7 @@ app.get("/api/monitor/oficore", (req, res) => {
   });
 });
 
-app.get("/api/oficore/stats", (req, res) => {
+app.get("/api/monitor/oficore/stats", (req, res) => {
   return res.json({
     success: true,
     mode: "real",
