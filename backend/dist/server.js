@@ -127,7 +127,7 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               NULL as id_regla,
               motivo,
               NULL as horas_por_revisar,
-              fecha_proceso,
+              fecha_recepcion as fecha_proceso,
               fecha_recepcion,
               pdf_capturado,
               xml_capturado,
@@ -314,7 +314,7 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               NULL as id_regla,
               CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
               NULL as horas_por_revisar,
-              fecha_proceso,
+              fecha_recepcion as fecha_proceso,
               fecha_recepcion,
               CAST(pdf_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as pdf_capturado,
               CAST(xml_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as xml_capturado,
@@ -811,64 +811,156 @@ app.post("/api/facturas/accion-manual", async (req, res) => {
 // 11. GET /api/oficore/stats
 app.get("/api/oficore/stats", async (req, res) => {
     try {
-        const currentYear = new Date().getFullYear();
-        const fechaDesde = req.query.fechaDesde || `${currentYear}-01-01`;
-        const fechaHasta = req.query.fechaHasta || `${currentYear}-12-31`;
+        const now = new Date();
+        const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const fechaDesde = req.query.fechaDesde || currentMonthStart;
+        const fechaHasta = req.query.fechaHasta || (0, date_fns_1.format)(now, "yyyy-MM-dd");
         const fDesdeClean = fechaDesde.replace(/-/g, "");
         const fHastaClean = fechaHasta.replace(/-/g, "");
-        console.log(`🔌 [OFICORE] Consultando incidencias REALES desde base de datos. Desde: ${fDesdeClean}, Hasta: ${fHastaClean}`);
-        const qDetalleTecnicos = `
-      SELECT 
-        incb.id_incidencia, 
-        incb.codigo_cliente, 
-        incb.contacto_nombre,
-        incb.id_area,
-        COALESCE(
-          ar.descripcion_area,
-          (SELECT TOP 1 ar_user.descripcion_area 
-           FROM MDA.area_usuario au 
-           INNER JOIN MDA.area_responsable ar_user ON (au.id_area = ar_user.id_area) 
-           WHERE au.usuario_codigo = ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), incb.usuario_codigo)
-          ),
-          'TECNOLOGÍA'
-        ) as area_nombre,
-        indt.fecha_detalle, 
-        indt.id_accion, 
-        ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), ISNULL(NULLIF(LTRIM(RTRIM(incb.usuario_codigo)), ''), 'Sin Asignar')) as tecnico,
-        acc.descripcion as estado_descripcion
-      FROM MDA.incidencia incb
-      INNER JOIN MDA.incidencia_detalle as indt ON (indt.id_incidencia = incb.id_incidencia)
-      LEFT JOIN MDA.accion acc ON (acc.id_accion = indt.id_accion)
-      LEFT JOIN MDA.area_responsable ar ON (ar.id_area = incb.id_area)
-      WHERE cast(indt.fecha_detalle as date) >= cast('${fDesdeClean}' as date) 
-      AND cast(indt.fecha_detalle as date) <= cast('${fHastaClean}' as date)
-      ORDER BY indt.fecha_detalle DESC
-    `;
-        console.log(`🔌 [OFICORE] Query:`, qDetalleTecnicos);
-        const resDetalles = await (0, db_client_1.executeQuery)(qDetalleTecnicos);
-        console.log(`✅ [OFICORE] ${resDetalles.recordset?.length || 0} registros encontrados en base de datos REAL`);
-        const allRecords = resDetalles.recordset || [];
-        const totalTickets = allRecords.length;
-        const ticketsResueltos = allRecords.filter((r) => r.id_accion === 5).length;
-        const ticketsPendientes = totalTickets - ticketsResueltos;
-        const estadosCount = {};
-        allRecords.forEach((r) => {
-            const key = r.id_accion?.toString() || 'null';
-            estadosCount[key] = (estadosCount[key] || 0) + 1;
-        });
-        console.log(`📊 [OFICORE] Estadísticas: Total=${totalTickets}, Resueltos=${ticketsResueltos}, Pendientes=${ticketsPendientes}`);
+        const isSimulated = (0, db_client_1.isSimulationMode)();
+        if (!isSimulated) {
+            try {
+                console.log(`🔌 [OFICORE] Consultando incidencias REALES desde base de datos. Desde: ${fDesdeClean}, Hasta: ${fHastaClean}`);
+                const qDetalleTecnicos = `
+          SELECT 
+            incb.id_incidencia, 
+            incb.codigo_cliente, 
+            incb.contacto_nombre,
+            incb.id_area,
+            COALESCE(
+              ar.descripcion_area,
+              (SELECT TOP 1 ar_user.descripcion_area 
+               FROM MDA.area_usuario au 
+               INNER JOIN MDA.area_responsable ar_user ON (au.id_area = ar_user.id_area) 
+               WHERE au.usuario_codigo = ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), incb.usuario_codigo)
+              ),
+              'TECNOLOGÍA'
+            ) as area_nombre,
+            indt.fecha_detalle, 
+            indt.id_accion, 
+            ISNULL(NULLIF(LTRIM(RTRIM(indt.usuario_codigo)), ''), ISNULL(NULLIF(LTRIM(RTRIM(incb.usuario_codigo)), ''), 'Sin Asignar')) as tecnico,
+            acc.descripcion as estado_descripcion
+          FROM MDA.incidencia incb
+          INNER JOIN MDA.incidencia_detalle as indt ON (indt.id_incidencia = incb.id_incidencia)
+          LEFT JOIN MDA.accion acc ON (acc.id_accion = indt.id_accion)
+          LEFT JOIN MDA.area_responsable ar ON (ar.id_area = incb.id_area)
+          WHERE cast(indt.fecha_detalle as date) >= cast('${fDesdeClean}' as date) 
+          AND cast(indt.fecha_detalle as date) <= cast('${fHastaClean}' as date)
+          ORDER BY indt.fecha_detalle DESC
+        `;
+                console.log(`🔌 [OFICORE] Query:`, qDetalleTecnicos);
+                const resDetalles = await (0, db_client_1.executeQuery)(qDetalleTecnicos);
+                const allRecords = resDetalles.recordset || [];
+                if (allRecords.length > 0) {
+                    console.log(`✅ [OFICORE] ${allRecords.length} registros encontrados en base de datos REAL`);
+                    const totalTickets = allRecords.length;
+                    const ticketsResueltos = allRecords.filter((r) => r.id_accion === 5).length;
+                    const ticketsPendientes = totalTickets - ticketsResueltos;
+                    const estadosCount = {};
+                    allRecords.forEach((r) => {
+                        const key = r.id_accion?.toString() || 'null';
+                        estadosCount[key] = (estadosCount[key] || 0) + 1;
+                    });
+                    return res.json({
+                        success: true,
+                        mode: "real",
+                        stats: {
+                            ingresadas: totalTickets,
+                            resueltas: ticketsResueltos,
+                            pendientes: ticketsPendientes,
+                        },
+                        detalles: allRecords,
+                        count: totalTickets,
+                        estados: estadosCount,
+                        source: "SQL Server REAL - MDA.incidencia con MDA.accion"
+                    });
+                }
+            }
+            catch (dbErr) {
+                console.warn("⚠️ Error en consulta SQL Server de Oficore, recurriendo a simulación:", dbErr.message);
+            }
+        }
+        // Datos Simulados / Fallback con tickets en distintas áreas para validación completa
+        const nowIso = new Date().toISOString();
+        const simulatedDetalles = [
+            {
+                id_incidencia: 5001,
+                codigo_cliente: "CL-101",
+                contacto_nombre: "Juan Pérez (Empresas Alfa)",
+                id_area: 1,
+                area_nombre: "Mesa De Ayuda",
+                fecha_detalle: nowIso,
+                id_accion: 3,
+                tecnico: "Carlos Mendoza",
+                estado_descripcion: "Asignado"
+            },
+            {
+                id_incidencia: 5002,
+                codigo_cliente: "CL-102",
+                contacto_nombre: "María González (Servicios Beta)",
+                id_area: 2,
+                area_nombre: "Control Gestión",
+                fecha_detalle: nowIso,
+                id_accion: 4,
+                tecnico: "Ana Silva",
+                estado_descripcion: "Gestionando"
+            },
+            {
+                id_incidencia: 5003,
+                codigo_cliente: "CL-103",
+                contacto_nombre: "Roberto Gómez (Logística Gamma)",
+                id_area: 3,
+                area_nombre: "Tecnología",
+                fecha_detalle: nowIso,
+                id_accion: 5,
+                tecnico: "Luis Torres",
+                estado_descripcion: "Resuelto"
+            },
+            {
+                id_incidencia: 5004,
+                codigo_cliente: "CL-104",
+                contacto_nombre: "Claudia Rojas (Distribuidora Delta)",
+                id_area: 4,
+                area_nombre: "Servicio",
+                fecha_detalle: nowIso,
+                id_accion: 1,
+                tecnico: "Sin Asignar",
+                estado_descripcion: "Recibido"
+            },
+            {
+                id_incidencia: 5005,
+                codigo_cliente: "CL-105",
+                contacto_nombre: "Pedro Morales (Corporación Epsilon)",
+                id_area: 5,
+                area_nombre: "Gerencia",
+                fecha_detalle: nowIso,
+                id_accion: 4,
+                tecnico: "Felipe Soto",
+                estado_descripcion: "Gestionando"
+            },
+            {
+                id_incidencia: 5006,
+                codigo_cliente: "CL-106",
+                contacto_nombre: "Sofia Castro (Inversiones Zeta)",
+                id_area: 6,
+                area_nombre: "Experiencia",
+                fecha_detalle: nowIso,
+                id_accion: 5,
+                tecnico: "Valentina Rivas",
+                estado_descripcion: "Resuelto"
+            }
+        ];
         return res.json({
             success: true,
-            mode: "real",
+            mode: "simulation",
             stats: {
-                ingresadas: totalTickets,
-                resueltas: ticketsResueltos,
-                pendientes: ticketsPendientes,
+                ingresadas: simulatedDetalles.length,
+                resueltas: 2,
+                pendientes: 4,
             },
-            detalles: allRecords,
-            count: totalTickets,
-            estados: estadosCount,
-            source: "SQL Server REAL - MDA.incidencia con MDA.accion"
+            detalles: simulatedDetalles,
+            count: simulatedDetalles.length,
+            source: "Modo Simulación / Fallback"
         });
     }
     catch (error) {
@@ -2137,6 +2229,63 @@ app.get(["/api/sgc/inyeccion-suministros-stats", "/api/sgc/inyeccion-stats"], as
         });
     }
 });
+// 13.11. GET /api/nubeprint/stats
+app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
+    try {
+        const isSimulated = (0, db_client_1.isSimulationMode)();
+        console.log(`🔌 [NubePrint RPA] Consultando [THE_COOLER_SGCX].[RPA].[ejecucion]. Modo Simulación: ${isSimulated}`);
+        if (!isSimulated) {
+            try {
+                const query = `
+          SELECT TOP 100 *
+          FROM [THE_COOLER_SGCX].[RPA].[ejecucion]
+          ORDER BY 1 DESC
+        `;
+                const result = await (0, db_client_1.executeQuery)(query);
+                const records = result?.recordset || [];
+                if (records.length > 0) {
+                    const filtered = records.filter((r) => {
+                        const name = String(r.rpa_nombre || r.nombre_rpa || r.nombre || r.rpa || "").toUpperCase();
+                        return name.includes("NUBEPRINT") || name.includes("INYECCIÓN SUMINISTROS") || name.includes("INYECCION SUMINISTROS");
+                    });
+                    return res.json({
+                        success: true,
+                        mode: "real",
+                        data: filtered.length > 0 ? filtered : records,
+                        count: records.length
+                    });
+                }
+            }
+            catch (dbErr) {
+                console.error("⚠️ Error SQL en [THE_COOLER_SGCX].[RPA].[ejecucion]:", dbErr.message);
+            }
+        }
+        // Datos simulados/fallback cuando está en modo simulación o sin registros
+        const simulatedData = [
+            {
+                id: 1,
+                rpa_nombre: "INYECCIÓN SUMINISTROS - NUBEPRINT",
+                estado: "COMPLETADO",
+                fecha_inicio: new Date().toISOString(),
+                motivo: "Ejecución completada exitosamente",
+                observacion: "Sin errores en la inyección de suministros NubePrint"
+            }
+        ];
+        return res.json({
+            success: true,
+            mode: "simulation",
+            data: simulatedData,
+            count: simulatedData.length
+        });
+    }
+    catch (error) {
+        console.error("❌ Error en API /api/nubeprint/stats:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al consultar ejecuciones de NubePrint: " + error.message
+        });
+    }
+});
 // 14. GET /api/dte/stats
 app.get("/api/dte/stats", async (req, res) => {
     try {
@@ -2651,7 +2800,8 @@ let simulatedServicios = [
     { Servicio_ID: 5, Codigo_Servicio: "SGC_01", Nombre_Servicio: "SGC", Descripcion: "SGC es el núcleo de las operaciones de la organización, centralizando la gestión de contratos, la administración de clientes y equipos, así como el ingreso y seguimiento de solicitudes de suministros, retiros y despachos de equipos.", Activo: true },
     { Servicio_ID: 6, Codigo_Servicio: "OFT_01", Nombre_Servicio: "Ofitec", Descripcion: "Ofitec es la plataforma encargada de la gestión, administración y monitoreo de los tickets de servicio técnico para los clientes de Ofimundo.", Activo: true },
     { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true },
-    { Servicio_ID: 8, Codigo_Servicio: "FAC_ART_01", Nombre_Servicio: "Facturas Artesanales", Descripcion: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML.", Activo: true }
+    { Servicio_ID: 8, Codigo_Servicio: "FAC_ART_01", Nombre_Servicio: "Facturas Artesanales", Descripcion: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML.", Activo: true },
+    { Servicio_ID: 9, Codigo_Servicio: "NUB_01", Nombre_Servicio: "Alertas de NubePrint", Descripcion: "Monitoreo y alerta automatizada del RPA INYECCIÓN SUMINISTROS - NUBEPRINT desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].", Activo: true }
 ];
 let simulatedRelaciones = [
     // Servicio 1: Aceptación y rechazo de facturas (ACRF_01)
@@ -2680,6 +2830,8 @@ let simulatedRelaciones = [
     { Relacion_ID: 23, Cliente_ID: 2, Servicio_ID: 6, Activo: true },
     { Relacion_ID: 24, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
     { Relacion_ID: 25, Cliente_ID: 6, Servicio_ID: 6, Activo: true },
+    // Servicio 9: Alertas de NubePrint (NUB_01)
+    { Relacion_ID: 30, Cliente_ID: 3, Servicio_ID: 9, Activo: true },
     // Servicio 7: Mi cuenta (MIC_01)
     { Relacion_ID: 27, Cliente_ID: 1, Servicio_ID: 7, Activo: true },
     { Relacion_ID: 28, Cliente_ID: 3, Servicio_ID: 7, Activo: true },
@@ -2708,26 +2860,70 @@ let simulatedProyectos = [
 ];
 let simulatedFichasProspecto = [
     {
-        Id: 11,
-        Codigo: 'serv_01',
-        NombreProyecto: 'Servidores y otros',
+        Id: 1012,
+        Codigo: 'siti_01',
+        NombreProyecto: 'Sitio Global Version 2',
         Estado: '10% Prospecto (Lead)',
-        Cliente: 'SERVICIOS DE EXPORTACIONES FRUTICOLAS EXSER LIMITADA',
-        GestorComercial: 'DANIELA VALDES',
+        Cliente: 'GLOBAL HORIZON',
+        GestorComercial: '',
+        ValorServicio: 0,
+        TipoCliente: 'Nuevo',
+        LineaServicio: 'ACRF_01'
+    },
+    {
+        Id: 1011,
+        Codigo: 'toke_01',
+        NombreProyecto: 'TOKENS FISICOS MFA PARA M365 Y FORTINET',
+        Estado: '100% Aceptada por cliente',
+        Cliente: 'COMISION NACIONAL DE ACREDITACION CNA',
+        GestorComercial: 'MACARENA ALLENDE',
+        ValorServicio: 0,
+        TipoCliente: 'Nuevo',
+        LineaServicio: 'INFRAESTRUCTURA'
+    },
+    {
+        Id: 14,
+        Codigo: 'acep_01',
+        NombreProyecto: 'Aceptación y Rechazo de Facturas + Nuevas funcionalidades',
+        Estado: '10% Prospecto (Lead)',
+        Cliente: 'ILUSTRE MUNICIPALIDAD DE LA REINA',
+        GestorComercial: 'MARIA EUGENIA NABALON',
+        ValorServicio: 0,
+        TipoCliente: 'Nuevo',
+        LineaServicio: 'ACRF_01'
+    },
+    {
+        Id: 13,
+        Codigo: 'cuen_01',
+        NombreProyecto: 'Cuentas Basicas',
+        Estado: '30% En elaboración',
+        Cliente: 'ILUSTRE MUNICIPALIDAD DE ANTOFAGASTA',
+        GestorComercial: 'RHODY SANTIBAÑEZ',
         ValorServicio: 0,
         TipoCliente: 'Nuevo',
         LineaServicio: 'OFT_01'
     },
     {
         Id: 12,
-        Codigo: 'ocrs_01',
-        NombreProyecto: 'Ocr Sodexo',
+        Codigo: 'digi_01',
+        NombreProyecto: 'DIGITALIZACION DOC. RRHH',
         Estado: '30% En elaboración',
         Cliente: 'SODEXO CHILE SPA',
         GestorComercial: 'MACARENA ALLENDE',
         ValorServicio: 0,
         TipoCliente: 'Nuevo',
         LineaServicio: 'ACRF_01'
+    },
+    {
+        Id: 11,
+        Codigo: 'prop_01',
+        NombreProyecto: 'Propuesta servidores',
+        Estado: '10% Prospecto (Lead)',
+        Cliente: 'SERVICIOS DE EXPORTACIONES FRUTICOLAS EXSER LIMITADA',
+        GestorComercial: 'DANIELA VALDES',
+        ValorServicio: 0,
+        TipoCliente: 'Nuevo',
+        LineaServicio: 'OFT_01'
     }
 ];
 function getServiceIdFromLine(line, projectCode, projectName) {
@@ -2956,35 +3152,22 @@ async function syncFichasProspectoWithRemote() {
     }
     console.log(`[SYNC] Recuperadas ${remoteFichas.length} fichas desde el servidor remoto.`);
     const isSimulated = (0, db_client_1.isSimulationMode)();
-    if (isSimulated) {
-        simulatedFichasProspecto = remoteFichas.map(f => ({
-            Id: Number(f.id),
-            Codigo: f.codigo,
-            NombreProyecto: f.nombreProyecto,
-            Estado: f.estado,
-            Cliente: f.cliente,
-            GestorComercial: f.gestorComercial,
-            ValorServicio: f.valorServicio || 0,
-            LineaServicio: f.lineaServicio || 'ACRF_01',
-            TipoCliente: f.tipoCliente || 'Nuevo'
-        }));
-        syncApprovedProspectsSimulation();
-    }
-    else {
-        for (const f of remoteFichas) {
-            try {
-                const queryCheck = "SELECT Id, Estado FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Codigo = @p0";
-                await (0, db_client_1.executeQuery)(queryCheck, [f.codigo]);
-            }
-            catch (err) {
-                console.error(`❌ Error consultando ficha prospecto ${f.codigo}:`, err.message);
-            }
-        }
-    }
+    simulatedFichasProspecto = remoteFichas.map(f => ({
+        Id: Number(f.id),
+        Codigo: f.codigo,
+        NombreProyecto: f.nombreProyecto,
+        Estado: f.estado,
+        Cliente: f.cliente,
+        GestorComercial: f.gestorComercial,
+        ValorServicio: f.valorServicio || 0,
+        LineaServicio: f.lineaServicio || 'ACRF_01',
+        TipoCliente: f.tipoCliente || 'Nuevo'
+    }));
+    syncApprovedProspectsSimulation();
 }
 // Iniciar sync remota de fichas cada 60 segundos
 setInterval(syncFichasProspectoWithRemote, 60000);
-setTimeout(syncFichasProspectoWithRemote, 5000);
+setTimeout(syncFichasProspectoWithRemote, 2000);
 // 18. GET /api/mon/services-data - Datos de clientes y servicios reales de THE_COOLER_CENTRAL
 app.get("/api/mon/services-data", async (req, res) => {
     try {
@@ -3027,31 +3210,15 @@ app.get("/api/mon/services-data", async (req, res) => {
         });
     }
 });
-// 18a. GET /api/mon/fichas-prospecto - Monitorear prospectos y auto-activar aprobados
+// 18a. GET /api/mon/fichas-prospecto - Monitorear prospectos y auto-activar aprobados desde API remota del CRM (18.230.23.241:3001 / 5173)
 app.get("/api/mon/fichas-prospecto", async (req, res) => {
     try {
-        const isSimulated = (0, db_client_1.isSimulationMode)();
-        if (isSimulated) {
-            syncApprovedProspectsSimulation();
-            return res.json({
-                success: true,
-                mode: "simulation",
-                data: simulatedFichasProspecto
-            });
-        }
-        else {
-            // Query FichasProspecto from the GESTION_PROYECTOS database
-            const query = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] ORDER BY FechaCreacion DESC";
-            const result = await (0, db_client_1.executeQuery)(query);
-            const fichas = result?.recordset || [];
-            // Auto-activate any that are approved
-            await syncApprovedProspectsReal(fichas);
-            return res.json({
-                success: true,
-                mode: "real",
-                data: fichas
-            });
-        }
+        syncApprovedProspectsSimulation();
+        return res.json({
+            success: true,
+            mode: "remote_crm_api",
+            data: simulatedFichasProspecto
+        });
     }
     catch (error) {
         console.error("❌ Error en API /api/mon/fichas-prospecto:", error);
@@ -3235,7 +3402,7 @@ app.get("/api/monitor/oficore", (req, res) => {
         ...oficoreStatus
     });
 });
-app.get("/api/oficore/stats", (req, res) => {
+app.get("/api/monitor/oficore/stats", (req, res) => {
     return res.json({
         success: true,
         mode: "real",

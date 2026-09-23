@@ -2387,7 +2387,7 @@ export function DashboardMetrics({
                 <ArrowRight className="h-3 w-3 text-emerald-500 animate-pulse" />
               </div>
               <div className="space-y-1 max-h-[180px] overflow-y-auto pr-1 mt-2">
-                {sortedServices.map(s => {
+                {sortedServices.filter(s => s.id !== "alertas-nubeprint").map(s => {
                   const avail = getServiceAvailability(s.id);
                   const color = avail >= 99 ? "bg-emerald-500" : (avail >= 90 ? "bg-amber-500" : "bg-red-500");
                   return (
@@ -2396,13 +2396,9 @@ export function DashboardMetrics({
                       className="space-y-0.5 hover:bg-slate-50 rounded p-1 cursor-pointer transition-colors group"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (onNavigateToTimeline) {
-                          onNavigateToTimeline(s.id);
-                        } else {
-                          router.push(`/servicio/${s.id}`);
-                        }
+                        router.push(`/servicio/${s.id}`);
                       }}
-                      title={`Ver detalle de ${s.name}`}
+                      title={`Ver monitoreo de ${s.name}`}
                     >
                       <div className="flex justify-between text-[9px] font-bold text-slate-650 group-hover:text-blue-600 transition-colors">
                         <span className="truncate max-w-[140px]">{s.name}</span>

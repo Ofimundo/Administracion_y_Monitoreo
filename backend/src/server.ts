@@ -140,7 +140,7 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               NULL as id_regla,
               motivo,
               NULL as horas_por_revisar,
-              fecha_proceso,
+              fecha_recepcion as fecha_proceso,
               fecha_recepcion,
               pdf_capturado,
               xml_capturado,
@@ -323,7 +323,7 @@ app.get("/api/facturas/bitacora", async (req, res) => {
               NULL as id_regla,
               CAST(motivo AS NVARCHAR(MAX)) COLLATE DATABASE_DEFAULT as motivo,
               NULL as horas_por_revisar,
-              fecha_proceso,
+              fecha_recepcion as fecha_proceso,
               fecha_recepcion,
               CAST(pdf_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as pdf_capturado,
               CAST(xml_capturado AS NVARCHAR(50)) COLLATE DATABASE_DEFAULT as xml_capturado,
@@ -3093,26 +3093,70 @@ let simulatedProyectos = [
 
 let simulatedFichasProspecto = [
   {
-    Id: 11,
-    Codigo: 'serv_01',
-    NombreProyecto: 'Servidores y otros',
+    Id: 1012,
+    Codigo: 'siti_01',
+    NombreProyecto: 'Sitio Global Version 2',
     Estado: '10% Prospecto (Lead)',
-    Cliente: 'SERVICIOS DE EXPORTACIONES FRUTICOLAS EXSER LIMITADA',
-    GestorComercial: 'DANIELA VALDES',
+    Cliente: 'GLOBAL HORIZON',
+    GestorComercial: '',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'ACRF_01'
+  },
+  {
+    Id: 1011,
+    Codigo: 'toke_01',
+    NombreProyecto: 'TOKENS FISICOS MFA PARA M365 Y FORTINET',
+    Estado: '100% Aceptada por cliente',
+    Cliente: 'COMISION NACIONAL DE ACREDITACION CNA',
+    GestorComercial: 'MACARENA ALLENDE',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'INFRAESTRUCTURA'
+  },
+  {
+    Id: 14,
+    Codigo: 'acep_01',
+    NombreProyecto: 'Aceptación y Rechazo de Facturas + Nuevas funcionalidades',
+    Estado: '10% Prospecto (Lead)',
+    Cliente: 'ILUSTRE MUNICIPALIDAD DE LA REINA',
+    GestorComercial: 'MARIA EUGENIA NABALON',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'ACRF_01'
+  },
+  {
+    Id: 13,
+    Codigo: 'cuen_01',
+    NombreProyecto: 'Cuentas Basicas',
+    Estado: '30% En elaboración',
+    Cliente: 'ILUSTRE MUNICIPALIDAD DE ANTOFAGASTA',
+    GestorComercial: 'RHODY SANTIBAÑEZ',
     ValorServicio: 0,
     TipoCliente: 'Nuevo',
     LineaServicio: 'OFT_01'
   },
   {
     Id: 12,
-    Codigo: 'ocrs_01',
-    NombreProyecto: 'Ocr Sodexo',
+    Codigo: 'digi_01',
+    NombreProyecto: 'DIGITALIZACION DOC. RRHH',
     Estado: '30% En elaboración',
     Cliente: 'SODEXO CHILE SPA',
     GestorComercial: 'MACARENA ALLENDE',
     ValorServicio: 0,
     TipoCliente: 'Nuevo',
     LineaServicio: 'ACRF_01'
+  },
+  {
+    Id: 11,
+    Codigo: 'prop_01',
+    NombreProyecto: 'Propuesta servidores',
+    Estado: '10% Prospecto (Lead)',
+    Cliente: 'SERVICIOS DE EXPORTACIONES FRUTICOLAS EXSER LIMITADA',
+    GestorComercial: 'DANIELA VALDES',
+    ValorServicio: 0,
+    TipoCliente: 'Nuevo',
+    LineaServicio: 'OFT_01'
   }
 ];
 
@@ -3363,34 +3407,23 @@ async function syncFichasProspectoWithRemote() {
   
   const isSimulated = isSimulationMode();
   
-  if (isSimulated) {
-    simulatedFichasProspecto = remoteFichas.map(f => ({
-      Id: Number(f.id),
-      Codigo: f.codigo,
-      NombreProyecto: f.nombreProyecto,
-      Estado: f.estado,
-      Cliente: f.cliente,
-      GestorComercial: f.gestorComercial,
-      ValorServicio: f.valorServicio || 0,
-      LineaServicio: f.lineaServicio || 'ACRF_01',
-      TipoCliente: f.tipoCliente || 'Nuevo'
-    }));
-    syncApprovedProspectsSimulation();
-  } else {
-    for (const f of remoteFichas) {
-      try {
-        const queryCheck = "SELECT Id, Estado FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] WHERE Codigo = @p0";
-        await executeQuery(queryCheck, [f.codigo]);
-      } catch (err: any) {
-        console.error(`❌ Error consultando ficha prospecto ${f.codigo}:`, err.message);
-      }
-    }
-  }
+  simulatedFichasProspecto = remoteFichas.map(f => ({
+    Id: Number(f.id),
+    Codigo: f.codigo,
+    NombreProyecto: f.nombreProyecto,
+    Estado: f.estado,
+    Cliente: f.cliente,
+    GestorComercial: f.gestorComercial,
+    ValorServicio: f.valorServicio || 0,
+    LineaServicio: f.lineaServicio || 'ACRF_01',
+    TipoCliente: f.tipoCliente || 'Nuevo'
+  }));
+  syncApprovedProspectsSimulation();
 }
 
 // Iniciar sync remota de fichas cada 60 segundos
 setInterval(syncFichasProspectoWithRemote, 60000);
-setTimeout(syncFichasProspectoWithRemote, 5000);
+setTimeout(syncFichasProspectoWithRemote, 2000);
 
 // 18. GET /api/mon/services-data - Datos de clientes y servicios reales de THE_COOLER_CENTRAL
 app.get("/api/mon/services-data", async (req, res) => {
@@ -3435,32 +3468,15 @@ app.get("/api/mon/services-data", async (req, res) => {
   }
 });
 
-// 18a. GET /api/mon/fichas-prospecto - Monitorear prospectos y auto-activar aprobados
+// 18a. GET /api/mon/fichas-prospecto - Monitorear prospectos y auto-activar aprobados desde API remota del CRM (18.230.23.241:3001 / 5173)
 app.get("/api/mon/fichas-prospecto", async (req, res) => {
   try {
-    const isSimulated = isSimulationMode();
-    if (isSimulated) {
-      syncApprovedProspectsSimulation();
-      return res.json({
-        success: true,
-        mode: "simulation",
-        data: simulatedFichasProspecto
-      });
-    } else {
-      // Query FichasProspecto from the GESTION_PROYECTOS database
-      const query = "SELECT * FROM [GESTION_PROYECTOS].[dbo].[FichasProspecto] ORDER BY FechaCreacion DESC";
-      const result = await executeQuery(query);
-      const fichas = result?.recordset || [];
-      
-      // Auto-activate any that are approved
-      await syncApprovedProspectsReal(fichas);
-      
-      return res.json({
-        success: true,
-        mode: "real",
-        data: fichas
-      });
-    }
+    syncApprovedProspectsSimulation();
+    return res.json({
+      success: true,
+      mode: "remote_crm_api",
+      data: simulatedFichasProspecto
+    });
   } catch (error: any) {
     console.error("❌ Error en API /api/mon/fichas-prospecto:", error);
     return res.status(500).json({
