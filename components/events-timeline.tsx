@@ -58,6 +58,8 @@ interface TimelineEvent {
 
 interface EventsTimelineProps {
   onSelectService?: (service: Service) => void;
+  initialServiceFilter?: string;
+  initialServiceId?: string;
 }
 
 interface Filters {
@@ -325,10 +327,17 @@ const DEFAULT_FILTERS: Filters = {
   dateRange: { from: undefined, to: undefined },
 };
 
-export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
+export function EventsTimeline({ onSelectService, initialServiceFilter, initialServiceId }: EventsTimelineProps) {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+
+  useEffect(() => {
+    const targetFilter = initialServiceFilter || initialServiceId;
+    if (targetFilter) {
+      setFilters(prev => ({ ...prev, serviceId: targetFilter }));
+    }
+  }, [initialServiceFilter, initialServiceId]);
   const [realLogs, setRealLogs] = useState<Record<string, LogEntry[]>>({
     facturas: [],
     oficore: [],
@@ -806,6 +815,33 @@ export function EventsTimeline({ onSelectService }: EventsTimelineProps) {
           }
         } catch (e) {
           console.error("Error fetching Mi Cuenta logs:", e);
+        }
+
+        // 7. Fetch Alertas de NubePrint (RPA INYECCIÓN SUMINISTROS - NUBEPRINT)
+        try {
+          const resNubeprint = await fetch("/api/nubeprint/stats");
+          const dataNubeprint = await resNubeprint.json();
+          if (dataNubeprint.success && dataNubeprint.data && Array.isArray(dataNubeprint.data)) {
+            newLogs["alertas-nubeprint"] = dataNubeprint.data.map((entry: any, index: number) => {
+              const st = String(entry.estado || "").toUpperCase();
+              const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(entry.motivo);
+              const rpaName = entry.rpa_nombre || "INYECCIÓN SUMINISTROS - NUBEPRINT";
+              const motivoStr = entry.motivo || entry.observacion || "Ejecución de bot NubePrint registrada en [THE_COOLER_SGCX].[RPA].[ejecucion]";
+              return {
+                id: `nubeprint_${entry.id || index}_${index}`,
+                message: isErr 
+                  ? `🚨 ERROR CRÍTICO RPA: ${rpaName}` 
+                  : `🤖 Bot RPA ${rpaName} - ${entry.estado || 'COMPLETADO'}`,
+                details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: ${entry.estado || 'COMPLETADO'} · Motivo: ${motivoStr}`,
+                timestamp: entry.fecha_inicio || entry.fecha || new Date().toISOString(),
+                type: isErr ? "error" : "success",
+                estado: entry.estado || (isErr ? "Error Infraestructura" : "Aprobado"),
+                isInfraestructura: isErr
+              };
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching NubePrint logs for timeline:", e);
         }
 
         // Si todos los logs reales están vacíos, cargamos simulación

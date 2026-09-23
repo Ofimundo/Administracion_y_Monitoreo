@@ -221,7 +221,7 @@ export function DashboardMetrics({
   onNavigateToSupport,
 }: {
   onNavigateToServices?: () => void;
-  onNavigateToTimeline?: () => void;
+  onNavigateToTimeline?: (serviceId?: string) => void;
   onNavigateToClients?: () => void;
   onNavigateToSupport?: (area?: string) => void;
 }) {
@@ -394,6 +394,40 @@ export function DashboardMetrics({
     codigoError: null,
     motivoError: null
   });
+
+  const [nubeprintStatus, setNubeprintStatus] = useState<{ disponible: boolean; errorMsg?: string }>({
+    disponible: true
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkNubeprintStatus = async () => {
+      try {
+        const res = await fetch("/api/nubeprint/stats");
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.data)) {
+          const latest = data.data[0];
+          if (latest) {
+            const st = String(latest.estado || "").toUpperCase();
+            const isError = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(latest.motivo);
+            setNubeprintStatus({
+              disponible: !isError,
+              errorMsg: latest.motivo || latest.observacion || undefined
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching NubePrint monitor status:", err);
+      }
+    };
+
+    checkNubeprintStatus();
+    const interval = setInterval(checkNubeprintStatus, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -783,6 +817,14 @@ export function DashboardMetrics({
         tiempoRespuesta: miCuentaStatus.responseTimeSec ? `${miCuentaStatus.responseTimeSec}s` : undefined,
         codigoError: miCuentaStatus.codigoError,
         motivoError: miCuentaStatus.motivoError
+      },
+      { 
+        id: "alertas-nubeprint", 
+        nombre: "Alertas de NubePrint", 
+        valor: nubeprintStatus.disponible ? 100 : 0,
+        total: 1,
+        errorDocs: nubeprintStatus.disponible ? 0 : 1,
+        estado: nubeprintStatus.disponible ? "Disponible" : "Sin Ejecución / Crítico"
       },
     ]);
 
@@ -1193,9 +1235,10 @@ export function DashboardMetrics({
 
   const sortedServices = useMemo(() => {
     const active = services.filter(s => !s.isComingSoon);
-    const soon = services.filter(s => s.isComingSoon);
-    return [...active, ...soon];
-  }, []);
+    return [...active].sort((a, b) => 
+      a.name.localeCompare(b.name, "es", { sensitivity: "base" })
+    );
+  }, [dataVersion]);
 
   const serviceAvailabilities = useMemo(() => {
     return {
@@ -1395,6 +1438,9 @@ export function DashboardMetrics({
       if (srv.id === "mi-cuenta" || srv.id === "micuenta") {
         return miCuentaStatus.disponible ? 100 : 0;
       }
+      if (srv.id === "alertas-nubeprint") {
+        return nubeprintStatus.disponible ? 100 : 0;
+      }
       return 100 - srv.errorPercentage;
     }
     if (serviceId === "facturas-artesanales") return 0;
@@ -1404,12 +1450,17 @@ export function DashboardMetrics({
     if (serviceId === "ofitec") return ofitecStatus.disponible ? 100 : 0;
     if (serviceId === "oficore") return oficoreStatus.disponible ? 100 : 0;
     if (serviceId === "mi-cuenta" || serviceId === "micuenta") return miCuentaStatus.disponible ? 100 : 0;
+    if (serviceId === "alertas-nubeprint") return nubeprintStatus.disponible ? 100 : 0;
     return (serviceAvailabilities as Record<string, number>)[serviceId] || 100;
   };
 
   // ✅ Función para obtener el estado REAL del servicio
   const getRealServiceStatus = (service: any): "success" | "warning" | "error" => {
     if (service.isComingSoon) return "success";
+
+    if (service.id === "alertas-nubeprint") {
+      return nubeprintStatus.disponible ? "success" : "error";
+    }
 
     if (service.id === "facturas-artesanales") {
       return "error";
@@ -2337,16 +2388,6 @@ export function DashboardMetrics({
               </div>
               <div className="space-y-1 max-h-[180px] overflow-y-auto pr-1 mt-2">
                 {sortedServices.map(s => {
-                  if (s.isComingSoon) {
-                    return (
-                      <div key={s.id} className="space-y-0.5 p-1">
-                        <div className="flex justify-between text-[9px] font-bold text-slate-400">
-                          <span className="truncate max-w-[120px]">{s.name}</span>
-                          <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-100">Próximamente</span>
-                        </div>
-                      </div>
-                    );
-                  }
                   const avail = getServiceAvailability(s.id);
                   const color = avail >= 99 ? "bg-emerald-500" : (avail >= 90 ? "bg-amber-500" : "bg-red-500");
                   return (
@@ -2355,7 +2396,11 @@ export function DashboardMetrics({
                       className="space-y-0.5 hover:bg-slate-50 rounded p-1 cursor-pointer transition-colors group"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push(`/servicio/${s.id}`);
+                        if (onNavigateToTimeline) {
+                          onNavigateToTimeline(s.id);
+                        } else {
+                          router.push(`/servicio/${s.id}`);
+                        }
                       }}
                       title={`Ver detalle de ${s.name}`}
                     >
@@ -2376,18 +2421,6 @@ export function DashboardMetrics({
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block border-b pb-1 mb-2">Estado de Servicios</span>
               <div className="text-[9px] space-y-1 font-semibold text-slate-700 max-h-[180px] overflow-y-auto pr-1">
                 {sortedServices.map(s => {
-                  if (s.isComingSoon) {
-                    return (
-                      <div key={s.id} className="flex justify-between items-center p-1">
-                        <span className="text-slate-400 font-semibold truncate max-w-[120px]">{s.name}</span>
-                        <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                          <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-100">Próximamente</span>
-                        </span>
-                      </div>
-                    );
-                  }
-                  
                   const realStatus = getRealServiceStatus(s);
                   let statusText = "Operativo";
                   let statusColor = "bg-emerald-500";
@@ -2409,7 +2442,11 @@ export function DashboardMetrics({
                       className="flex justify-between items-center hover:bg-slate-50 rounded p-1 cursor-pointer transition-colors group"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push(`/servicio/${s.id}`);
+                        if (onNavigateToTimeline) {
+                          onNavigateToTimeline(s.id);
+                        } else {
+                          router.push(`/servicio/${s.id}`);
+                        }
                       }}
                       title={`Ver detalle de ${s.name}`}
                     >

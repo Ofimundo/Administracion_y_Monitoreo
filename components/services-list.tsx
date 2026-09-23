@@ -183,6 +183,7 @@ export function ServicesList() {
 
   const [sgcPingOk, setSgcPingOk] = useState<boolean>(true);
   const [ofitecStatus, setOfitecStatus] = useState<{ disponible: boolean }>({ disponible: true });
+  const [nubeprintStatus, setNubeprintStatus] = useState<{ disponible: boolean }>({ disponible: true });
   const [facturasBitacora, setFacturasBitacora] = useState<any[]>([]);
   const [dteLogs, setDteLogs] = useState<any[]>([]);
 
@@ -192,16 +193,23 @@ export function ServicesList() {
       try {
         const now = new Date();
         const primerDiaMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-        const [sgcRes, ofitecRes, factRes, dteRes, corpescaRes] = await Promise.all([
+        const [sgcRes, ofitecRes, factRes, dteRes, corpescaRes, nubeRes] = await Promise.all([
           fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
           fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
           fetch(`/api/facturas/bitacora?estado=todos&fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
           fetch(`/api/dte/stats?fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
           fetch(`/api/facturas/bitacora?cliente=cl_corpesca&fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
+          fetch("/api/nubeprint/stats").then(r => r.json()).catch(() => null),
         ]);
         if (isMounted) {
           if (sgcRes) setSgcPingOk(sgcRes.pong === true || sgcRes.isAvailable === true);
           if (ofitecRes) setOfitecStatus({ disponible: ofitecRes.disponible === true });
+          if (nubeRes && nubeRes.success && Array.isArray(nubeRes.data) && nubeRes.data.length > 0) {
+            const latest = nubeRes.data[0];
+            const st = String(latest.estado || "").toUpperCase();
+            const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(latest.motivo);
+            setNubeprintStatus({ disponible: !isErr });
+          }
           let allFacturas: any[] = [];
           if (factRes && factRes.data) allFacturas.push(...factRes.data);
           if (corpescaRes && corpescaRes.data) allFacturas.push(...corpescaRes.data);
@@ -339,6 +347,10 @@ export function ServicesList() {
       return "success";
     }
     
+    if (service.id === "alertas-nubeprint") {
+      return nubeprintStatus.disponible ? "success" : "error";
+    }
+
     if (service.id === "sgc") {
       return sgcPingOk ? "success" : "error";
     }
@@ -432,6 +444,10 @@ export function ServicesList() {
       return 0;
     }
     
+    if (service.id === "alertas-nubeprint") {
+      return nubeprintStatus.disponible ? 0 : 100;
+    }
+
     if (service.id === "sgc") {
       return sgcPingOk ? 0 : 100;
     }
@@ -530,7 +546,7 @@ export function ServicesList() {
   ];
 
   const serviceNames = useMemo(() => {
-    return services.map(service => ({
+    return services.filter(s => s.id !== "alertas-nubeprint").map(service => ({
       value: service.name,
       label: service.name,
       errorPercentage: getRealErrorPercentage(service),
@@ -540,7 +556,7 @@ export function ServicesList() {
   }, [services, dataVersion]);
 
   const filteredServices = useMemo(() => {
-    let result = [...services];
+    let result = services.filter(service => service.id !== "alertas-nubeprint");
 
     // ✅ Ocultar por defecto los servicios "Próximamente" (en desarrollo) salvo que el usuario active la casilla showComingSoon o busque por nombre
     if (!filters.showComingSoon && !filters.search) {

@@ -2394,6 +2394,67 @@ app.get(["/api/sgc/inyeccion-suministros-stats", "/api/sgc/inyeccion-stats"], as
   }
 });
 
+// 13.11. GET /api/nubeprint/stats
+app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    console.log(`🔌 [NubePrint RPA] Consultando [THE_COOLER_SGCX].[RPA].[ejecucion]. Modo Simulación: ${isSimulated}`);
+
+    if (!isSimulated) {
+      try {
+        const query = `
+          SELECT TOP 100 *
+          FROM [THE_COOLER_SGCX].[RPA].[ejecucion]
+          ORDER BY 1 DESC
+        `;
+        const result = await executeQuery(query);
+        const records = result?.recordset || [];
+
+        if (records.length > 0) {
+          const filtered = records.filter((r: any) => {
+            const name = String(r.rpa_nombre || r.nombre_rpa || r.nombre || r.rpa || "").toUpperCase();
+            return name.includes("NUBEPRINT") || name.includes("INYECCIÓN SUMINISTROS") || name.includes("INYECCION SUMINISTROS");
+          });
+
+          return res.json({
+            success: true,
+            mode: "real",
+            data: filtered.length > 0 ? filtered : records,
+            count: records.length
+          });
+        }
+      } catch (dbErr: any) {
+        console.error("⚠️ Error SQL en [THE_COOLER_SGCX].[RPA].[ejecucion]:", dbErr.message);
+      }
+    }
+
+    // Datos simulados/fallback cuando está en modo simulación o sin registros
+    const simulatedData = [
+      {
+        id: 1,
+        rpa_nombre: "INYECCIÓN SUMINISTROS - NUBEPRINT",
+        estado: "COMPLETADO",
+        fecha_inicio: new Date().toISOString(),
+        motivo: "Ejecución completada exitosamente",
+        observacion: "Sin errores en la inyección de suministros NubePrint"
+      }
+    ];
+
+    return res.json({
+      success: true,
+      mode: "simulation",
+      data: simulatedData,
+      count: simulatedData.length
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/nubeprint/stats:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar ejecuciones de NubePrint: " + error.message
+    });
+  }
+});
+
 // 14. GET /api/dte/stats
 app.get("/api/dte/stats", async (req, res) => {
   try {
@@ -2962,7 +3023,8 @@ let simulatedServicios = [
   { Servicio_ID: 5, Codigo_Servicio: "SGC_01", Nombre_Servicio: "SGC", Descripcion: "SGC es el núcleo de las operaciones de la organización, centralizando la gestión de contratos, la administración de clientes y equipos, así como el ingreso y seguimiento de solicitudes de suministros, retiros y despachos de equipos.", Activo: true },
   { Servicio_ID: 6, Codigo_Servicio: "OFT_01", Nombre_Servicio: "Ofitec", Descripcion: "Ofitec es la plataforma encargada de la gestión, administración y monitoreo de los tickets de servicio técnico para los clientes de Ofimundo.", Activo: true },
   { Servicio_ID: 7, Codigo_Servicio: "MIC_01", Nombre_Servicio: "Mi cuenta", Descripcion: "Gestiona fácilmente tus servicios con Mi Cuenta de Ofimundo S.A. Solicita insumos, revisa tus facturas, coordina soporte técnico y administra tus usuarios desde un solo lugar", Activo: true },
-  { Servicio_ID: 8, Codigo_Servicio: "FAC_ART_01", Nombre_Servicio: "Facturas Artesanales", Descripcion: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML.", Activo: true }
+  { Servicio_ID: 8, Codigo_Servicio: "FAC_ART_01", Nombre_Servicio: "Facturas Artesanales", Descripcion: "Monitoreo y procesamiento automatizado de facturas artesanales para Corpesca S.A., verificando folios, fecha de recepción, captura de PDF y XML.", Activo: true },
+  { Servicio_ID: 9, Codigo_Servicio: "NUB_01", Nombre_Servicio: "Alertas de NubePrint", Descripcion: "Monitoreo y alerta automatizada del RPA INYECCIÓN SUMINISTROS - NUBEPRINT desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].", Activo: true }
 ];
 
 let simulatedRelaciones = [
@@ -2996,6 +3058,9 @@ let simulatedRelaciones = [
   { Relacion_ID: 23, Cliente_ID: 2, Servicio_ID: 6, Activo: true },
   { Relacion_ID: 24, Cliente_ID: 3, Servicio_ID: 6, Activo: true },
   { Relacion_ID: 25, Cliente_ID: 6, Servicio_ID: 6, Activo: true },
+
+  // Servicio 9: Alertas de NubePrint (NUB_01)
+  { Relacion_ID: 30, Cliente_ID: 3, Servicio_ID: 9, Activo: true },
 
   // Servicio 7: Mi cuenta (MIC_01)
   { Relacion_ID: 27, Cliente_ID: 1, Servicio_ID: 7, Activo: true },

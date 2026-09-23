@@ -101,6 +101,20 @@ const baseServices: Service[] = [
     isComingSoon: false,
   },
   {
+    id: "alertas-nubeprint",
+    name: "Alertas de NubePrint",
+    description: "Monitoreo y alerta automatizada del RPA INYECCIÓN SUMINISTROS - NUBEPRINT desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" }
+    ],
+    logs: [
+      { id: "1", message: "Servicio de Alertas de NubePrint activo", timestamp: new Date().toISOString(), type: "success" },
+    ],
+    isComingSoon: false,
+  },
+  {
     id: "saldos",
     name: "Saldos Bancarios",
     description: "🚀 Próximamente - Sistema automatizado para la consulta y consolidación de saldos bancarios de múltiples instituciones financieras.",
@@ -425,7 +439,8 @@ const serviceIdMap: Record<string, string> = {
   "SGC_01": "sgc",
   "OFT_01": "ofitec",
   "MIC_01": "mi-cuenta",
-  "FAC_ART_01": "facturas-artesanales"
+  "FAC_ART_01": "facturas-artesanales",
+  "NUB_01": "alertas-nubeprint"
 };
 
 // Variables mutables para prospectos y proyectos
@@ -647,6 +662,14 @@ export async function initializeDatabaseData(): Promise<boolean> {
       // 4. Actualizar arreglos exportados in-place para conservar las referencias importadas
       clients.length = 0;
       clients.push(...dbClients);
+
+      // Asegurar que todos los servicios activos base (como alertas-nubeprint y facturas-artesanales) se mantengan
+      const customActiveServices = baseServices.filter(s => !s.isComingSoon);
+      customActiveServices.forEach(cs => {
+        if (!dbServices.some(s => s.id === cs.id)) {
+          dbServices.push(cs);
+        }
+      });
 
       const comingSoonSrvs = baseServices.filter(s => s.isComingSoon);
       services.length = 0;

@@ -51,6 +51,7 @@ export default function HomePage() {
   // ✅ CAMBIADO: Dashboard como pestaña activa por defecto
   const [activeTab, setActiveTab] = useState("dashboard");
   const [supportInitialArea, setSupportInitialArea] = useState<string>("todos");
+  const [timelineServiceFilter, setTimelineServiceFilter] = useState<string>("all");
   const [isInitialized, setIsInitialized] = useState(false);
   const mountedRef = useRef(true);
 
@@ -428,13 +429,21 @@ export default function HomePage() {
                   if (tab.hasClientCallback) props.onSelectClient = handleSelectClient;
                   if (tab.id === "dashboard") {
                     props.onNavigateToServices = () => setActiveTab("services");
-                    props.onNavigateToTimeline = () => setActiveTab("timeline");
+                    props.onNavigateToTimeline = (serviceId?: string) => {
+                      if (serviceId) {
+                        setTimelineServiceFilter(serviceId);
+                      }
+                      setActiveTab("timeline");
+                    };
                     props.onNavigateToHeatMap = () => setActiveTab("services");
                     props.onNavigateToClients = () => setActiveTab("clients");
                     props.onNavigateToSupport = (area?: string) => {
                       setSupportInitialArea(area || "Tecnología");
                       setActiveTab("soporte");
                     };
+                  }
+                  if (tab.id === "timeline") {
+                    props.initialServiceFilter = timelineServiceFilter;
                   }
                   if (tab.id === "soporte") {
                     props.initialArea = supportInitialArea;
