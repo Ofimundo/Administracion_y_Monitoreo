@@ -184,6 +184,16 @@ export function ServicesList() {
   const [sgcPingOk, setSgcPingOk] = useState<boolean>(true);
   const [ofitecStatus, setOfitecStatus] = useState<{ disponible: boolean }>({ disponible: true });
   const [nubeprintStatus, setNubeprintStatus] = useState<{ disponible: boolean }>({ disponible: true });
+  const [contadoresStatus, setContadoresStatus] = useState<{
+    kfs: { disponible: boolean };
+    mps: { disponible: boolean };
+    ndd: { disponible: boolean };
+  }>({
+    kfs: { disponible: true },
+    mps: { disponible: true },
+    ndd: { disponible: true },
+  });
+  const [rpaServicesStatus, setRpaServicesStatus] = useState<any>(null);
   const [facturasBitacora, setFacturasBitacora] = useState<any[]>([]);
   const [dteLogs, setDteLogs] = useState<any[]>([]);
 
@@ -193,22 +203,45 @@ export function ServicesList() {
       try {
         const now = new Date();
         const primerDiaMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-        const [sgcRes, ofitecRes, factRes, dteRes, corpescaRes, nubeRes] = await Promise.all([
+        const [sgcRes, ofitecRes, factRes, dteRes, corpescaRes, nubeRes, contadoresRes] = await Promise.all([
           fetch("/api/sgc/ping").then(r => r.json()).catch(() => null),
           fetch("/api/monitor/ofitec").then(r => r.json()).catch(() => null),
           fetch(`/api/facturas/bitacora?estado=todos&fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
           fetch(`/api/dte/stats?fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
           fetch(`/api/facturas/bitacora?cliente=cl_corpesca&fechaDesde=${primerDiaMes}`).then(r => r.json()).catch(() => null),
           fetch("/api/nubeprint/stats").then(r => r.json()).catch(() => null),
+          fetch("/api/contadores/stats").then(r => r.json()).catch(() => null),
         ]);
         if (isMounted) {
           if (sgcRes) setSgcPingOk(sgcRes.pong === true || sgcRes.isAvailable === true);
           if (ofitecRes) setOfitecStatus({ disponible: ofitecRes.disponible === true });
-          if (nubeRes && nubeRes.success && Array.isArray(nubeRes.data) && nubeRes.data.length > 0) {
-            const latest = nubeRes.data[0];
-            const st = String(latest.estado || "").toUpperCase();
-            const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(latest.motivo);
-            setNubeprintStatus({ disponible: !isErr });
+          if (nubeRes && nubeRes.success) {
+            if (typeof nubeRes.disponible === "boolean") {
+              setNubeprintStatus({ disponible: nubeRes.disponible === true });
+            } else if (Array.isArray(nubeRes.data) && nubeRes.data.length > 0) {
+              const latest = nubeRes.data[0];
+              const st = String(latest.estado || "").toUpperCase();
+              const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(latest.motivo);
+              setNubeprintStatus({ disponible: !isErr });
+            }
+          }
+          if (contadoresRes && contadoresRes.success && contadoresRes.data) {
+            setContadoresStatus({
+              kfs: { disponible: contadoresRes.data.kfs?.disponible === true },
+              mps: { disponible: contadoresRes.data.mps?.disponible === true },
+              ndd: { disponible: contadoresRes.data.ndd?.disponible === true },
+            });
+          }
+          let rpaServRes = null;
+          try {
+            const rpaServ = await fetch("/api/rpa/ejecuciones-servicios");
+            rpaServRes = await rpaServ.json();
+          } catch (e) {}
+
+          if (!isMounted) return;
+
+          if (rpaServRes && rpaServRes.success && rpaServRes.data) {
+            setRpaServicesStatus(rpaServRes.data);
           }
           let allFacturas: any[] = [];
           if (factRes && factRes.data) allFacturas.push(...factRes.data);
@@ -372,6 +405,9 @@ export function ServicesList() {
     }
 
     if (service.id === "facturas-artesanales") {
+      if (rpaServicesStatus?.corpesca) {
+        return rpaServicesStatus.corpesca.disponible ? "success" : "error";
+      }
       const now = new Date();
       const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
       const hoyStr = format(now, "yyyy-MM-dd");
@@ -395,6 +431,18 @@ export function ServicesList() {
 
       const isCorpDown = (esHoraPasada && !tieneHoy) || (!tieneHoy && !tieneAyer);
       return isCorpDown ? "error" : "success";
+    }
+
+    if (service.id === "contadores-kfs") {
+      return contadoresStatus.kfs.disponible ? "success" : "error";
+    }
+
+    if (service.id === "contadores-mps") {
+      return contadoresStatus.mps.disponible ? "success" : "error";
+    }
+
+    if (service.id === "contadores-ndd") {
+      return contadoresStatus.ndd.disponible ? "success" : "error";
     }
 
     if (service.id === "facturas") {
@@ -423,8 +471,8 @@ export function ServicesList() {
       };
 
       const autoDown = checkDown((f: any) => (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL")), 11 * 60);
-      const antDown = checkDown((f: any) => (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA")), 13 * 60);
-      const stueDown = checkDown((f: any) => {
+      const antDown = rpaServicesStatus?.antofagasta ? !rpaServicesStatus.antofagasta.disponible : checkDown((f: any) => (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA")), 13 * 60);
+      const stueDown = rpaServicesStatus?.ofimundo ? !rpaServicesStatus.ofimundo.disponible : checkDown((f: any) => {
         const isAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
         const isCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
         const isAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
@@ -446,6 +494,18 @@ export function ServicesList() {
     
     if (service.id === "alertas-nubeprint") {
       return nubeprintStatus.disponible ? 0 : 100;
+    }
+
+    if (service.id === "contadores-kfs") {
+      return contadoresStatus.kfs.disponible ? 0 : 100;
+    }
+
+    if (service.id === "contadores-mps") {
+      return contadoresStatus.mps.disponible ? 0 : 100;
+    }
+
+    if (service.id === "contadores-ndd") {
+      return contadoresStatus.ndd.disponible ? 0 : 100;
     }
 
     if (service.id === "sgc") {
@@ -546,7 +606,7 @@ export function ServicesList() {
   ];
 
   const serviceNames = useMemo(() => {
-    return services.filter(s => s.id !== "alertas-nubeprint").map(service => ({
+    return services.map(service => ({
       value: service.name,
       label: service.name,
       errorPercentage: getRealErrorPercentage(service),
@@ -556,7 +616,9 @@ export function ServicesList() {
   }, [services, dataVersion]);
 
   const filteredServices = useMemo(() => {
-    let result = services.filter(service => service.id !== "alertas-nubeprint");
+    // ✅ Eliminar de la pestaña de servicios: Alertas NubePrint y Contadores (KFS, MPS, NDD)
+    const HIDDEN_SERVICES_TAB_IDS = ["alertas-nubeprint", "contadores-kfs", "contadores-mps", "contadores-ndd"];
+    let result = services.filter(s => !HIDDEN_SERVICES_TAB_IDS.includes(s.id));
 
     // ✅ Ocultar por defecto los servicios "Próximamente" (en desarrollo) salvo que el usuario active la casilla showComingSoon o busque por nombre
     if (!filters.showComingSoon && !filters.search) {
@@ -661,25 +723,31 @@ export function ServicesList() {
                 11 * 60
               );
             } else if (isAnt) {
-              clientDown = checkDown(
-                (f: any) => (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA")),
-                13 * 60
-              );
+              clientDown = rpaServicesStatus?.antofagasta
+                ? !rpaServicesStatus.antofagasta.disponible
+                : checkDown(
+                    (f: any) => (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA")),
+                    13 * 60
+                  );
             } else if (isCorp) {
-              clientDown = checkDown(
-                (f: any) => (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA")),
-                23 * 60
-              );
+              clientDown = rpaServicesStatus?.corpesca
+                ? !rpaServicesStatus.corpesca.disponible
+                : checkDown(
+                    (f: any) => (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA")),
+                    23 * 60
+                  );
             } else {
-              clientDown = checkDown(
-                (f: any) => {
-                  const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-                  const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
-                  const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
-                  return !matchAnt && !matchCorp && !matchAuto;
-                },
-                15 * 60 + 30
-              );
+              clientDown = rpaServicesStatus?.ofimundo
+                ? !rpaServicesStatus.ofimundo.disponible
+                : checkDown(
+                    (f: any) => {
+                      const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+                      const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+                      const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+                      return !matchAnt && !matchCorp && !matchAuto;
+                    },
+                    15 * 60 + 30
+                  );
             }
           }
 

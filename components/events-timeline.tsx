@@ -821,27 +821,214 @@ export function EventsTimeline({ onSelectService, initialServiceFilter, initialS
         try {
           const resNubeprint = await fetch("/api/nubeprint/stats");
           const dataNubeprint = await resNubeprint.json();
-          if (dataNubeprint.success && dataNubeprint.data && Array.isArray(dataNubeprint.data)) {
-            newLogs["alertas-nubeprint"] = dataNubeprint.data.map((entry: any, index: number) => {
-              const st = String(entry.estado || "").toUpperCase();
-              const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(entry.motivo);
-              const rpaName = entry.rpa_nombre || "INYECCIÓN SUMINISTROS - NUBEPRINT";
-              const motivoStr = entry.motivo || entry.observacion || "Ejecución de bot NubePrint registrada en [THE_COOLER_SGCX].[RPA].[ejecucion]";
-              return {
-                id: `nubeprint_${entry.id || index}_${index}`,
-                message: isErr 
-                  ? `🚨 ERROR CRÍTICO RPA: ${rpaName}` 
-                  : `🤖 Bot RPA ${rpaName} - ${entry.estado || 'COMPLETADO'}`,
-                details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: ${entry.estado || 'COMPLETADO'} · Motivo: ${motivoStr}`,
-                timestamp: entry.fecha_inicio || entry.fecha || new Date().toISOString(),
-                type: isErr ? "error" : "success",
-                estado: entry.estado || (isErr ? "Error Infraestructura" : "Aprobado"),
-                isInfraestructura: isErr
-              };
+          const nubeprintLogs: LogEntry[] = [];
+
+          if (dataNubeprint.success) {
+            if (dataNubeprint.data && Array.isArray(dataNubeprint.data)) {
+              dataNubeprint.data.forEach((entry: any, index: number) => {
+                const st = String(entry.estado || "").toUpperCase();
+                const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(entry.motivo);
+                const rpaName = entry.rpa_nombre || entry.rpa || "INYECCIÓN SUMINISTROS - NUBEPRINT";
+                const motivoStr = entry.motivo || entry.observacion || entry.mensaje || "Ejecución de bot NubePrint registrada en [THE_COOLER_SGCX].[RPA].[ejecucion]";
+                nubeprintLogs.push({
+                  id: `nubeprint_${entry.id_ejecucion || entry.id || index}_${index}`,
+                  message: isErr 
+                    ? `🚨 ERROR CRÍTICO RPA: ${rpaName}` 
+                    : `🤖 Bot RPA ${rpaName} - ${entry.estado || 'COMPLETADO'}`,
+                  details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: ${entry.estado || 'COMPLETADO'} · Motivo: ${motivoStr}`,
+                  timestamp: entry.fecha_inicio || entry.fecha || new Date().toISOString(),
+                  type: isErr ? "error" : "success",
+                  estado: entry.estado || (isErr ? "Error Infraestructura" : "Aprobado"),
+                  isInfraestructura: isErr
+                });
+              });
+            }
+
+            if (dataNubeprint.disponible === false && dataNubeprint.motivo) {
+              nubeprintLogs.unshift({
+                id: `nubeprint_error_schedule`,
+                message: `🔴 ALERTA/ERROR RPA: NUBEPRINT - OMISIÓN/FALLO EN EJECUCIÓN`,
+                details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: Caído/Alerta · Motivo: ${dataNubeprint.motivo}`,
+                timestamp: new Date().toISOString(),
+                type: "error",
+                estado: "Error Infraestructura",
+                isInfraestructura: true,
+              });
+            }
+          }
+          newLogs["alertas-nubeprint"] = nubeprintLogs;
+        } catch (e) {
+          console.error("Error fetching NubePrint logs for timeline:", e);
+        }
+
+        // 8. Fetch Alertas de Contadores (KFS, MPS, NDD)
+        try {
+          const resContadores = await fetch("/api/contadores/stats");
+          const dataContadores = await resContadores.json();
+          if (dataContadores.success && dataContadores.data) {
+            ["kfs", "mps", "ndd"].forEach(key => {
+              const item = dataContadores.data[key];
+              const serviceId = `contadores-${key}`;
+              const counterLogs: LogEntry[] = [];
+
+              if (item) {
+                if (Array.isArray(item.records) && item.records.length > 0) {
+                  item.records.forEach((entry: any, index: number) => {
+                    const st = String(entry.estado || "").toUpperCase();
+                    const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO");
+                    const rpaName = item.rpa || `CONTADORES - ${key.toUpperCase()}`;
+                    const motivoStr = entry.mensaje || entry.motivo || entry.observacion || "Ejecución diaria registrada en [THE_COOLER_SGCX].[RPA].[ejecucion]";
+                    counterLogs.push({
+                      id: `contadores_${key}_${entry.id_ejecucion || index}_${index}`,
+                      message: isErr 
+                        ? `🚨 ERROR RPA DIARIO: ${rpaName}` 
+                        : `🤖 Bot RPA ${rpaName} - ${entry.estado || 'COMPLETADO'}`,
+                      details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: ${entry.estado || 'COMPLETADO'} · Detalle: ${motivoStr}`,
+                      timestamp: entry.fecha_inicio || entry.fecha || new Date().toISOString(),
+                      type: isErr ? "error" : "success",
+                      estado: entry.estado || (isErr ? "Error" : "Exitoso"),
+                      isInfraestructura: isErr
+                    });
+                  });
+                }
+
+                if (item.disponible === false && item.motivo) {
+                  counterLogs.unshift({
+                    id: `contadores_${key}_error_schedule`,
+                    message: `🔴 ALERTA/ERROR RPA DIARIO: CONTADORES - ${key.toUpperCase()}`,
+                    details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: Caído/Omisión · Motivo: ${item.motivo}`,
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    estado: "Error Infraestructura",
+                    isInfraestructura: true,
+                  });
+                }
+              }
+
+              newLogs[serviceId] = counterLogs;
             });
           }
         } catch (e) {
-          console.error("Error fetching NubePrint logs for timeline:", e);
+          console.error("Error fetching Contadores logs for timeline:", e);
+        }
+
+        // 9. Fetch Ejecuciones RPA Servicios (CORPESCA, OFIMUNDO, ANTOFAGASTA)
+        try {
+          const resRpaServicios = await fetch("/api/rpa/ejecuciones-servicios");
+          const dataRpaServicios = await resRpaServicios.json();
+          if (dataRpaServicios.success && dataRpaServicios.data) {
+            const rpaData = dataRpaServicios.data;
+
+            // Corpesca
+            if (rpaData.corpesca) {
+              const corpItem = rpaData.corpesca;
+              if (Array.isArray(corpItem.records)) {
+                corpItem.records.forEach((entry: any, index: number) => {
+                  const st = String(entry.estado || "").toUpperCase();
+                  const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO");
+                  const msg = entry.mensaje || entry.observacion || "Proceso completado exitosamente.";
+                  newLogs["facturas-artesanales"].push({
+                    id: `rpa_corpesca_${entry.id_ejecucion || index}_${index}`,
+                    message: isErr ? `🚨 ERROR RPA CORPESCA: ${entry.rpa}` : `🤖 Bot RPA CORPESCA - ${entry.estado || 'FINALIZADO'}`,
+                    details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Inicio: ${entry.fecha_inicio ? format(new Date(entry.fecha_inicio), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Término: ${entry.fecha_termino ? format(new Date(entry.fecha_termino), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Mensaje: ${msg}`,
+                    timestamp: entry.fecha_inicio || new Date().toISOString(),
+                    type: isErr ? "error" : "success",
+                    estado: entry.estado || "FINALIZADO",
+                    isInfraestructura: isErr,
+                    cliente_id: "cl_corpesca",
+                    cliente_nombre: "CORPESCA S.A."
+                  });
+                });
+              }
+              if (corpItem.disponible === false && corpItem.motivo) {
+                newLogs["facturas-artesanales"].unshift({
+                  id: `rpa_corpesca_error_omision`,
+                  message: `🔴 ALERTA/ERROR RPA: CORPESCA`,
+                  details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: Caído/Omisión · Motivo: ${corpItem.motivo}`,
+                  timestamp: new Date().toISOString(),
+                  type: "error",
+                  estado: "Error Infraestructura",
+                  isInfraestructura: true,
+                  cliente_id: "cl_corpesca",
+                  cliente_nombre: "CORPESCA S.A."
+                });
+              }
+            }
+
+            // OFIMUNDO (Stuedemann S.A.)
+            if (rpaData.ofimundo) {
+              const ofiItem = rpaData.ofimundo;
+              if (Array.isArray(ofiItem.records)) {
+                ofiItem.records.forEach((entry: any, index: number) => {
+                  const st = String(entry.estado || "").toUpperCase();
+                  const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO");
+                  const msg = entry.mensaje || entry.observacion || "Proceso completado exitosamente.";
+                  newLogs.facturas.push({
+                    id: `rpa_ofimundo_${entry.id_ejecucion || index}_${index}`,
+                    message: isErr ? `🚨 ERROR RPA OFIMUNDO: ${entry.rpa}` : `🤖 Bot RPA OFIMUNDO (Stuedemann) - ${entry.estado || 'FINALIZADO'}`,
+                    details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Inicio: ${entry.fecha_inicio ? format(new Date(entry.fecha_inicio), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Término: ${entry.fecha_termino ? format(new Date(entry.fecha_termino), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Mensaje: ${msg}`,
+                    timestamp: entry.fecha_inicio || new Date().toISOString(),
+                    type: isErr ? "error" : "success",
+                    estado: entry.estado || "FINALIZADO",
+                    isInfraestructura: isErr,
+                    cliente_id: "cl_stuedemann",
+                    cliente_nombre: "STUEDEMANN S.A."
+                  });
+                });
+              }
+              if (ofiItem.disponible === false && ofiItem.motivo) {
+                newLogs.facturas.unshift({
+                  id: `rpa_ofimundo_error_omision`,
+                  message: `🔴 ALERTA/ERROR RPA: ACEPTACIÓN Y RECHAZO - OFIMUNDO`,
+                  details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: Caído/Omisión · Motivo: ${ofiItem.motivo}`,
+                  timestamp: new Date().toISOString(),
+                  type: "error",
+                  estado: "Error Infraestructura",
+                  isInfraestructura: true,
+                  cliente_id: "cl_stuedemann",
+                  cliente_nombre: "STUEDEMANN S.A."
+                });
+              }
+            }
+
+            // ANTOFAGASTA
+            if (rpaData.antofagasta) {
+              const antItem = rpaData.antofagasta;
+              if (Array.isArray(antItem.records)) {
+                antItem.records.forEach((entry: any, index: number) => {
+                  const st = String(entry.estado || "").toUpperCase();
+                  const isErr = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO");
+                  const msg = entry.mensaje || entry.observacion || "Proceso completado exitosamente.";
+                  newLogs.facturas.push({
+                    id: `rpa_antofagasta_${entry.id_ejecucion || index}_${index}`,
+                    message: isErr ? `🚨 ERROR RPA ANTOFAGASTA: ${entry.rpa}` : `🤖 Bot RPA ANTOFAGASTA - ${entry.estado || 'FINALIZADO'}`,
+                    details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Inicio: ${entry.fecha_inicio ? format(new Date(entry.fecha_inicio), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Término: ${entry.fecha_termino ? format(new Date(entry.fecha_termino), "dd/MM/yyyy HH:mm:ss") : 'N/A'} · Mensaje: ${msg}`,
+                    timestamp: entry.fecha_inicio || new Date().toISOString(),
+                    type: isErr ? "error" : "success",
+                    estado: entry.estado || "FINALIZADO",
+                    isInfraestructura: isErr,
+                    cliente_id: "cl_cmds_antofagasta",
+                    cliente_nombre: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA"
+                  });
+                });
+              }
+              if (antItem.disponible === false && antItem.motivo) {
+                newLogs.facturas.unshift({
+                  id: `rpa_antofagasta_error_omision`,
+                  message: `🔴 ALERTA/ERROR RPA: ACEPTACIÓN Y RECHAZO - ANTOFAGASTA`,
+                  details: `Tabla: [THE_COOLER_SGCX].[RPA].[ejecucion] · Estado: Caído/Omisión · Motivo: ${antItem.motivo}`,
+                  timestamp: new Date().toISOString(),
+                  type: "error",
+                  estado: "Error Infraestructura",
+                  isInfraestructura: true,
+                  cliente_id: "cl_cmds_antofagasta",
+                  cliente_nombre: "CORP MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA"
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Error fetching RPA ejecuciones servicios for timeline:", e);
         }
 
         // Si todos los logs reales están vacíos, cargamos simulación

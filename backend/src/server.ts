@@ -2394,6 +2394,139 @@ app.get(["/api/sgc/inyeccion-suministros-stats", "/api/sgc/inyeccion-stats"], as
   }
 });
 
+// Helper para parsear fechas de SQL Server sin desfase horario UTC
+function parseSqlDateToLocal(dateInput: any): Date {
+  if (!dateInput) return new Date();
+  if (dateInput instanceof Date) {
+    return new Date(
+      dateInput.getUTCFullYear(),
+      dateInput.getUTCMonth(),
+      dateInput.getUTCDate(),
+      dateInput.getUTCHours(),
+      dateInput.getUTCMinutes(),
+      dateInput.getUTCSeconds()
+    );
+  }
+  const str = String(dateInput);
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if (match) {
+    return new Date(
+      parseInt(match[1], 10),
+      parseInt(match[2], 10) - 1,
+      parseInt(match[3], 10),
+      parseInt(match[4], 10),
+      parseInt(match[5], 10),
+      parseInt(match[6], 10)
+    );
+  }
+  return new Date(str);
+}
+
+// Helper para evaluar el estado del RPA Alertas NubePrint (08:00 - 23:59:59 cada 2 horas)
+function evaluateNubeprintScheduleStatus(records: any[]) {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinutes = now.getMinutes();
+  const currentTimeInMinutes = currentHour * 60 + currentMinutes;
+
+  const windowStart = 8 * 60;          // 08:00 AM (480 mins)
+  const windowEnd = 23 * 60 + 59;      // 23:59:59 PM (1439 mins)
+
+  const isOperatingHours = currentTimeInMinutes >= windowStart && currentTimeInMinutes <= windowEnd;
+
+  if (!records || records.length === 0) {
+    return {
+      disponible: !isOperatingHours,
+      scheduleOk: !isOperatingHours,
+      horarioOperativo: isOperatingHours,
+      minsSinceLastExec: null,
+      motivo: isOperatingHours 
+        ? "❌ Caído: Sin ejecuciones de 'INYECCIÓN SUMINISTROS - NUBEPRINT' registradas en horario operativo (08:00 - 23:59)" 
+        : "Fuera de horario operativo (08:00 - 23:59)"
+    };
+  }
+
+  // Ordenar por fecha_inicio o id_ejecucion descendente para tomar siempre la ejecución MÁS RECIENTE
+  const sortedRecords = [...records].sort((a, b) => {
+    const timeA = parseSqlDateToLocal(a.fecha_inicio || a.fecha_inicio_ejecucion || a.fecha).getTime() || (Number(a.id_ejecucion) || 0);
+    const timeB = parseSqlDateToLocal(b.fecha_inicio || b.fecha_inicio_ejecucion || b.fecha).getTime() || (Number(b.id_ejecucion) || 0);
+    return timeB - timeA;
+  });
+
+  const latest = sortedRecords[0];
+  const fechaStr = latest.fecha_inicio || latest.fecha_inicio_ejecucion || latest.fecha_ejecucion || latest.fecha || latest.created_at || latest.fecha_creacion;
+  const estadoStr = String(latest.estado || latest.estado_ejecucion || latest.status || "").toUpperCase();
+
+  const isFailed = estadoStr.includes("FALLIDO") || estadoStr.includes("ERROR") || estadoStr.includes("CRITICO") || estadoStr.includes("FAILED");
+
+  if (!fechaStr) {
+    return {
+      disponible: !isFailed,
+      scheduleOk: !isFailed,
+      horarioOperativo: isOperatingHours,
+      minsSinceLastExec: null,
+      motivo: isFailed ? "❌ Caído: Última ejecución registrada con error" : "Ejecución registrada sin fecha"
+    };
+  }
+
+  const execDate = parseSqlDateToLocal(fechaStr);
+  let diffMs = now.getTime() - execDate.getTime();
+  if (diffMs < 0) diffMs = 0; // Prevenir valores negativos por pequeños desfasamientos del reloj
+  const diffMinutes = Math.floor(diffMs / 60000);
+
+  if (isOperatingHours) {
+    if (isFailed) {
+      return {
+        disponible: false,
+        scheduleOk: false,
+        horarioOperativo: true,
+        minsSinceLastExec: diffMinutes,
+        motivo: `❌ Caído: Última ejecución fallida (hace ${diffMinutes} min)`
+      };
+    }
+
+    // Frecuencia: Cada 2 horas (120 min) + 10 min de tolerancia por desfase de jobs = 130 min max
+    if (diffMinutes > 130) {
+      const horas = Math.floor(diffMinutes / 60);
+      const mins = diffMinutes % 60;
+      return {
+        disponible: false,
+        scheduleOk: false,
+        horarioOperativo: true,
+        minsSinceLastExec: diffMinutes,
+        motivo: `❌ Caído: Omición de ejecución. Han pasado ${horas}h ${mins}m sin ejecuciones en horario operativo (08:00 - 23:59). Requiere 1 ejecución cada 2 horas.`
+      };
+    }
+
+    return {
+      disponible: true,
+      scheduleOk: true,
+      horarioOperativo: true,
+      minsSinceLastExec: diffMinutes,
+      motivo: `✅ Operativo: Ejecución al día (hace ${diffMinutes} min)`
+    };
+  } else {
+    // Fuera de horario operativo (00:00:00 - 07:59:59 AM)
+    if (isFailed) {
+      return {
+        disponible: false,
+        scheduleOk: false,
+        horarioOperativo: false,
+        minsSinceLastExec: diffMinutes,
+        motivo: `❌ Caído: La última ejecución del ciclo anterior finalizó con error`
+      };
+    }
+
+    return {
+      disponible: true,
+      scheduleOk: true,
+      horarioOperativo: false,
+      minsSinceLastExec: diffMinutes,
+      motivo: `✅ Fuera de horario operativo (08:00 a 23:59). Próxima ejecución programada a las 08:00 AM`
+    };
+  }
+}
+
 // 13.11. GET /api/nubeprint/stats
 app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
   try {
@@ -2403,24 +2536,27 @@ app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
     if (!isSimulated) {
       try {
         const query = `
-          SELECT TOP 100 *
-          FROM [THE_COOLER_SGCX].[RPA].[ejecucion]
-          ORDER BY 1 DESC
+          select *
+          from [THE_COOLER_SGCX].rpa.ejecucion
+          where rpa ='INYECCIÓN SUMINISTROS - NUBEPRINT'
+          order by fecha_inicio desc
         `;
         const result = await executeQuery(query);
-        const records = result?.recordset || [];
+        let records: any[] = (result?.recordset || []) as any[];
 
         if (records.length > 0) {
-          const filtered = records.filter((r: any) => {
-            const name = String(r.rpa_nombre || r.nombre_rpa || r.nombre || r.rpa || "").toUpperCase();
-            return name.includes("NUBEPRINT") || name.includes("INYECCIÓN SUMINISTROS") || name.includes("INYECCION SUMINISTROS");
-          });
+          const evalRes = evaluateNubeprintScheduleStatus(records);
 
           return res.json({
             success: true,
             mode: "real",
-            data: filtered.length > 0 ? filtered : records,
-            count: records.length
+            data: records,
+            count: records.length,
+            disponible: evalRes.disponible,
+            scheduleOk: evalRes.scheduleOk,
+            horarioOperativo: evalRes.horarioOperativo,
+            minsSinceLastExec: evalRes.minsSinceLastExec,
+            motivo: evalRes.motivo
           });
         }
       } catch (dbErr: any) {
@@ -2432,6 +2568,7 @@ app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
     const simulatedData = [
       {
         id: 1,
+        rpa: "INYECCIÓN SUMINISTROS - NUBEPRINT",
         rpa_nombre: "INYECCIÓN SUMINISTROS - NUBEPRINT",
         estado: "COMPLETADO",
         fecha_inicio: new Date().toISOString(),
@@ -2440,17 +2577,355 @@ app.get(["/api/nubeprint/stats", "/api/rpa/ejecucion"], async (req, res) => {
       }
     ];
 
+    const evalSimulated = evaluateNubeprintScheduleStatus(simulatedData);
+
     return res.json({
       success: true,
       mode: "simulation",
       data: simulatedData,
-      count: simulatedData.length
+      count: simulatedData.length,
+      disponible: evalSimulated.disponible,
+      scheduleOk: evalSimulated.scheduleOk,
+      horarioOperativo: evalSimulated.horarioOperativo,
+      minsSinceLastExec: evalSimulated.minsSinceLastExec,
+      motivo: evalSimulated.motivo
     });
   } catch (error: any) {
     console.error("❌ Error en API /api/nubeprint/stats:", error);
     return res.status(500).json({
       success: false,
-      message: "Error al consultar ejecuciones de NubePrint: " + error.message
+      message: "Error al consultar ejecuciones de NubePrint: " + error.message,
+      disponible: false,
+      scheduleOk: false,
+      motivo: "Error al consultar API backend"
+    });
+  }
+});
+
+// Helper para evaluar ejecuciones diarias de Contadores (1 vez al día a las 00:00, rango 23:00 a 00:30)
+function evaluateDailyCounterScheduleStatus(records: any[], rpaName: string) {
+  const now = new Date();
+  
+  if (!records || records.length === 0) {
+    return {
+      disponible: false,
+      scheduleOk: false,
+      minsSinceLastExec: null,
+      motivo: `❌ Caído: Sin ejecuciones registradas de '${rpaName}'`
+    };
+  }
+
+  // Ordenar por fecha_inicio o id_ejecucion descendente para tomar la ejecución más reciente
+  const sortedRecords = [...records].sort((a, b) => {
+    const timeA = parseSqlDateToLocal(a.fecha_inicio || a.fecha_inicio_ejecucion || a.fecha).getTime() || (Number(a.id_ejecucion) || 0);
+    const timeB = parseSqlDateToLocal(b.fecha_inicio || b.fecha_inicio_ejecucion || b.fecha).getTime() || (Number(b.id_ejecucion) || 0);
+    return timeB - timeA;
+  });
+
+  const latest = sortedRecords[0];
+  const fechaStr = latest.fecha_inicio || latest.fecha_inicio_ejecucion || latest.fecha_ejecucion || latest.fecha || latest.created_at || latest.fecha_creacion;
+  const estadoStr = String(latest.estado || latest.estado_ejecucion || latest.status || "").toUpperCase();
+
+  const isFailed = estadoStr.includes("FALLIDO") || estadoStr.includes("ERROR") || estadoStr.includes("CRITICO") || estadoStr.includes("FAILED");
+
+  if (!fechaStr) {
+    return {
+      disponible: !isFailed,
+      scheduleOk: !isFailed,
+      minsSinceLastExec: null,
+      motivo: isFailed ? `❌ Caído: Última ejecución de '${rpaName}' finalizó con error` : "Ejecución registrada sin fecha"
+    };
+  }
+
+  const execDate = parseSqlDateToLocal(fechaStr);
+  let diffMs = now.getTime() - execDate.getTime();
+  if (diffMs < 0) diffMs = 0;
+  const diffMinutes = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMinutes / 60);
+
+  if (isFailed) {
+    return {
+      disponible: false,
+      scheduleOk: false,
+      minsSinceLastExec: diffMinutes,
+      motivo: `❌ Caído: Última ejecución diaria de '${rpaName}' registró un error (${latest.mensaje || 'Error en ejecución'})`
+    };
+  }
+
+  // Frecuencia diaria: Rango 23:00 - 00:00 (1 vez al día). Máximo tolerado entre ejecuciones diarias: 26 horas (1560 mins)
+  const maxAllowedMinsDaily = 26 * 60;
+
+  if (diffMinutes > maxAllowedMinsDaily) {
+    return {
+      disponible: false,
+      scheduleOk: false,
+      minsSinceLastExec: diffMinutes,
+      motivo: `❌ Caído: Omisión de ejecución diaria. Han pasado ${diffHours}h sin ejecuciones de '${rpaName}' (rango esperado 23:00 - 00:00).`
+    };
+  }
+
+  return {
+    disponible: true,
+    scheduleOk: true,
+    minsSinceLastExec: diffMinutes,
+    motivo: `✅ Operativo: Ejecución diaria de '${rpaName}' al día (hace ${diffHours}h ${diffMinutes % 60}m)`
+  };
+}
+
+// 13.12. GET /api/contadores/stats
+app.get(["/api/contadores/stats", "/api/contadores"], async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    console.log(`🔌 [Contadores RPA] Consultando ejecuciones diarias (KFS, MPS, NDD). Modo Simulación: ${isSimulated}`);
+
+    const qKFS = `select * from [THE_COOLER_SGCX].rpa.ejecucion where rpa ='CONTADORES - KFS' order by fecha_inicio desc`;
+    const qMPS = `select * from [THE_COOLER_SGCX].rpa.ejecucion where rpa ='CONTADORES - MPS' order by fecha_inicio desc`;
+    const qNDD = `select * from [THE_COOLER_SGCX].rpa.ejecucion where rpa ='CONTADORES - NDD' order by fecha_inicio desc`;
+
+    if (!isSimulated) {
+      try {
+        const [resKFS, resMPS, resNDD] = await Promise.all([
+          executeQuery(qKFS).catch(() => null),
+          executeQuery(qMPS).catch(() => null),
+          executeQuery(qNDD).catch(() => null)
+        ]);
+
+        const recordsKFS: any[] = (resKFS?.recordset || []) as any[];
+        const recordsMPS: any[] = (resMPS?.recordset || []) as any[];
+        const recordsNDD: any[] = (resNDD?.recordset || []) as any[];
+
+        const evalKFS = evaluateDailyCounterScheduleStatus(recordsKFS, "CONTADORES - KFS");
+        const evalMPS = evaluateDailyCounterScheduleStatus(recordsMPS, "CONTADORES - MPS");
+        const evalNDD = evaluateDailyCounterScheduleStatus(recordsNDD, "CONTADORES - NDD");
+
+        return res.json({
+          success: true,
+          mode: "real",
+          data: {
+            kfs: { rpa: "CONTADORES - KFS", records: recordsKFS, ...evalKFS },
+            mps: { rpa: "CONTADORES - MPS", records: recordsMPS, ...evalMPS },
+            ndd: { rpa: "CONTADORES - NDD", records: recordsNDD, ...evalNDD }
+          },
+          summary: {
+            kfsOk: evalKFS.disponible,
+            mpsOk: evalMPS.disponible,
+            nddOk: evalNDD.disponible,
+            allOk: evalKFS.disponible && evalMPS.disponible && evalNDD.disponible
+          }
+        });
+      } catch (dbErr: any) {
+        console.error("⚠️ Error SQL en consulta de Contadores:", dbErr.message);
+      }
+    }
+
+    // Fallback / Modo Simulación
+    const simKFS = [{ id: 1, rpa: "CONTADORES - KFS", estado: "COMPLETADO", fecha_inicio: new Date().toISOString(), mensaje: "Ejecución exitosa" }];
+    const simMPS = [{ id: 2, rpa: "CONTADORES - MPS", estado: "COMPLETADO", fecha_inicio: new Date().toISOString(), mensaje: "Ejecución exitosa" }];
+    const simNDD = [{ id: 3, rpa: "CONTADORES - NDD", estado: "COMPLETADO", fecha_inicio: new Date().toISOString(), mensaje: "Ejecución exitosa" }];
+
+    const evalKFS = evaluateDailyCounterScheduleStatus(simKFS, "CONTADORES - KFS");
+    const evalMPS = evaluateDailyCounterScheduleStatus(simMPS, "CONTADORES - MPS");
+    const evalNDD = evaluateDailyCounterScheduleStatus(simNDD, "CONTADORES - NDD");
+
+    return res.json({
+      success: true,
+      mode: "simulation",
+      data: {
+        kfs: { rpa: "CONTADORES - KFS", records: simKFS, ...evalKFS },
+        mps: { rpa: "CONTADORES - MPS", records: simMPS, ...evalMPS },
+        ndd: { rpa: "CONTADORES - NDD", records: simNDD, ...evalNDD }
+      },
+      summary: {
+        kfsOk: evalKFS.disponible,
+        mpsOk: evalMPS.disponible,
+        nddOk: evalNDD.disponible,
+        allOk: true
+      }
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/contadores/stats:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar contadores: " + error.message
+    });
+  }
+});
+
+// Helper para evaluar ejecuciones RPA de Disponibilidad por Servicio y Estado de Servicios
+function evaluateRpaExecutionStatus(
+  records: any[],
+  rpaName: string,
+  targetHour: number,
+  targetMinute: number = 0
+) {
+  const now = new Date();
+  
+  if (!records || records.length === 0) {
+    return {
+      ejecutado: false,
+      disponible: false,
+      scheduleOk: false,
+      status: "error" as const,
+      minsSinceLastExec: null,
+      motivo: `❌ Sin ejecuciones registradas para '${rpaName}'`
+    };
+  }
+
+  // Ordenar por fecha_inicio descendente
+  const sortedRecords = [...records].sort((a, b) => {
+    const timeA = parseSqlDateToLocal(a.fecha_inicio || a.fecha_termino || a.fecha).getTime() || 0;
+    const timeB = parseSqlDateToLocal(b.fecha_inicio || b.fecha_termino || b.fecha).getTime() || 0;
+    return timeB - timeA;
+  });
+
+  const latest = sortedRecords[0];
+  const fechaStr = latest.fecha_inicio || latest.fecha_termino || latest.created_at;
+  const estadoStr = String(latest.estado || "").toUpperCase();
+  const mensajeStr = latest.mensaje || latest.observacion || "Sin observación";
+
+  const isFailed = estadoStr.includes("FALLIDO") || estadoStr.includes("ERROR") || estadoStr.includes("CRITICO") || estadoStr.includes("FAILED");
+  const isFinished = estadoStr.includes("FINALIZADO") || estadoStr.includes("COMPLETADO") || estadoStr.includes("EXITOSA") || estadoStr.includes("OK") || estadoStr.includes("EXITO");
+
+  if (!fechaStr) {
+    return {
+      ejecutado: isFinished,
+      disponible: !isFailed && isFinished,
+      scheduleOk: !isFailed && isFinished,
+      status: isFailed ? ("error" as const) : (isFinished ? ("success" as const) : ("warning" as const)),
+      latest,
+      motivo: isFailed ? `❌ Última ejecución de '${rpaName}' falló: ${mensajeStr}` : `Ejecución registrada: ${mensajeStr}`
+    };
+  }
+
+  const execDate = parseSqlDateToLocal(fechaStr);
+  let diffMs = now.getTime() - execDate.getTime();
+  if (diffMs < 0) diffMs = 0;
+  const diffMinutes = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMinutes / 60);
+
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const scheduledMins = targetHour * 60 + targetMinute;
+
+  // Tolerancia de 26 horas para ejecuciones diarias
+  const maxToleranceMins = 26 * 60;
+
+  let esProcesoAlDia = false;
+  if (currentMins >= scheduledMins) {
+    esProcesoAlDia = diffMinutes <= (currentMins - scheduledMins + 180);
+  } else {
+    esProcesoAlDia = diffMinutes <= maxToleranceMins;
+  }
+
+  if (isFailed) {
+    return {
+      ejecutado: true,
+      disponible: false,
+      scheduleOk: false,
+      status: "error" as const,
+      minsSinceLastExec: diffMinutes,
+      latest,
+      motivo: `❌ Caído: Última ejecución de '${rpaName}' finalizó con error (${mensajeStr})`
+    };
+  }
+
+  if (!esProcesoAlDia && diffMinutes > maxToleranceMins) {
+    return {
+      ejecutado: false,
+      disponible: false,
+      scheduleOk: false,
+      status: "error" as const,
+      minsSinceLastExec: diffMinutes,
+      latest,
+      motivo: `❌ Omisión de ejecución: Han pasado ${diffHours}h sin ejecuciones de '${rpaName}' (Horario esperado: ${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')} hrs)`
+    };
+  }
+
+  return {
+    ejecutado: true,
+    disponible: true,
+    scheduleOk: true,
+    status: "success" as const,
+    minsSinceLastExec: diffMinutes,
+    latest,
+    motivo: `✅ Operativo: Ejecución de '${rpaName}' realizada correctamente (${mensajeStr})`
+  };
+}
+
+// 13.13. GET /api/rpa/ejecuciones-servicios
+// Monitoreo para los indicadores de Disponibilidad por Servicio y Estado de Servicios
+app.get(["/api/rpa/ejecuciones-servicios"], async (req, res) => {
+  try {
+    const isSimulated = isSimulationMode();
+    console.log(`🔌 [RPA Ejecuciones Servicios] Consultando queries de monitoreo. Modo Simulación: ${isSimulated}`);
+
+    const qCorpesca = `select *
+from rpa.ejecucion
+where rpa ='CORPESCA'
+order by fecha_inicio desc`;
+
+    const qOfimundo = `select *
+from rpa.ejecucion
+where rpa ='ACEPTACIÓN Y RECHAZO - OFIMUNDO'
+order by fecha_inicio desc`;
+
+    const qAntofagasta = `select *
+from rpa.ejecucion
+where rpa ='ACEPTACIÓN Y RECHAZO - ANTOFAGASTA'
+order by fecha_inicio desc`;
+
+    if (!isSimulated) {
+      try {
+        const [resCorpesca, resOfimundo, resAntofagasta] = await Promise.all([
+          executeQuery(qCorpesca).catch(() => null),
+          executeQuery(qOfimundo).catch(() => null),
+          executeQuery(qAntofagasta).catch(() => null)
+        ]);
+
+        const recCorpesca: any[] = (resCorpesca?.recordset || []) as any[];
+        const recOfimundo: any[] = (resOfimundo?.recordset || []) as any[];
+        const recAntofagasta: any[] = (resAntofagasta?.recordset || []) as any[];
+
+        const evalCorpesca = evaluateRpaExecutionStatus(recCorpesca, "CORPESCA", 22, 0);
+        const evalOfimundo = evaluateRpaExecutionStatus(recOfimundo, "ACEPTACIÓN Y RECHAZO - OFIMUNDO", 14, 0);
+        const evalAntofagasta = evaluateRpaExecutionStatus(recAntofagasta, "ACEPTACIÓN Y RECHAZO - ANTOFAGASTA", 12, 0);
+
+        return res.json({
+          success: true,
+          mode: "real",
+          data: {
+            corpesca: { rpa: "CORPESCA", records: recCorpesca, ...evalCorpesca },
+            ofimundo: { rpa: "ACEPTACIÓN Y RECHAZO - OFIMUNDO", records: recOfimundo, ...evalOfimundo },
+            antofagasta: { rpa: "ACEPTACIÓN Y RECHAZO - ANTOFAGASTA", records: recAntofagasta, ...evalAntofagasta }
+          }
+        });
+      } catch (dbErr: any) {
+        console.error("⚠️ Error SQL en ejecuciones de servicios RPA:", dbErr.message);
+      }
+    }
+
+    // Fallback / Modo Simulación
+    const simCorpesca = [{ id_ejecucion: 1, rpa: "CORPESCA", estado: "FINALIZADO", fecha_inicio: new Date().toISOString(), mensaje: "Proceso completado exitosamente." }];
+    const simOfimundo = [{ id_ejecucion: 2, rpa: "ACEPTACIÓN Y RECHAZO - OFIMUNDO", estado: "FINALIZADO", fecha_inicio: new Date().toISOString(), mensaje: "Proceso completado exitosamente." }];
+    const simAntofagasta = [{ id_ejecucion: 3, rpa: "ACEPTACIÓN Y RECHAZO - ANTOFAGASTA", estado: "FINALIZADO", fecha_inicio: new Date().toISOString(), mensaje: "Proceso completado exitosamente." }];
+
+    const evalCorpesca = evaluateRpaExecutionStatus(simCorpesca, "CORPESCA", 22, 0);
+    const evalOfimundo = evaluateRpaExecutionStatus(simOfimundo, "ACEPTACIÓN Y RECHAZO - OFIMUNDO", 14, 0);
+    const evalAntofagasta = evaluateRpaExecutionStatus(simAntofagasta, "ACEPTACIÓN Y RECHAZO - ANTOFAGASTA", 12, 0);
+
+    return res.json({
+      success: true,
+      mode: "simulation",
+      data: {
+        corpesca: { rpa: "CORPESCA", records: simCorpesca, ...evalCorpesca },
+        ofimundo: { rpa: "ACEPTACIÓN Y RECHAZO - OFIMUNDO", records: simOfimundo, ...evalOfimundo },
+        antofagasta: { rpa: "ACEPTACIÓN Y RECHAZO - ANTOFAGASTA", records: simAntofagasta, ...evalAntofagasta }
+      }
+    });
+  } catch (error: any) {
+    console.error("❌ Error en API /api/rpa/ejecuciones-servicios:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar ejecuciones RPA: " + error.message
     });
   }
 });

@@ -260,6 +260,7 @@ export function DashboardMetrics({
   const [dteData, setDteData] = useState<any[]>([]);
   const [sgcData, setSgcData] = useState<any[]>([]);
   const [serviciosData, setServiciosData] = useState<any[]>([]);
+  const [rpaServicesStatus, setRpaServicesStatus] = useState<any>(null);
   const [contratosStats, setContratosStats] = useState<any>(null);
   const [equiposStats, setEquiposStats] = useState<any>(null);
   
@@ -405,9 +406,14 @@ export function DashboardMetrics({
       try {
         const res = await fetch("/api/nubeprint/stats");
         const data = await res.json();
-        if (isMounted && data.success && Array.isArray(data.data)) {
-          const latest = data.data[0];
-          if (latest) {
+        if (isMounted && data.success) {
+          if (typeof data.disponible === "boolean") {
+            setNubeprintStatus({
+              disponible: data.disponible === true,
+              errorMsg: data.motivo || undefined
+            });
+          } else if (Array.isArray(data.data) && data.data.length > 0) {
+            const latest = data.data[0];
             const st = String(latest.estado || "").toUpperCase();
             const isError = st.includes("FALLIDO") || st.includes("ERROR") || st.includes("CRITICO") || isInfraestructuraError(latest.motivo);
             setNubeprintStatus({
@@ -423,6 +429,42 @@ export function DashboardMetrics({
 
     checkNubeprintStatus();
     const interval = setInterval(checkNubeprintStatus, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const [contadoresStatus, setContadoresStatus] = useState<{
+    kfs: { disponible: boolean; motivo?: string };
+    mps: { disponible: boolean; motivo?: string };
+    ndd: { disponible: boolean; motivo?: string };
+  }>({
+    kfs: { disponible: true },
+    mps: { disponible: true },
+    ndd: { disponible: true },
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkContadoresStatus = async () => {
+      try {
+        const res = await fetch("/api/contadores/stats");
+        const data = await res.json();
+        if (isMounted && data.success && data.data) {
+          setContadoresStatus({
+            kfs: { disponible: data.data.kfs?.disponible === true, motivo: data.data.kfs?.motivo },
+            mps: { disponible: data.data.mps?.disponible === true, motivo: data.data.mps?.motivo },
+            ndd: { disponible: data.data.ndd?.disponible === true, motivo: data.data.ndd?.motivo },
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching Contadores monitor status:", err);
+      }
+    };
+
+    checkContadoresStatus();
+    const interval = setInterval(checkContadoresStatus, 30000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -1373,39 +1415,47 @@ export function DashboardMetrics({
     });
     if ((currentTimeInMinutes >= 11 * 60 && !tieneAutoHoy) || (!tieneAutoHoy && !tieneAutoAyer)) downCount++;
 
-    // Antofagasta
-    const tieneAntHoy = invoicesList.some((f: any) => {
-      const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      if (!match) return false;
-      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
-      return dStr === hoyStr;
-    });
-    const tieneAntAyer = invoicesList.some((f: any) => {
-      const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      if (!match) return false;
-      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
-      return dStr === ayerStr;
-    });
-    if ((currentTimeInMinutes >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer)) downCount++;
+    // Antofagasta (Monitoreado por query rpa.ejecucion: rpa = 'ACEPTACIÓN Y RECHAZO - ANTOFAGASTA')
+    if (rpaServicesStatus?.antofagasta) {
+      if (!rpaServicesStatus.antofagasta.disponible) downCount++;
+    } else {
+      const tieneAntHoy = invoicesList.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        if (!match) return false;
+        const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+        return dStr === hoyStr;
+      });
+      const tieneAntAyer = invoicesList.some((f: any) => {
+        const match = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        if (!match) return false;
+        const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+        return dStr === ayerStr;
+      });
+      if ((currentTimeInMinutes >= 13 * 60 && !tieneAntHoy) || (!tieneAntHoy && !tieneAntAyer)) downCount++;
+    }
 
-    // Stuedemann
-    const tieneStueHoy = invoicesList.some((f: any) => {
-      const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
-      const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
-      if (matchAnt || matchCorp || matchAuto) return false;
-      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
-      return dStr === hoyStr;
-    });
-    const tieneStueAyer = invoicesList.some((f: any) => {
-      const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
-      const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
-      const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
-      if (matchAnt || matchCorp || matchAuto) return false;
-      const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
-      return dStr === ayerStr;
-    });
-    if ((currentTimeInMinutes >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer)) downCount++;
+    // Stuedemann / OFIMUNDO (Monitoreado por query rpa.ejecucion: rpa = 'ACEPTACIÓN Y RECHAZO - OFIMUNDO')
+    if (rpaServicesStatus?.ofimundo) {
+      if (!rpaServicesStatus.ofimundo.disponible) downCount++;
+    } else {
+      const tieneStueHoy = invoicesList.some((f: any) => {
+        const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+        const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (matchAnt || matchCorp || matchAuto) return false;
+        const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+        return dStr === hoyStr;
+      });
+      const tieneStueAyer = invoicesList.some((f: any) => {
+        const matchAnt = (f.cliente_id && f.cliente_id.includes("antofagasta")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("ANTOFAGASTA"));
+        const matchCorp = (f.cliente_id && f.cliente_id.includes("corpesca")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("CORPESCA"));
+        const matchAuto = (f.cliente_id && f.cliente_id.includes("automovil")) || (f.cliente_nombre && f.cliente_nombre.toUpperCase().includes("AUTOMOVIL"));
+        if (matchAnt || matchCorp || matchAuto) return false;
+        const dStr = f.fecha_proceso ? String(f.fecha_proceso).split('T')[0] : "";
+        return dStr === ayerStr;
+      });
+      if ((currentTimeInMinutes >= (15 * 60 + 30) && !tieneStueHoy) || (!tieneStueHoy && !tieneStueAyer)) downCount++;
+    }
 
     const opCount = totalCount - downCount;
     const availability = Math.round((opCount / totalCount) * 10000) / 100;
@@ -1418,7 +1468,10 @@ export function DashboardMetrics({
     const srv = services.find(s => s.id === serviceId);
     if (srv) {
       if (srv.id === "facturas-artesanales") {
-        return 0;
+        if (rpaServicesStatus?.corpesca) {
+          return rpaServicesStatus.corpesca.disponible ? 100 : 0;
+        }
+        return 100;
       }
       if (srv.id === "facturas") {
         return getFacturasAvailabilityAndStatus().availability;
@@ -1443,7 +1496,9 @@ export function DashboardMetrics({
       }
       return 100 - srv.errorPercentage;
     }
-    if (serviceId === "facturas-artesanales") return 0;
+    if (serviceId === "facturas-artesanales") {
+      return rpaServicesStatus?.corpesca ? (rpaServicesStatus.corpesca.disponible ? 100 : 0) : 100;
+    }
     if (serviceId === "facturas") return getFacturasAvailabilityAndStatus().availability;
     if (serviceId === "dte") return dteScheduleStatus.scheduleOk ? 100 : 0;
     if (serviceId === "sgc") return sgcPingOk ? 100 : 0;
@@ -1463,7 +1518,10 @@ export function DashboardMetrics({
     }
 
     if (service.id === "facturas-artesanales") {
-      return "error";
+      if (rpaServicesStatus?.corpesca) {
+        return rpaServicesStatus.corpesca.status || (rpaServicesStatus.corpesca.disponible ? "success" : "error");
+      }
+      return "success";
     }
     
     if (service.id === "sgc") {
@@ -1509,6 +1567,16 @@ export function DashboardMetrics({
       
       if (servicesData) {
         calculateAllMetrics(servicesData, facturasArray);
+      }
+
+      try {
+        const rpaRes = await fetch("/api/rpa/ejecuciones-servicios");
+        const rpaData = await rpaRes.json();
+        if (rpaData.success && rpaData.data) {
+          setRpaServicesStatus(rpaData.data);
+        }
+      } catch (err) {
+        console.error("Error fetching RPA ejecuciones servicios:", err);
       }
 
       try {
@@ -2387,9 +2455,10 @@ export function DashboardMetrics({
                 <ArrowRight className="h-3 w-3 text-emerald-500 animate-pulse" />
               </div>
               <div className="space-y-1 max-h-[180px] overflow-y-auto pr-1 mt-2">
-                {sortedServices.filter(s => s.id !== "alertas-nubeprint").map(s => {
+                {sortedServices.filter(s => s.id !== "alertas-nubeprint" && !s.id.startsWith("contadores-")).map(s => {
                   const avail = getServiceAvailability(s.id);
-                  const color = avail >= 99 ? "bg-emerald-500" : (avail >= 90 ? "bg-amber-500" : "bg-red-500");
+                  const realStatus = getRealServiceStatus(s);
+                  const color = realStatus === "success" ? "bg-emerald-500" : (realStatus === "warning" ? "bg-amber-500" : "bg-red-500");
                   return (
                     <div 
                       key={s.id} 
@@ -2398,7 +2467,13 @@ export function DashboardMetrics({
                         e.stopPropagation();
                         router.push(`/servicio/${s.id}`);
                       }}
-                      title={`Ver monitoreo de ${s.name}`}
+                      title={
+                        s.id === "facturas-artesanales" && rpaServicesStatus?.corpesca
+                          ? `${s.name}\n• CORPESCA: ${rpaServicesStatus.corpesca.motivo}`
+                          : s.id === "facturas" && rpaServicesStatus
+                          ? `${s.name}\n• OFIMUNDO (Stuedemann S.A.): ${rpaServicesStatus.ofimundo?.motivo || 'OK'}\n• ANTOFAGASTA: ${rpaServicesStatus.antofagasta?.motivo || 'OK'}`
+                          : `Ver monitoreo de ${s.name}`
+                      }
                     >
                       <div className="flex justify-between text-[9px] font-bold text-slate-650 group-hover:text-blue-600 transition-colors">
                         <span className="truncate max-w-[140px]">{s.name}</span>
@@ -2444,7 +2519,13 @@ export function DashboardMetrics({
                           router.push(`/servicio/${s.id}`);
                         }
                       }}
-                      title={`Ver detalle de ${s.name}`}
+                      title={
+                        s.id === "facturas-artesanales" && rpaServicesStatus?.corpesca
+                          ? `${s.name}\n• CORPESCA: ${rpaServicesStatus.corpesca.motivo}`
+                          : s.id === "facturas" && rpaServicesStatus
+                          ? `${s.name}\n• OFIMUNDO (Stuedemann S.A.): ${rpaServicesStatus.ofimundo?.motivo || 'OK'}\n• ANTOFAGASTA: ${rpaServicesStatus.antofagasta?.motivo || 'OK'}`
+                          : `Ver detalle de ${s.name}`
+                      }
                     >
                       <span className="truncate max-w-[140px] group-hover:text-blue-600 transition-colors">{s.name}</span>
                       <span className="flex items-center gap-1.5">

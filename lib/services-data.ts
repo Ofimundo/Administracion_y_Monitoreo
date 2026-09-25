@@ -115,6 +115,42 @@ const baseServices: Service[] = [
     isComingSoon: false,
   },
   {
+    id: "contadores-kfs",
+    name: "Contadores - KFS",
+    description: "Monitoreo diario (00:00 hrs) del RPA CONTADORES - KFS desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" }
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
+  {
+    id: "contadores-mps",
+    name: "Contadores - MPS",
+    description: "Monitoreo diario (00:00 hrs) del RPA CONTADORES - MPS desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" }
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
+  {
+    id: "contadores-ndd",
+    name: "Contadores - NDD",
+    description: "Monitoreo diario (00:00 hrs) del RPA CONTADORES - NDD desde la tabla [THE_COOLER_SGCX].[RPA].[ejecucion].",
+    errorPercentage: 0,
+    status: "success",
+    clients: [
+      { id: "cl_stuedemann", name: "STUEDEMANN S.A.", errorPercentage: 0, status: "success" }
+    ],
+    logs: [],
+    isComingSoon: false,
+  },
+  {
     id: "saldos",
     name: "Saldos Bancarios",
     description: "🚀 Próximamente - Sistema automatizado para la consulta y consolidación de saldos bancarios de múltiples instituciones financieras.",
